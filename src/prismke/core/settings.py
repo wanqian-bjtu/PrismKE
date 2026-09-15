@@ -52,3 +52,11 @@ class Settings(BaseSettings):
     @property
     def checkpoint_path(self) -> Path:
         return self.runtime_dir / "checkpoints.sqlite3"
+
+    @property
+    def uploads_dir(self) -> Path:
+        return self.runtime_dir / "uploads"
+
+    @property
+    def audit_path(self) -> Path:
+        return self.runtime_dir / "audit.jsonl"

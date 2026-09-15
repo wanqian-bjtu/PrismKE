@@ -11,8 +11,11 @@ import typer
 from pydantic import BaseModel
 from rich.console import Console
 
+from prismke.core.errors import ProviderConfigurationError
+from prismke.core.settings import Settings
 from prismke.domain import ReviewDecision, load_schema
 from prismke.evaluation import evaluate_manifest
+from prismke.persistence import FileEvidenceStore, Neo4jGraphStore, migrate_json_graph
 from prismke.workflow import PrismKEService
 
 app = typer.Typer(no_args_is_help=True, help="PrismKE knowledge construction CLI")
@@ -126,6 +129,70 @@ def evaluate(
     console.print(
         f"evaluation completed={report.completed_cases} failed={report.failed_cases} "
         f"claim_f1={report.claim_f1:.4f} output={output.resolve()}"
+    )
+
+
+@app.command("migrate-graph")
+def migrate_graph(
+    source: Annotated[
+        Path, typer.Option("--from-json", exists=True, dir_okay=False)
+    ],
+    destination: Annotated[str, typer.Option("--to")] = "neo4j",
+    dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
+) -> None:
+    """Validate or migrate a JSON graph into the configured Neo4j backend."""
+    if destination != "neo4j":
+        raise typer.BadParameter("only the neo4j destination is supported")
+    settings = Settings()
+
+    async def execute() -> object:
+        target = None
+        if not dry_run:
+            if not settings.neo4j_password:
+                raise ProviderConfigurationError(
+                    "migration requires PRISMKE_NEO4J_PASSWORD"
+                )
+            target = Neo4jGraphStore(
+                settings.neo4j_uri,
+                settings.neo4j_user,
+                settings.neo4j_password,
+                settings.neo4j_database,
+            )
+        evidence = FileEvidenceStore(source.resolve().parent.parent / "evidence")
+        try:
+            return await migrate_json_graph(
+                source.resolve(), target, evidence_store=evidence, dry_run=dry_run
+            )
+        finally:
+            if target is not None:
+                await target.close()
+
+    _print_model(asyncio.run(execute()))
+
+
+@app.command()
+def serve(
+    host: Annotated[str | None, typer.Option("--host")] = None,
+    port: Annotated[int | None, typer.Option("--port")] = None,
+) -> None:
+    """Start the FastAPI service and mounted Gradio workspace."""
+    try:
+        import uvicorn
+
+        from prismke.api import create_app
+    except ImportError as exc:
+        raise typer.BadParameter("web dependencies are missing; run `uv sync --extra web`") from exc
+    overrides: dict[str, object] = {}
+    if host is not None:
+        overrides["api_host"] = host
+    if port is not None:
+        overrides["api_port"] = port
+    settings = Settings(**overrides)
+    uvicorn.run(
+        create_app(settings),
+        host=settings.api_host,
+        port=settings.api_port,
+        log_config=None,
     )
 
 

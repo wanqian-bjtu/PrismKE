@@ -48,3 +48,19 @@ class RunRepository:
         return WorkflowState.model_validate(
             orjson.loads(target.read_bytes())
         )
+
+    def list(self, limit: int = 100) -> list[WorkflowState]:
+        paths = sorted(
+            self.directory.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True
+        )
+        states: list[WorkflowState] = []
+        for path in paths[: max(limit, 0)]:
+            states.append(WorkflowState.model_validate(orjson.loads(path.read_bytes())))
+        return states
+
+    def find_review(self, task_id: str) -> tuple[WorkflowState, str]:
+        for state in self.list():
+            task = next((item for item in state.review_tasks if item.id == task_id), None)
+            if task is not None:
+                return state, task.claim_id
+        raise KeyError(f"review task not found: {task_id}")
