@@ -25,7 +25,7 @@ from prismke.domain import (
     VisualExtractionRequest,
 )
 from prismke.governance import MultimodalAlignmentService
-from prismke.parsing import ParserRegistry
+from prismke.parsing import ParserRegistry, select_analysis_assets
 from prismke.providers import OpenAICompatibleVLMProvider, PaddleOCRProvider
 from prismke.workflow import PrismKEService
 
@@ -258,3 +258,31 @@ async def test_paddle_provider_converts_lines_to_bbox(tmp_path: Path) -> None:
     assert result.text_blocks[0].text == "PrismKE"
     assert result.text_blocks[0].modality == Modality.OCR
     assert result.evidence[0].bbox == BBox(x0=10, y0=20, x1=90, y1=50)
+
+
+def test_scanned_pdf_render_suppresses_duplicate_embedded_asset() -> None:
+    embedded = MediaAsset(
+        id="media:embedded",
+        path="embedded.png",
+        media_type="image/png",
+        page_number=1,
+        evidence_id="ev:embedded",
+        origin="pdf_embedded",
+    )
+    rendered = MediaAsset(
+        id="media:rendered",
+        path="rendered.png",
+        media_type="image/png",
+        page_number=1,
+        evidence_id="ev:rendered",
+        origin="pdf_page_render",
+        requires_ocr=True,
+    )
+    document = DocumentIR(
+        id="doc:scan",
+        source_path="scan.pdf",
+        source_hash="c" * 64,
+        media_type="application/pdf",
+        media_assets=[embedded, rendered],
+    )
+    assert select_analysis_assets(document) == [rendered]

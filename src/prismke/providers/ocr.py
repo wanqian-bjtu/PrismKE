@@ -18,6 +18,7 @@ from prismke.domain import (
     OCRResult,
     TextBlock,
 )
+from prismke.parsing.visual_assets import select_analysis_assets
 
 
 class DisabledOCRProvider:
@@ -77,7 +78,7 @@ class PaddleOCRProvider:
         blocks: list[TextBlock] = []
         evidence: list[EvidenceRef] = []
         warnings: list[str] = []
-        for asset in request.document.media_assets:
+        for asset in select_analysis_assets(request.document):
             if asset.origin == "pdf_page_render" and not asset.requires_ocr:
                 continue
             try:
