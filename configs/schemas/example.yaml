@@ -1,0 +1,24 @@
+schema_id: prismke-example
+version: "0.1"
+strict: true
+entity_types:
+  - id: Software
+    aliases: [software, system, project]
+  - id: Organization
+    aliases: [organization, organisation, company]
+  - id: Person
+    aliases: [person, researcher]
+relations:
+  - id: developed_by
+    aliases: [created_by, developed by]
+    domain: [Software]
+    range: [Organization, Person]
+entity_catalog:
+  - id: entity:prismke
+    name: PrismKE
+    type: Software
+    aliases: [Prism KE]
+  - id: entity:openai
+    name: OpenAI
+    type: Organization
+    aliases: []
