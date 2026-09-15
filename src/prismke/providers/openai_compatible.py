@@ -67,7 +67,12 @@ class OpenAICompatibleLLMProvider:
             "Extract factual claims from the supplied blocks under the supplied schema. "
             "Return a JSON object with key 'claims'. Each claim must contain subject, "
             "relation, object, subject_type, optional object_type, confidence, and "
-            "evidence_id. Never invent an evidence_id.\n"
+            "evidence_id. Subject and object must be exact surface forms from the source "
+            "block; never return entity catalog IDs, values beginning with 'entity:', "
+            "translations, or canonical names absent from the source. Choose relation "
+            "direction so the subject type satisfies domain and the object type satisfies "
+            "range; use the inverse relation ID when the sentence has the inverse direction. "
+            "Never invent an evidence_id.\n"
             f"Schema: {request.output_schema.model_dump_json()}\n"
             f"Blocks: {json.dumps(blocks, ensure_ascii=False)}"
         )
@@ -113,7 +118,10 @@ class OpenAICompatibleLLMProvider:
             context = blocks_by_evidence.get(evidence_id)
             candidates.append(
                 candidate_from_payload(
-                    item, evidence_id, context.text if context is not None else ""
+                    item,
+                    evidence_id,
+                    context.text if context is not None else "",
+                    output_schema=request.output_schema,
                 )
             )
         return ExtractionResult(

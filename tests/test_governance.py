@@ -183,6 +183,56 @@ def test_inverse_relations_share_claim_identity() -> None:
     assert claims[0].evidence_ids == ["ev:1", "ev:2"]
 
 
+def test_inverse_relation_repairs_provider_direction_from_entity_types() -> None:
+    schema = SchemaIndex(
+        OutputSchema(
+            schema_id="software",
+            version="1",
+            entity_types=[EntityTypeDef(id="Software"), EntityTypeDef(id="Organization")],
+            relations=[
+                RelationDef(
+                    id="developed_by",
+                    domain=["Software"],
+                    range=["Organization"],
+                    inverse_relation="develops",
+                ),
+                RelationDef(
+                    id="develops",
+                    domain=["Organization"],
+                    range=["Software"],
+                    inverse_relation="developed_by",
+                ),
+            ],
+        )
+    )
+    organization = EntityMention(
+        id="mention:organization",
+        name="Northstar Labs",
+        entity_type="Organization",
+        evidence_ids=["ev:1"],
+    )
+    software = EntityMention(
+        id="mention:software",
+        name="AuroraGraph",
+        entity_type="Software",
+        evidence_ids=["ev:1"],
+    )
+    candidate = CandidateClaim(
+        id="candidate:inverse-direction",
+        subject=organization,
+        relation="developed_by",
+        object=software,
+        confidence=0.9,
+        evidence_ids=["ev:1"],
+    )
+    bundle = EntityResolver(schema, []).resolve([organization, software])
+    entities = {entity.id: entity for entity in bundle.entities}
+    claims = normalize_claims([candidate], schema, entities, bundle.mention_to_entity)
+    assert claims[0].relation_id == "develops"
+    assert claims[0].subject_id == bundle.mention_to_entity[organization.id]
+    assert claims[0].object_entity_id == bundle.mention_to_entity[software.id]
+
+
 def test_symmetric_relation_shares_claim_identity() -> None:
     schema = SchemaIndex(
         OutputSchema(

@@ -62,21 +62,35 @@ def normalize_claims(
             relation_id = relation.id
         subject_id = mention_to_entity[candidate.subject.id]
         subject_type = entities[subject_id].entity_type
+        object_entity_id: str | None = None
+        object_literal: str | None = None
+        object_type: str | None = None
+        if isinstance(candidate.object, EntityMention):
+            object_entity_id = mention_to_entity[candidate.object.id]
+            object_type = entities[object_entity_id].entity_type
+        else:
+            object_literal = candidate.object.strip()
+        if relation and object_type:
+            subject_matches = not relation.domain or subject_type in relation.domain
+            object_matches = not relation.range or object_type in relation.range
+            if not (subject_matches and object_matches) and relation.inverse_relation:
+                inverse = schema.relation_by_id(relation.inverse_relation)
+                if inverse:
+                    inverse_subject_matches = (
+                        not inverse.domain or subject_type in inverse.domain
+                    )
+                    inverse_object_matches = not inverse.range or object_type in inverse.range
+                    if inverse_subject_matches and inverse_object_matches:
+                        relation = inverse
+                        relation_id = inverse.id
         if relation and relation.domain and subject_type not in relation.domain:
             raise SchemaValidationError(
                 f"relation {relation.id} does not accept subject type {subject_type}"
             )
-        object_entity_id: str | None = None
-        object_literal: str | None = None
-        if isinstance(candidate.object, EntityMention):
-            object_entity_id = mention_to_entity[candidate.object.id]
-            object_type = entities[object_entity_id].entity_type
-            if relation and relation.range and object_type not in relation.range:
-                raise SchemaValidationError(
-                    f"relation {relation.id} does not accept object type {object_type}"
-                )
-        else:
-            object_literal = candidate.object.strip()
+        if relation and object_type and relation.range and object_type not in relation.range:
+            raise SchemaValidationError(
+                f"relation {relation.id} does not accept object type {object_type}"
+            )
         identity = _fact_identity(
             schema,
             subject_id,

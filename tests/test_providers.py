@@ -8,6 +8,8 @@ import pytest
 from prismke.core.errors import ProviderRequestError, ProviderResponseError
 from prismke.domain import (
     DocumentIR,
+    EntityCatalogItem,
+    EntityTypeDef,
     EvidenceKind,
     EvidenceRef,
     ExtractionRequest,
@@ -78,6 +80,91 @@ async def test_openai_provider_with_mock_transport() -> None:
     assert result.call_records[0].response_model == "qwen3.7-flash-2026-07-15"
     assert result.call_records[0].total_tokens == 120
     assert result.call_records[0].status == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_openai_provider_grounds_catalog_ids_to_source_surface_forms() -> None:
+    evidence = EvidenceRef(
+        id="ev:source",
+        kind=EvidenceKind.TEXT_SPAN,
+        document_id="doc:source",
+        source_hash="a" * 64,
+        modality=Modality.TEXT,
+        char_start=0,
+        char_end=24,
+    )
+    document = DocumentIR(
+        id="doc:source",
+        source_path="sample.md",
+        source_hash="a" * 64,
+        media_type="text/markdown",
+        text_blocks=[
+            TextBlock(
+                id="block:source",
+                text="北辰实验室开发了 AuroraGraph。",
+                evidence_id=evidence.id,
+            )
+        ],
+        evidence=[evidence],
+    )
+    schema = OutputSchema(
+        schema_id="source-grounding",
+        version="1",
+        entity_types=[EntityTypeDef(id="Software"), EntityTypeDef(id="Organization")],
+        relations=[],
+        entity_catalog=[
+            EntityCatalogItem(
+                id="entity:northstar-labs",
+                name="Northstar Labs",
+                type="Organization",
+                aliases=["北辰实验室"],
+            ),
+            EntityCatalogItem(
+                id="entity:harbor-research",
+                name="Harbor Research",
+                type="Organization",
+            ),
+            EntityCatalogItem(
+                id="entity:auroragraph",
+                name="AuroraGraph",
+                type="Software",
+            ),
+        ],
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        request_payload = json.loads(request.content)
+        prompt = request_payload["messages"][0]["content"]
+        assert "exact surface forms" in prompt
+        payload = {
+            "claims": [
+                {
+                    "subject": "entity:harbor-research",
+                    "relation": "developed_by",
+                    "object": "entity:auroragraph",
+                    "subject_type": "Organization",
+                    "object_type": "Software",
+                    "confidence": 0.9,
+                    "evidence_id": evidence.id,
+                }
+            ]
+        }
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": json.dumps(payload)}}]},
+        )
+
+    provider = OpenAICompatibleLLMProvider(
+        "https://example.test/v1",
+        "secret",
+        "model",
+        transport=httpx.MockTransport(handler),
+    )
+    result = await provider.extract(
+        ExtractionRequest(document=document, output_schema=schema)
+    )
+    assert result.candidates[0].subject.name == "北辰实验室"
+    assert result.candidates[0].object.name == "AuroraGraph"
 
 
 @pytest.mark.asyncio

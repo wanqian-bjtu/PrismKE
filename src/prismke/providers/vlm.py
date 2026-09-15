@@ -229,6 +229,7 @@ class OpenAICompatibleVLMProvider:
                         modality=Modality.IMAGE,
                         source_tool="visual_extraction",
                         visual_observation_ids=[observation.id] if observation else [],
+                        output_schema=request.output_schema,
                     )
                 )
             except (KeyError, TypeError, ValueError) as exc:
