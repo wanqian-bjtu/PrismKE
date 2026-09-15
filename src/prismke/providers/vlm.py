@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import json
 from io import BytesIO
@@ -11,6 +10,7 @@ from typing import Any, cast
 import httpx
 from PIL import Image
 
+from prismke.core.errors import ProviderResponseError
 from prismke.core.ids import stable_id
 from prismke.domain import (
     BBox,
@@ -20,10 +20,12 @@ from prismke.domain import (
     ExtractionResult,
     LocalizationLevel,
     Modality,
+    ProviderCallRecord,
     VisualExtractionRequest,
     VisualObservation,
 )
 from prismke.providers.common import candidate_from_payload
+from prismke.providers.http_client import post_chat_completion
 
 PROMPT_VERSION = "visual-schema-claims-v1"
 PROTOCOL_VERSION = "chat-completions-vision-v1"
@@ -76,33 +78,19 @@ class OpenAICompatibleVLMProvider:
             image.save(output, format="PNG")
         return f"data:image/png;base64,{base64.b64encode(output.getvalue()).decode('ascii')}"
 
-    async def _post(self, body: dict[str, Any]) -> dict[str, Any]:
-        headers = {"Authorization": f"Bearer {self.api_key}"}
-        delay = 0.5
-        for attempt in range(3):
-            try:
-                async with httpx.AsyncClient(
-                    timeout=self.timeout, transport=self.transport
-                ) as client:
-                    response = await client.post(
-                        f"{self.base_url}/chat/completions", headers=headers, json=body
-                    )
-                response.raise_for_status()
-                return dict(response.json())
-            except httpx.HTTPStatusError as exc:
-                status = exc.response.status_code
-                if status != 429 and status < 500:
-                    raise
-                if attempt == 2:
-                    raise
-                await asyncio.sleep(delay)
-                delay *= 2
-            except (httpx.TimeoutException, httpx.NetworkError):
-                if attempt == 2:
-                    raise
-                await asyncio.sleep(delay)
-                delay *= 2
-        raise RuntimeError("unreachable")
+    async def _post(
+        self, body: dict[str, Any], operation_id: str
+    ) -> tuple[dict[str, Any], ProviderCallRecord]:
+        return await post_chat_completion(
+            base_url=self.base_url,
+            api_key=self.api_key,
+            body=body,
+            timeout=self.timeout,
+            provider="vlm",
+            operation_id=operation_id,
+            prompt_version=PROMPT_VERSION,
+            transport=self.transport,
+        )
 
     async def extract(self, request: VisualExtractionRequest) -> ExtractionResult:
         asset = request.asset
@@ -132,8 +120,15 @@ class OpenAICompatibleVLMProvider:
             "temperature": 0,
             "response_format": {"type": "json_object"},
         }
-        response = await self._post(body)
-        content = response["choices"][0]["message"]["content"]
+        response, first_record = await self._post(body, asset.id)
+        records = [first_record]
+        try:
+            content = response["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ProviderResponseError(
+                "模型服务响应缺少 choices.message.content",
+                call_records=records,
+            ) from exc
         try:
             payload = json.loads(content)
         except (TypeError, json.JSONDecodeError):
@@ -147,8 +142,15 @@ class OpenAICompatibleVLMProvider:
                     "content": "Return the same result as one valid JSON object only.",
                 },
             ]
-            repaired = await self._post(repair_body)
-            payload = json.loads(repaired["choices"][0]["message"]["content"])
+            repaired, repair_record = await self._post(repair_body, f"{asset.id}:repair")
+            records.append(repair_record)
+            try:
+                payload = json.loads(repaired["choices"][0]["message"]["content"])
+            except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+                raise ProviderResponseError(
+                    "模型服务在一次修复后仍未返回有效的结构化 JSON",
+                    call_records=records,
+                ) from exc
         observations: list[VisualObservation] = []
         evidence: list[EvidenceRef] = []
         warnings: list[str] = []
@@ -232,5 +234,9 @@ class OpenAICompatibleVLMProvider:
             except (KeyError, TypeError, ValueError) as exc:
                 warnings.append(f"visual_claim_invalid:asset={asset.id}:{exc}")
         return ExtractionResult(
-            candidates=candidates, observations=observations, evidence=evidence, warnings=warnings
+            candidates=candidates,
+            observations=observations,
+            evidence=evidence,
+            warnings=warnings,
+            call_records=records,
         )

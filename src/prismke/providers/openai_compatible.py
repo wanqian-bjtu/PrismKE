@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import httpx
 
+from prismke.core.errors import ProviderResponseError
 from prismke.core.ids import stable_id
-from prismke.domain import ExtractionRequest, ExtractionResult
+from prismke.domain import ExtractionRequest, ExtractionResult, ProviderCallRecord
 from prismke.providers.common import candidate_from_payload
+from prismke.providers.http_client import post_chat_completion
 
 PROMPT_VERSION = "schema-claims-v1"
 PROTOCOL_VERSION = "chat-completions-v1"
-PROVIDER_VERSION = "0.1.1"
+PROVIDER_VERSION = "0.2.0"
 
 
 class OpenAICompatibleLLMProvider:
@@ -41,6 +44,20 @@ class OpenAICompatibleLLMProvider:
             PROVIDER_VERSION,
         )
 
+    async def _post(
+        self, body: dict[str, Any], operation_id: str
+    ) -> tuple[dict[str, Any], ProviderCallRecord]:
+        return await post_chat_completion(
+            base_url=self.base_url,
+            api_key=self.api_key,
+            body=body,
+            timeout=self.timeout,
+            provider="llm",
+            operation_id=operation_id,
+            prompt_version=PROMPT_VERSION,
+            transport=self.transport,
+        )
+
     async def extract(self, request: ExtractionRequest) -> ExtractionResult:
         blocks = [
             {"evidence_id": block.evidence_id, "text": block.text}
@@ -54,20 +71,35 @@ class OpenAICompatibleLLMProvider:
             f"Schema: {request.output_schema.model_dump_json()}\n"
             f"Blocks: {json.dumps(blocks, ensure_ascii=False)}"
         )
-        headers = {"Authorization": f"Bearer {self.api_key}"}
         body = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0,
             "response_format": {"type": "json_object"},
         }
-        async with httpx.AsyncClient(timeout=self.timeout, transport=self.transport) as client:
-            response = await client.post(
-                f"{self.base_url}/chat/completions", headers=headers, json=body
+        response, first_record = await self._post(body, request.document.id)
+        records = [first_record]
+        try:
+            content = response["choices"][0]["message"]["content"]
+            payload = json.loads(content)
+        except (KeyError, IndexError, TypeError, json.JSONDecodeError):
+            repair_body = dict(body)
+            repair_body["messages"] = [
+                *body["messages"],
+                {"role": "assistant", "content": str(response)},
+                {"role": "user", "content": "Return one valid JSON object only."},
+            ]
+            repaired, repair_record = await self._post(
+                repair_body, f"{request.document.id}:repair"
             )
-            response.raise_for_status()
-        content = response.json()["choices"][0]["message"]["content"]
-        payload = json.loads(content)
+            records.append(repair_record)
+            try:
+                payload = json.loads(repaired["choices"][0]["message"]["content"])
+            except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+                raise ProviderResponseError(
+                    "模型服务在一次修复后仍未返回有效的结构化 JSON",
+                    call_records=records,
+                ) from exc
         evidence = {item.id: item for item in request.document.evidence}
         blocks_by_evidence = {item.evidence_id: item for item in request.document.text_blocks}
         candidates = []
@@ -83,4 +115,8 @@ class OpenAICompatibleLLMProvider:
                     item, evidence_id, context.text if context is not None else ""
                 )
             )
-        return ExtractionResult(candidates=candidates, warnings=warnings)
+        return ExtractionResult(
+            candidates=candidates,
+            warnings=warnings,
+            call_records=records,
+        )

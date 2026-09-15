@@ -121,7 +121,17 @@ async def test_vlm_region_evidence_with_mock_transport(tmp_path: Path) -> None:
             ],
         }
         return httpx.Response(
-            200, json={"choices": [{"message": {"content": json.dumps(payload)}}]}
+            200,
+            json={
+                "id": "req-vision-safe",
+                "model": "qwen3.7-flash",
+                "usage": {
+                    "prompt_tokens": 200,
+                    "completion_tokens": 40,
+                    "total_tokens": 240,
+                },
+                "choices": [{"message": {"content": json.dumps(payload)}}],
+            },
         )
 
     provider = OpenAICompatibleVLMProvider(
@@ -133,6 +143,9 @@ async def test_vlm_region_evidence_with_mock_transport(tmp_path: Path) -> None:
     assert result.observations[0].bbox is not None
     assert result.candidates[0].modalities == [Modality.IMAGE]
     assert result.evidence[0].media_asset_id == asset.id
+    assert result.call_records[0].provider == "vlm"
+    assert result.call_records[0].total_tokens == 240
+    assert result.call_records[0].estimated_cost_cny is not None
 
 
 def test_cross_modal_support_merges_evidence() -> None:

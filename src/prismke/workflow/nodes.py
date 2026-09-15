@@ -98,6 +98,7 @@ class WorkflowNodes:
         )
         state.text_candidates = result.candidates
         state.warnings.extend(result.warnings)
+        state.provider_calls.extend(result.call_records)
         return state
 
     async def extract_visual_claims(self, state: WorkflowState) -> WorkflowState:
@@ -133,6 +134,7 @@ class WorkflowNodes:
                 await self.evidence_store.put_ref(evidence)
                 state.document.evidence.append(evidence)
             state.warnings.extend(result.warnings)
+            state.provider_calls.extend(result.call_records)
         return state
 
     async def align_modalities(self, state: WorkflowState) -> WorkflowState:

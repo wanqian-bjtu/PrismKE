@@ -7,6 +7,7 @@ import pytest
 
 from prismke.core.errors import ProviderConfigurationError
 from prismke.core.settings import Settings
+from prismke.providers import OpenAICompatibleLLMProvider, OpenAICompatibleVLMProvider
 from prismke.workflow import PrismKEService
 
 
@@ -14,6 +15,39 @@ def test_openai_provider_requires_explicit_configuration(tmp_path: Path) -> None
     service = PrismKEService(Settings(runtime_dir=tmp_path / "runtime"))
     with pytest.raises(ProviderConfigurationError, match="PRISMKE_LLM_API_KEY"):
         service.provider("openai-compatible")
+
+
+def test_openai_provider_rejects_placeholder_base_url(tmp_path: Path) -> None:
+    service = PrismKEService(
+        Settings(
+            runtime_dir=tmp_path / "runtime",
+            llm_base_url="https://<WorkspaceId>.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+            llm_api_key="secret",
+            llm_model="qwen3.7-flash",
+        )
+    )
+    with pytest.raises(ProviderConfigurationError, match="PRISMKE_LLM_BASE_URL"):
+        service.provider("openai-compatible")
+
+
+def test_same_key_can_configure_text_and_visual_providers(tmp_path: Path) -> None:
+    service = PrismKEService(
+        Settings(
+            runtime_dir=tmp_path / "runtime",
+            llm_base_url="https://workspace.example.test/compatible-mode/v1",
+            llm_api_key="shared-secret",
+            llm_model="qwen3.7-flash",
+            vlm_base_url="https://workspace.example.test/compatible-mode/v1",
+            vlm_api_key="shared-secret",
+            vlm_model="qwen3.7-flash",
+        )
+    )
+    text_provider = service.provider("openai-compatible")
+    visual_provider = service.vlm_provider("openai-compatible")
+    assert isinstance(text_provider, OpenAICompatibleLLMProvider)
+    assert isinstance(visual_provider, OpenAICompatibleVLMProvider)
+    assert text_provider.model == "qwen3.7-flash"
+    assert visual_provider.model == "qwen3.7-flash"
 
 
 @pytest.mark.asyncio

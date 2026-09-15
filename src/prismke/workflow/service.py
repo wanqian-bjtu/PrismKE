@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import urlparse
 
 from prismke.core.errors import LegacyCheckpointError, ProviderConfigurationError
 from prismke.core.ids import canonical_hash, file_sha256, stable_id
@@ -35,6 +36,20 @@ class PrismKEService:
         self.graph_store = JSONGraphStore(self.settings.graph_dir)
         self.evidence_store = FileEvidenceStore(self.settings.evidence_dir)
 
+    @staticmethod
+    def _validate_endpoint(value: str, variable: str) -> None:
+        parsed = urlparse(value.strip())
+        if (
+            not value.strip()
+            or "<" in value
+            or ">" in value
+            or parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+        ):
+            raise ProviderConfigurationError(
+                f"openai-compatible requires a valid {variable}"
+            )
+
     def provider(self, name: str) -> LLMProvider:
         if name == "mock":
             return MockLLMProvider()
@@ -44,6 +59,7 @@ class PrismKEService:
             raise ProviderConfigurationError("openai-compatible requires PRISMKE_LLM_API_KEY")
         if not self.settings.llm_model:
             raise ProviderConfigurationError("openai-compatible requires PRISMKE_LLM_MODEL")
+        self._validate_endpoint(self.settings.llm_base_url, "PRISMKE_LLM_BASE_URL")
         return OpenAICompatibleLLMProvider(
             base_url=self.settings.llm_base_url,
             api_key=self.settings.llm_api_key,
@@ -75,6 +91,7 @@ class PrismKEService:
             raise ProviderConfigurationError("openai-compatible VLM requires PRISMKE_VLM_API_KEY")
         if not self.settings.vlm_model:
             raise ProviderConfigurationError("openai-compatible VLM requires PRISMKE_VLM_MODEL")
+        self._validate_endpoint(self.settings.vlm_base_url, "PRISMKE_VLM_BASE_URL")
         return OpenAICompatibleVLMProvider(
             base_url=self.settings.vlm_base_url,
             api_key=self.settings.vlm_api_key,

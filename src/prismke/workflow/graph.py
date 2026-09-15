@@ -53,6 +53,15 @@ class PrismKEWorkflow:
     def _state(graph_state: GraphState) -> WorkflowState:
         return WorkflowState.model_validate(graph_state["payload"])
 
+    @staticmethod
+    def _record_provider_failure(state: WorkflowState, exc: Exception) -> None:
+        records = getattr(exc, "call_records", None)
+        if records is None:
+            record = getattr(exc, "call_record", None)
+            records = [record] if record is not None else []
+        known = {item.id for item in state.provider_calls}
+        state.provider_calls.extend(item for item in records if item.id not in known)
+
     def _node(
         self,
         name: str,
@@ -63,6 +72,7 @@ class PrismKEWorkflow:
             try:
                 state = await handler(state)
             except Exception as exc:
+                self._record_provider_failure(state, exc)
                 state.status = "failed"
                 state.failed_node = name
                 state.current_node = name
@@ -88,6 +98,7 @@ class PrismKEWorkflow:
             try:
                 state = await handler(state)
             except Exception as exc:
+                self._record_provider_failure(state, exc)
                 state.status = "failed"
                 state.failed_node = name
                 state.current_node = name
@@ -106,6 +117,12 @@ class PrismKEWorkflow:
         state.text_candidates = text_state.text_candidates
         state.visual_candidates = visual_state.visual_candidates
         state.document = visual_state.document
+        calls = [
+            *state.provider_calls,
+            *text_state.provider_calls,
+            *visual_state.provider_calls,
+        ]
+        state.provider_calls = list({item.id: item for item in calls}.values())
         state.warnings = list(
             dict.fromkeys([*state.warnings, *text_state.warnings, *visual_state.warnings])
         )

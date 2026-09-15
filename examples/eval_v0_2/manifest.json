@@ -1,0 +1,272 @@
+{
+  "version": "0.2-public-1",
+  "schema_path": "schema.yaml",
+  "cases": [
+    {
+      "id": "support-zh-md",
+      "input": "01_support_zh.md",
+      "language": "zh",
+      "scenarios": [
+        "cross_modal_support",
+        "region_evidence"
+      ],
+      "claims": [
+        {
+          "subject": "AuroraGraph",
+          "relation": "developed_by",
+          "object": "Northstar Labs"
+        }
+      ],
+      "expected_alignment_decisions": [
+        "support"
+      ],
+      "expected_localization_levels": [
+        "region"
+      ]
+    },
+    {
+      "id": "support-en-html",
+      "input": "02_support_en.html",
+      "language": "en",
+      "scenarios": [
+        "cross_modal_support",
+        "html_image"
+      ],
+      "claims": [
+        {
+          "subject": "BeaconAI",
+          "relation": "developed_by",
+          "object": "Harbor Research"
+        }
+      ],
+      "expected_alignment_decisions": [
+        "support"
+      ],
+      "expected_localization_levels": [
+        "region"
+      ]
+    },
+    {
+      "id": "conflict-zh-md",
+      "input": "03_conflict_zh.md",
+      "language": "zh",
+      "scenarios": [
+        "cross_modal_conflict"
+      ],
+      "claims": [
+        {
+          "subject": "NovaIndex",
+          "relation": "developed_by",
+          "object": "Northstar Labs"
+        },
+        {
+          "subject": "NovaIndex",
+          "relation": "developed_by",
+          "object": "Contoso AI"
+        }
+      ],
+      "expected_alignment_decisions": [
+        "conflict"
+      ],
+      "expected_localization_levels": [
+        "region"
+      ]
+    },
+    {
+      "id": "conflict-en-html",
+      "input": "04_conflict_en.html",
+      "language": "en",
+      "scenarios": [
+        "cross_modal_conflict"
+      ],
+      "claims": [
+        {
+          "subject": "AtlasFlow",
+          "relation": "developed_by",
+          "object": "Harbor Research"
+        },
+        {
+          "subject": "AtlasFlow",
+          "relation": "developed_by",
+          "object": "Contoso AI"
+        }
+      ],
+      "expected_alignment_decisions": [
+        "conflict"
+      ],
+      "expected_localization_levels": [
+        "region"
+      ]
+    },
+    {
+      "id": "image-only-png",
+      "input": "05_image_only.png",
+      "language": "en",
+      "scenarios": [
+        "image_only",
+        "region_evidence"
+      ],
+      "claims": [
+        {
+          "subject": "VisionDesk",
+          "relation": "developed_by",
+          "object": "Northstar Labs"
+        }
+      ],
+      "expected_alignment_decisions": [
+        "independent"
+      ],
+      "expected_localization_levels": [
+        "region"
+      ]
+    },
+    {
+      "id": "image-only-jpeg",
+      "input": "06_image_only.jpg",
+      "language": "en",
+      "scenarios": [
+        "image_only"
+      ],
+      "claims": [
+        {
+          "subject": "ChartPilot",
+          "relation": "developed_by",
+          "object": "Harbor Research"
+        }
+      ],
+      "expected_alignment_decisions": [
+        "independent"
+      ],
+      "expected_localization_levels": [
+        "region"
+      ]
+    },
+    {
+      "id": "scanned-pdf-zh",
+      "input": "07_scanned_zh.pdf",
+      "language": "zh",
+      "scenarios": [
+        "scanned_pdf",
+        "ocr"
+      ],
+      "claims": [
+        {
+          "subject": "星图系统",
+          "relation": "developed_by",
+          "object": "北辰实验室"
+        }
+      ],
+      "expected_alignment_decisions": [
+        "support"
+      ],
+      "expected_localization_levels": [
+        "region"
+      ]
+    },
+    {
+      "id": "scanned-pdf-en",
+      "input": "08_scanned_en.pdf",
+      "language": "en",
+      "scenarios": [
+        "scanned_pdf",
+        "ocr"
+      ],
+      "claims": [
+        {
+          "subject": "ScanGraph",
+          "relation": "developed_by",
+          "object": "Harbor Research"
+        }
+      ],
+      "expected_alignment_decisions": [
+        "support"
+      ],
+      "expected_localization_levels": [
+        "region"
+      ]
+    },
+    {
+      "id": "pdf-text-image-duplicate",
+      "input": "09_text_image.pdf",
+      "language": "en",
+      "scenarios": [
+        "pdf_text_ocr_duplicate",
+        "cross_modal_support"
+      ],
+      "claims": [
+        {
+          "subject": "EvidenceHub",
+          "relation": "developed_by",
+          "object": "Northstar Labs"
+        }
+      ],
+      "expected_alignment_decisions": [
+        "support"
+      ],
+      "expected_localization_levels": [
+        "region"
+      ]
+    },
+    {
+      "id": "pdf-image-coarse-fallback",
+      "input": "10_poster.pdf",
+      "language": "en",
+      "scenarios": [
+        "whole_image_or_region_evidence"
+      ],
+      "claims": [
+        {
+          "subject": "PosterKG",
+          "relation": "developed_by",
+          "object": "Contoso AI"
+        }
+      ],
+      "expected_alignment_decisions": [
+        "independent"
+      ],
+      "expected_localization_levels": []
+    },
+    {
+      "id": "alias-zh",
+      "input": "11_alias_zh.md",
+      "language": "zh",
+      "scenarios": [
+        "cross_document_alias"
+      ],
+      "claims": [
+        {
+          "subject": "AuroraGraph",
+          "relation": "developed_by",
+          "object": "Northstar Labs"
+        }
+      ],
+      "expected_alignment_decisions": [
+        "independent"
+      ],
+      "expected_localization_levels": [
+        "text_span"
+      ]
+    },
+    {
+      "id": "alias-en",
+      "input": "12_alias_en.html",
+      "language": "en",
+      "scenarios": [
+        "cross_document_alias"
+      ],
+      "claims": [
+        {
+          "subject": "AuroraGraph",
+          "relation": "developed_by",
+          "object": "Northstar Labs"
+        }
+      ],
+      "expected_alignment_decisions": [
+        "independent"
+      ],
+      "expected_localization_levels": [
+        "text_span"
+      ]
+    }
+  ]
+}

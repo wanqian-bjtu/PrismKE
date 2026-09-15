@@ -1,0 +1,44 @@
+schema_id: prismke-v0.2-public-evaluation
+version: "0.2-public-1"
+strict: true
+entity_types:
+  - id: Software
+    aliases: [software, system, project, 软件, 系统]
+  - id: Organization
+    aliases: [organization, organisation, company, lab, laboratory, 机构, 实验室]
+relations:
+  - id: developed_by
+    aliases: [developed by, created by, 开发者, 开发机构, 由其开发]
+    domain: [Software]
+    range: [Organization]
+    functional: true
+    min_cardinality: 0
+    max_cardinality: 1
+    symmetric: false
+    inverse_relation: develops
+  - id: develops
+    aliases: [develops, 开发]
+    domain: [Organization]
+    range: [Software]
+    functional: false
+    min_cardinality: 0
+    max_cardinality: null
+    symmetric: false
+    inverse_relation: developed_by
+entity_catalog:
+  - id: entity:northstar-labs
+    name: Northstar Labs
+    type: Organization
+    aliases: [Northstar Laboratory, 北辰实验室]
+  - id: entity:harbor-research
+    name: Harbor Research
+    type: Organization
+    aliases: [Harbor Lab]
+  - id: entity:contoso-ai
+    name: Contoso AI
+    type: Organization
+    aliases: []
+  - id: entity:auroragraph
+    name: AuroraGraph
+    type: Software
+    aliases: [Aurora Graph]
