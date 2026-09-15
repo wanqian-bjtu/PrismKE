@@ -112,6 +112,7 @@ def normalize_claims(
                 qualifiers=candidate.qualifiers,
                 cross_modal_support=candidate.cross_modal_support,
                 coarse_visual_evidence=candidate.coarse_visual_evidence,
+                context_only_visual_claim=candidate.context_only_visual_claim,
             )
         )
     return merge_supporting_claims(claims)
@@ -132,5 +133,8 @@ def merge_supporting_claims(claims: list[Claim]) -> list[Claim]:
         current.cross_modal_support = current.cross_modal_support or claim.cross_modal_support
         current.coarse_visual_evidence = (
             current.coarse_visual_evidence and claim.coarse_visual_evidence
+        )
+        current.context_only_visual_claim = (
+            current.context_only_visual_claim or claim.context_only_visual_claim
         )
     return list(merged.values())

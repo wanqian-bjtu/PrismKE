@@ -25,7 +25,7 @@ from prismke.providers.base import LLMProvider, OCRProvider, VLMProvider
 from prismke.workflow.graph import PrismKEWorkflow
 
 PIPELINE_VERSION = "0.2.0"
-ASSET_POLICY_VERSION = "assets-v1"
+ASSET_POLICY_VERSION = "assets-v2"
 ALIGNMENT_POLICY_VERSION = "alignment-v1"
 
 
