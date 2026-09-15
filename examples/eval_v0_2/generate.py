@@ -152,7 +152,7 @@ def _manifest() -> dict[str, object]:
                 "language": "en",
                 "scenarios": ["image_only", "region_evidence"],
                 "claims": [claim("VisionDesk", "developed_by", "Northstar Labs")],
-                "expected_alignment_decisions": ["independent"],
+                "expected_alignment_decisions": ["support"],
                 "expected_localization_levels": ["region"],
             },
             {
@@ -161,7 +161,7 @@ def _manifest() -> dict[str, object]:
                 "language": "en",
                 "scenarios": ["image_only"],
                 "claims": [claim("ChartPilot", "developed_by", "Harbor Research")],
-                "expected_alignment_decisions": ["independent"],
+                "expected_alignment_decisions": ["support"],
                 "expected_localization_levels": ["region"],
             },
             {

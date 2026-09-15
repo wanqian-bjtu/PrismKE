@@ -180,6 +180,35 @@ def test_cross_modal_support_merges_evidence() -> None:
     assert records[0].decision == "support"
 
 
+def test_ocr_and_image_support_does_not_double_count_confidence() -> None:
+    def candidate(identifier: str, modality: Modality, evidence: str) -> CandidateClaim:
+        return CandidateClaim(
+            id=identifier,
+            subject=EntityMention(
+                id=f"mention:{identifier}",
+                name="VisionDesk",
+                entity_type="Software",
+                modality=modality,
+                evidence_ids=[evidence],
+            ),
+            relation="developed_by",
+            object="Northstar Labs",
+            confidence=0.8,
+            evidence_ids=[evidence],
+            modalities=[modality],
+        )
+
+    schema = OutputSchema(schema_id="s", version="1", entity_types=[], relations=[])
+    merged, records = MultimodalAlignmentService().align(
+        [candidate("ocr", Modality.OCR, "ev:ocr")],
+        [candidate("vision", Modality.IMAGE, "ev:image")],
+        SchemaIndex(schema),
+    )
+    assert merged[0].confidence == 0.8
+    assert not merged[0].cross_modal_support
+    assert records[0].decision == "support"
+
+
 def test_cross_modal_candidates_with_shared_subject_are_related() -> None:
     def candidate(identifier: str, relation: str, modality: Modality) -> CandidateClaim:
         return CandidateClaim(

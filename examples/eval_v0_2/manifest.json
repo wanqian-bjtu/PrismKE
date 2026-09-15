@@ -114,7 +114,7 @@
         }
       ],
       "expected_alignment_decisions": [
-        "independent"
+        "support"
       ],
       "expected_localization_levels": [
         "region"
@@ -135,7 +135,7 @@
         }
       ],
       "expected_alignment_decisions": [
-        "independent"
+        "support"
       ],
       "expected_localization_levels": [
         "region"

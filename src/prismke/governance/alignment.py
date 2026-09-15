@@ -50,8 +50,8 @@ class MultimodalAlignmentService:
         records: list[AlignmentRecord] = []
         for signature, members in groups.items():
             modalities = sorted({modality for item in members for modality in item.modalities})
-            cross_modal = Modality.IMAGE in modalities and bool(
-                {Modality.TEXT, Modality.OCR} & set(modalities)
+            cross_modal = (
+                Modality.IMAGE in modalities and Modality.TEXT in modalities
             )
             if len(members) == 1:
                 aligned.append(members[0])
