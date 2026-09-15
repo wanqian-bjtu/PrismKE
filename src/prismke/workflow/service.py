@@ -158,6 +158,10 @@ class PrismKEService:
 
     async def review(self, run_id: str, claim_id: str, decision: ReviewDecision) -> WorkflowState:
         state = self.runs.load(run_id)
+        if state.pipeline_version != PIPELINE_VERSION:
+            raise LegacyCheckpointError(
+                "this run was created by an older pipeline and cannot be resumed with v0.2"
+            )
         claim = next((item for item in state.claims if item.id == claim_id), None)
         if claim is None:
             raise KeyError(f"claim not found: {claim_id}")
@@ -180,6 +184,14 @@ class PrismKEService:
         vlm_provider = self.vlm_provider(state.vlm_provider_name)
         if state.provider_fingerprint not in ("legacy", provider.fingerprint()):
             raise ProviderConfigurationError("provider configuration changed since run creation")
+        if state.ocr_provider_fingerprint != ocr_provider.fingerprint():
+            raise ProviderConfigurationError(
+                "OCR provider configuration changed since run creation"
+            )
+        if state.vlm_provider_fingerprint != vlm_provider.fingerprint():
+            raise ProviderConfigurationError(
+                "VLM provider configuration changed since run creation"
+            )
         if not await self._workflow(
             provider, ocr_provider, vlm_provider, state.allow_remote_assets
         ).record_review(state):
@@ -190,6 +202,10 @@ class PrismKEService:
 
     async def resume(self, run_id: str) -> WorkflowState:
         state = self.runs.load(run_id)
+        if state.pipeline_version != PIPELINE_VERSION:
+            raise LegacyCheckpointError(
+                "this run was created by an older pipeline and cannot be resumed with v0.2"
+            )
         provider = self.provider(state.provider_name)
         ocr_provider = self.ocr_provider(state.ocr_provider_name)
         vlm_provider = self.vlm_provider(state.vlm_provider_name)

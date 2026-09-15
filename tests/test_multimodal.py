@@ -10,11 +10,13 @@ from PIL import Image
 
 from prismke.core.settings import Settings
 from prismke.domain import (
+    BBox,
     CandidateClaim,
     DocumentIR,
     EntityMention,
     MediaAsset,
     Modality,
+    OCRRequest,
     OutputSchema,
     SchemaIndex,
     SourceDocument,
@@ -22,7 +24,7 @@ from prismke.domain import (
 )
 from prismke.governance import MultimodalAlignmentService
 from prismke.parsing import ParserRegistry
-from prismke.providers import OpenAICompatibleVLMProvider
+from prismke.providers import OpenAICompatibleVLMProvider, PaddleOCRProvider
 from prismke.workflow import PrismKEService
 
 
@@ -151,3 +153,47 @@ def test_vlm_configuration_is_strict(tmp_path: Path) -> None:
     service = PrismKEService(Settings(runtime_dir=tmp_path / "runtime"))
     with pytest.raises(Exception, match="PRISMKE_VLM_API_KEY"):
         service.vlm_provider("openai-compatible")
+
+
+@pytest.mark.asyncio
+async def test_paddle_provider_converts_lines_to_bbox(tmp_path: Path) -> None:
+    image = tmp_path / "ocr.png"
+    _image(image)
+    asset = MediaAsset(
+        id="media:ocr",
+        path=str(image),
+        media_type="image/png",
+        width=128,
+        height=96,
+        evidence_id="ev:asset",
+        blob_hash="b" * 64,
+        requires_ocr=True,
+    )
+    document = DocumentIR(
+        id="doc:ocr",
+        source_path=str(image),
+        source_hash="b" * 64,
+        media_type="image/png",
+        media_assets=[asset],
+    )
+
+    class Result:
+        json = {
+            "res": {
+                "rec_texts": ["PrismKE"],
+                "rec_scores": [0.93],
+                "rec_polys": [[[10, 20], [90, 20], [90, 50], [10, 50]]],
+            }
+        }
+
+    class Engine:
+        def predict(self, path: str):  # type: ignore[no-untyped-def]
+            assert path == str(image)
+            return [Result()]
+
+    provider = PaddleOCRProvider()
+    provider._engine = Engine()
+    result = await provider.recognize(OCRRequest(document=document))
+    assert result.text_blocks[0].text == "PrismKE"
+    assert result.text_blocks[0].modality == Modality.OCR
+    assert result.evidence[0].bbox == BBox(x0=10, y0=20, x1=90, y1=50)

@@ -43,6 +43,9 @@ async def test_scanned_pdf_is_marked_for_ocr(tmp_path: Path) -> None:
     pdf.close()
     document = await ParserRegistry().parse(SourceDocument(path=path))
     assert "ocr_required:page=1" in document.warnings
+    assert document.pages[0].requires_ocr
+    assert document.media_assets[0].origin == "pdf_page_render"
+    assert document.media_assets[0].requires_ocr
 
 
 @pytest.mark.asyncio

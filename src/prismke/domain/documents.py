@@ -6,7 +6,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class Modality(StrEnum):
@@ -41,6 +41,12 @@ class BBox(BaseModel):
     y0: float
     x1: float
     y1: float
+
+    @model_validator(mode="after")
+    def validate_bounds(self) -> BBox:
+        if self.x0 >= self.x1 or self.y0 >= self.y1:
+            raise ValueError("bbox must have positive width and height")
+        return self
 
 
 class SourceDocument(BaseModel):

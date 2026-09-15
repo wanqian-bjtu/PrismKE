@@ -74,7 +74,7 @@ class PaddleOCRProvider:
         evidence: list[EvidenceRef] = []
         warnings: list[str] = []
         for asset in request.document.media_assets:
-            if not (asset.requires_ocr or asset.origin == "source_image"):
+            if asset.origin == "pdf_page_render" and not asset.requires_ocr:
                 continue
             try:
                 for result_index, result in enumerate(engine.predict(asset.path)):

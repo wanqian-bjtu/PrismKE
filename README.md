@@ -2,16 +2,17 @@
 
 PrismKE 是一个面向通用多模态知识图谱构建的研究型项目，目标是实现模式引导、证据感知、可审核和可持续更新的知识抽取流程。
 
-当前代码位于 `dev/v0.1` 分支。v0.1.1 在首个可运行纵向闭环上补充了原子写图、内容寻址证据、稳定运行标识和持久化检查点恢复。
+当前开发代码位于 `dev/v0.2` 分支。v0.2.0 在 v0.1.1 的可信写图基础上加入真实 OCR、OpenAI-compatible VLM、文档内图片解析、视觉观察和跨模态事实对齐。
 
 ## 当前能力
 
 ### 文档解析
 
-- 支持 TXT 和 Markdown 文档，并保留字符级证据范围。
-- 支持文本型 PDF，并保留页码和边界框坐标（bbox）。
-- 支持 PNG、JPEG 和 WebP 图片，生成 `MediaAsset` 与图片级证据。
-- 扫描型 PDF 暂不执行真实 OCR，而是为无文本页面记录 `ocr_required` 警告。
+- 支持 TXT、Markdown、HTML、DOCX、PDF、PNG、JPEG 和 WebP。
+- Markdown、HTML 和 DOCX 中的图片会与邻近文字、alt 或图注一同进入 `DocumentIR`。
+- PDF 保留文本页码和 bbox，抽取内嵌光栅图片，并为扫描页或矢量较重页面生成页面图。
+- PaddleOCR 3.x 将扫描页和图片文字转为带像素 bbox 的 OCR 文本块。
+- 小于 `64×64` 的装饰图默认跳过；远程图片默认禁止下载。
 
 ### 模式引导抽取
 
@@ -19,6 +20,7 @@ PrismKE 是一个面向通用多模态知识图谱构建的研究型项目，目
 - 支持实体类型、类型别名、关系、关系别名、domain、range、基数、对称关系、逆关系和严格模式。
 - 提供可重复测试的 Mock Provider。
 - 提供 OpenAI-compatible 文本模型接口。
+- 提供独立的 OpenAI-compatible 多模态 VLM 接口，每次处理一个可追溯视觉资产。
 - 只有显式选择 `mock` 才会使用 Mock Provider；真实模型配置缺失时直接报错。
 
 ### 实体与事实治理
@@ -37,6 +39,7 @@ PrismKE 是一个面向通用多模态知识图谱构建的研究型项目，目
 - 置信度位于 `0.55` 至 `0.85` 之间的 Claim 进入人工审核。
 - 置信度低于 `0.55` 的 Claim 默认拒绝。
 - 冲突 Claim 必须进入人工审核。
+- 只有整图证据的视觉独有 Claim 必须进入人工审核。
 - 审核决定保存后，可以从 LangGraph SQLite 检查点继续工作流。
 
 ### 图谱与版本
@@ -51,9 +54,13 @@ PrismKE 是一个面向通用多模态知识图谱构建的研究型项目，目
 ```text
 ingest
   -> parse_document
+  -> materialize_visual_assets
+  -> run_ocr
   -> persist_evidence
   -> load_schema
-  -> extract_claims
+  -> extract_text_claims
+  -> extract_visual_claims
+  -> align_modalities
   -> resolve_entities
   -> normalize_claims
   -> detect_conflicts
@@ -73,6 +80,12 @@ conda create -n prismke python=3.11 -y
 conda activate prismke
 python -m pip install uv
 uv sync --extra dev
+```
+
+需要真实 OCR 时安装可选依赖：
+
+```bash
+uv sync --extra dev --extra ocr
 ```
 
 在当前 AutoDL 服务器上，环境路径为：
@@ -161,6 +174,44 @@ prismke run INPUT \
   --provider openai-compatible
 ```
 
+## OCR 与视觉抽取
+
+OCR 默认使用 CPU、中文模型（兼容常见中英混排）：
+
+```text
+PRISMKE_OCR_DEVICE=cpu
+PRISMKE_OCR_LANG=ch
+PRISMKE_OCR_MODEL=PP-OCRv5
+```
+
+VLM 使用与文本模型相互独立的配置，缺少配置时不会静默回退 Mock：
+
+```text
+PRISMKE_VLM_BASE_URL=https://api.openai.com/v1
+PRISMKE_VLM_API_KEY=
+PRISMKE_VLM_MODEL=
+PRISMKE_VLM_TIMEOUT=120
+```
+
+真实多模态运行：
+
+```bash
+prismke run INPUT \
+  --schema configs/schemas/example.yaml \
+  --provider openai-compatible \
+  --ocr-provider paddle \
+  --vlm-provider openai-compatible
+```
+
+不调用真实 API 的结构测试可以使用 `--ocr-provider mock --vlm-provider mock`。HTML 与 Markdown 远程图片只有显式添加 `--allow-remote-assets` 才会下载。
+
+查看或导出 Claim 引用的证据：
+
+```bash
+prismke show-evidence EVIDENCE_ID
+prismke export-evidence EVIDENCE_ID --output evidence.png
+```
+
 ## 运行产物
 
 运行数据默认写入 `runtime/`，该目录不会提交到 Git：
@@ -171,6 +222,7 @@ runtime/
 ├── evidence/
 │   ├── blobs/           # 按SHA-256寻址的原始文件
 │   └── refs/            # 带完整性校验的EvidenceRef
+├── assets/               # 解析阶段产生的内容寻址视觉资产
 ├── graph/
 │   └── graph.json       # 原子提交的实体、Claim、冲突和Revision
 └── runs/
@@ -189,16 +241,15 @@ pytest
 
 ## 当前边界
 
-v0.1.1 尚未实现以下能力：
+v0.2.0 尚未实现以下能力：
 
-- 真实 OCR 推理。
-- 真实 VLM 图片事实抽取与图文对齐。
 - Neo4j 正式写入。
 - FastAPI 和 Gradio 页面。
 - Docker Compose 部署。
 - 表格和图表语义解析。
 - 向量召回、复杂实体消歧和 MSPT 式持续学习。
+- 本地 VLM 与结构化表格/图表数值解析。
 
-图片在当前版本中作为证据资产，而不是默认作为领域实体。后续视觉抽取模块会从图片区域生成 `VisualObservation`，再将其中识别出的真实领域对象链接到 `CanonicalEntity`。
+图片作为证据资产，而不是默认作为领域实体。VLM 从整图或图片区域生成 `VisualObservation`，其中识别出的真实领域对象才会链接到 `CanonicalEntity`。区域定位不可用时会保留整图证据并降低自动提交权限。
 
 详细研究设计与后续路线见 [`docs/PrismKE从零构建计划.md`](docs/PrismKE从零构建计划.md)。
