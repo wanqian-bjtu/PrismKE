@@ -46,6 +46,8 @@ neo4j = [
 web = [
   "fastapi>=0.115,<1",
   "gradio>=5,<7",
+  "networkx>=3.4,<4",
+  "plotly>=6,<7",
   "python-multipart>=0.0.20,<1",
   "uvicorn>=0.34,<1",
 ]
@@ -60,6 +62,7 @@ packages = ["src/prismke"]
 addopts = "-q"
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = ["neo4j: requires a live dedicated Neo4j database"]
 
 [tool.ruff]
 line-length = 100

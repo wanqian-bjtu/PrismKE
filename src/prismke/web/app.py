@@ -67,6 +67,16 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         state = await service.review(run_id, claim_id, ReviewDecision(decision))
         return _state_summary(state), _claim_rows(state)
 
+    def load_review_queue(
+        run_id: str,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[list[Any]]]:
+        state = service.show_run(run_id)
+        return (
+            [item.model_dump(mode="json") for item in state.review_tasks],
+            [item.model_dump(mode="json") for item in state.conflicts],
+            _claim_rows(state),
+        )
+
     async def show_evidence(evidence_id: str) -> tuple[dict[str, Any], str | None]:
         evidence = await service.evidence_store.get(evidence_id)
         output = service.settings.runtime_dir / "ui" / f"{evidence_id.replace(':', '_')}.png"
@@ -78,9 +88,68 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             preview = None
         return evidence.model_dump(mode="json"), preview
 
-    async def neighborhood(entity_id: str, depth: int) -> dict[str, Any]:
+    async def neighborhood(entity_id: str, depth: int) -> tuple[Any, dict[str, Any]]:
+        import networkx as nx
+        import plotly.graph_objects as go
+
         result = await service.graph_store.get_neighborhood(entity_id, depth)
-        return result.model_dump(mode="json")
+        graph = nx.Graph()
+        labels: dict[str, str] = {}
+        kinds: dict[str, str] = {}
+        for entity in result.entities:
+            graph.add_node(entity.id)
+            labels[entity.id] = entity.name
+            kinds[entity.id] = "entity"
+        for claim in result.claims:
+            target = claim.object_entity_id or f"literal:{claim.id}"
+            if claim.object_literal is not None:
+                graph.add_node(target)
+                labels[target] = claim.object_literal
+                kinds[target] = "literal"
+            graph.add_edge(claim.subject_id, target, label=claim.relation_id)
+        positions = nx.spring_layout(graph, seed=42) if graph.nodes else {}
+        edge_x: list[float | None] = []
+        edge_y: list[float | None] = []
+        for left, right in graph.edges:
+            edge_x.extend([positions[left][0], positions[right][0], None])
+            edge_y.extend([positions[left][1], positions[right][1], None])
+        figure = go.Figure()
+        figure.add_trace(
+            go.Scatter(
+                x=edge_x,
+                y=edge_y,
+                mode="lines",
+                line={"color": "#9ca3af", "width": 1.5},
+                hoverinfo="skip",
+            )
+        )
+        figure.add_trace(
+            go.Scatter(
+                x=[positions[node][0] for node in graph.nodes],
+                y=[positions[node][1] for node in graph.nodes],
+                mode="markers+text",
+                text=[labels.get(node, node) for node in graph.nodes],
+                textposition="top center",
+                marker={
+                    "size": 18,
+                    "color": [
+                        "#0f766e" if kinds.get(node) == "entity" else "#f97316"
+                        for node in graph.nodes
+                    ],
+                },
+                customdata=list(graph.nodes),
+                hovertemplate="%{text}<br>%{customdata}<extra></extra>",
+            )
+        )
+        figure.update_layout(
+            height=520,
+            margin={"l": 20, "r": 20, "t": 20, "b": 20},
+            showlegend=False,
+            xaxis={"visible": False},
+            yaxis={"visible": False},
+            plot_bgcolor="white",
+        )
+        return figure, result.model_dump(mode="json")
 
     async def revisions() -> list[list[Any]]:
         items = await service.graph_store.list_revisions()
@@ -141,6 +210,10 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
 
         with gr.Tab("冲突审核"):
             review_run = gr.Textbox(label="Run ID")
+            review_load = gr.Button("加载审核队列")
+            with gr.Row():
+                review_tasks = gr.JSON(label="待审核任务")
+                review_conflicts = gr.JSON(label="冲突集合")
             review_claim_id = gr.Textbox(label="Claim ID")
             review_decision = gr.Radio(
                 ["approve", "reject"], value="approve", label="审核决定"
@@ -148,6 +221,11 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             review_button = gr.Button("提交审核", variant="primary")
             review_summary = gr.JSON(label="审核后的运行状态")
             review_claims = gr.Dataframe(headers=claim_headers, interactive=False)
+            review_load.click(
+                load_review_queue,
+                [review_run],
+                [review_tasks, review_conflicts, review_claims],
+            )
             review_button.click(
                 review_claim,
                 [review_run, review_claim_id, review_decision],
@@ -167,8 +245,11 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             entity_id = gr.Textbox(label="Entity ID")
             depth = gr.Slider(1, 3, value=1, step=1, label="邻域深度")
             graph_button = gr.Button("查询邻域")
+            graph_plot = gr.Plot(label="实体邻域图")
             graph_output = gr.JSON(label="实体邻域")
-            graph_button.click(neighborhood, [entity_id, depth], [graph_output])
+            graph_button.click(
+                neighborhood, [entity_id, depth], [graph_plot, graph_output]
+            )
 
         with gr.Tab("版本"):
             revision_button = gr.Button("刷新版本")
