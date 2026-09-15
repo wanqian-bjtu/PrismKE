@@ -41,9 +41,16 @@ def run(
     input_path: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
     schema: Annotated[Path, typer.Option("--schema", exists=True, dir_okay=False)],
     provider: Annotated[str, typer.Option("--provider")] = "mock",
+    ocr_provider: Annotated[str, typer.Option("--ocr-provider")] = "disabled",
+    vlm_provider: Annotated[str, typer.Option("--vlm-provider")] = "disabled",
+    allow_remote_assets: Annotated[bool, typer.Option("--allow-remote-assets")] = False,
 ) -> None:
     """Run the complete PrismKE workflow for one document."""
-    state = asyncio.run(PrismKEService().run(input_path, schema, provider))
+    state = asyncio.run(
+        PrismKEService().run(
+            input_path, schema, provider, ocr_provider, vlm_provider, allow_remote_assets
+        )
+    )
     console.print(f"run_id={state.run_id} status={state.status}")
     _print_model(state)
 
@@ -71,6 +78,27 @@ def resume(run_id: str) -> None:
     state = asyncio.run(PrismKEService().resume(run_id))
     console.print(f"run_id={state.run_id} status={state.status}")
     _print_model(state)
+
+
+@app.command("show-evidence")
+def show_evidence(evidence_id: str) -> None:
+    """Print immutable evidence metadata."""
+    service = PrismKEService()
+    evidence = asyncio.run(service.evidence_store.get(evidence_id))
+    _print_model(evidence)
+
+
+@app.command("export-evidence")
+def export_evidence(
+    evidence_id: str,
+    output: Annotated[Path, typer.Option("--output", dir_okay=False)],
+) -> None:
+    """Export an evidence image or region as PNG/binary data."""
+    service = PrismKEService()
+    payload = asyncio.run(service.evidence_store.crop(evidence_id))
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(payload)
+    console.print(f"evidence exported: {output.resolve()}")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 """Entity and claim governance services."""
 
+from prismke.governance.alignment import MultimodalAlignmentService
 from prismke.governance.claim_normalization import (
     collect_mentions,
     merge_supporting_claims,
@@ -17,4 +18,5 @@ __all__ = [
     "merge_supporting_claims",
     "normalize_claims",
     "route_by_risk",
+    "MultimodalAlignmentService",
 ]

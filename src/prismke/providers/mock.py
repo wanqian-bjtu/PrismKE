@@ -28,13 +28,9 @@ class MockLLMProvider:
                     "object_type": object_type or None,
                     "confidence": float(confidence),
                 }
-                candidates.append(
-                    candidate_from_payload(payload, block.evidence_id, block.text)
-                )
+                candidates.append(candidate_from_payload(payload, block.evidence_id, block.text))
             except (ValueError, KeyError) as exc:
                 warnings.append(f"mock_parse_failed:block={block.id}:{exc}")
-        if request.document.media_assets:
-            warnings.append("mock_vlm_returned_no_visual_claims")
         return ExtractionResult(candidates=candidates, warnings=warnings)
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 from pathlib import Path
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -21,6 +22,18 @@ class EvidenceKind(StrEnum):
     PDF_BBOX = "pdf_bbox"
     IMAGE = "image"
     VISUAL_REGION = "visual_region"
+
+
+class CoordinateSpace(StrEnum):
+    PDF_POINTS = "pdf_points"
+    IMAGE_PIXELS = "image_pixels"
+    NORMALIZED = "normalized"
+
+
+class LocalizationLevel(StrEnum):
+    TEXT_SPAN = "text_span"
+    REGION = "region"
+    ASSET = "asset"
 
 
 class BBox(BaseModel):
@@ -43,6 +56,9 @@ class TextBlock(BaseModel):
     char_end: int | None = None
     bbox: BBox | None = None
     evidence_id: str
+    modality: Modality = Modality.TEXT
+    source_media_asset_id: str | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class MediaAsset(BaseModel):
@@ -53,6 +69,39 @@ class MediaAsset(BaseModel):
     height: int | None = None
     page_number: int | None = None
     evidence_id: str
+    blob_hash: str | None = None
+    origin: Literal[
+        "source_image",
+        "pdf_embedded",
+        "pdf_page_render",
+        "docx_embedded",
+        "html_embedded",
+        "markdown_embedded",
+    ] = "source_image"
+    source_ref: str | None = None
+    context_text: str = ""
+    requires_ocr: bool = False
+
+
+class DocumentPage(BaseModel):
+    id: str
+    page_number: int = Field(ge=1)
+    width: float = Field(gt=0)
+    height: float = Field(gt=0)
+    requires_ocr: bool = False
+    text_block_ids: list[str] = Field(default_factory=list)
+    media_asset_ids: list[str] = Field(default_factory=list)
+
+
+class VisualObservation(BaseModel):
+    id: str
+    media_asset_id: str
+    label: str
+    description: str = ""
+    bbox: BBox | None = None
+    confidence: float = Field(ge=0.0, le=1.0)
+    evidence_id: str
+    attributes: dict[str, Any] = Field(default_factory=dict)
 
 
 class EvidenceRef(BaseModel):
@@ -68,6 +117,10 @@ class EvidenceRef(BaseModel):
     media_asset_id: str | None = None
     model_name: str | None = None
     prompt_version: str | None = None
+    coordinate_space: CoordinateSpace | None = None
+    canvas_width: float | None = Field(default=None, gt=0)
+    canvas_height: float | None = Field(default=None, gt=0)
+    localization_level: LocalizationLevel | None = None
 
 
 class DocumentIR(BaseModel):
@@ -75,7 +128,9 @@ class DocumentIR(BaseModel):
     source_path: str
     source_hash: str
     media_type: str
+    pages: list[DocumentPage] = Field(default_factory=list)
     text_blocks: list[TextBlock] = Field(default_factory=list)
     media_assets: list[MediaAsset] = Field(default_factory=list)
+    visual_observations: list[VisualObservation] = Field(default_factory=list)
     evidence: list[EvidenceRef] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)

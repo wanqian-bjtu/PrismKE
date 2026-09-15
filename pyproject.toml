@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "prismke"
-version = "0.1.1"
+version = "0.2.0"
 description = "Schema-guided, evidence-aware multimodal knowledge graph construction"
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
@@ -17,6 +17,8 @@ dependencies = [
   "langgraph-checkpoint-sqlite>=2,<4",
   "orjson>=3.10,<4",
   "pillow>=11,<13",
+  "beautifulsoup4>=4.13,<5",
+  "python-docx>=1.1,<2",
   "pydantic>=2.10,<3",
   "pydantic-settings>=2.7,<3",
   "pymupdf>=1.25,<2",
@@ -33,6 +35,10 @@ dev = [
   "pytest-cov>=6,<8",
   "ruff>=0.9,<1",
   "types-PyYAML>=6.0,<7",
+]
+ocr = [
+  "paddleocr>=3,<4",
+  "paddlepaddle>=3,<4",
 ]
 
 [project.scripts]

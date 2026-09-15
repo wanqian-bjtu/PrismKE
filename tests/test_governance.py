@@ -199,12 +199,8 @@ def test_symmetric_relation_shares_claim_identity() -> None:
             ],
         )
     )
-    left = EntityMention(
-        id="mention:left", name="A", entity_type="Person", evidence_ids=["ev:1"]
-    )
-    right = EntityMention(
-        id="mention:right", name="B", entity_type="Person", evidence_ids=["ev:1"]
-    )
+    left = EntityMention(id="mention:left", name="A", entity_type="Person", evidence_ids=["ev:1"])
+    right = EntityMention(id="mention:right", name="B", entity_type="Person", evidence_ids=["ev:1"])
     candidates = [
         CandidateClaim(
             id="candidate:1",

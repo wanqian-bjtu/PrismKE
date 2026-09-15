@@ -23,7 +23,7 @@ from prismke.domain import (
 from prismke.parsing import ParserRegistry
 from prismke.parsing.adapters import TextParser
 from prismke.persistence import FileEvidenceStore, JSONGraphStore, RunRepository
-from prismke.providers import MockLLMProvider
+from prismke.providers import DisabledOCRProvider, DisabledVLMProvider, MockLLMProvider
 from prismke.workflow import PrismKEService, PrismKEWorkflow
 from prismke.workflow.nodes import WorkflowNodes
 
@@ -105,6 +105,8 @@ async def test_failed_node_resumes_without_repeating_parser(
     runs.save(state)
     workflow = PrismKEWorkflow(
         provider,
+        DisabledOCRProvider(),
+        DisabledVLMProvider(),
         JSONGraphStore(runtime / "graph"),
         FileEvidenceStore(runtime / "evidence"),
         runtime / "checkpoints.sqlite3",
@@ -113,7 +115,7 @@ async def test_failed_node_resumes_without_repeating_parser(
     )
     with pytest.raises(RuntimeError, match="simulated provider outage"):
         await workflow.invoke(state)
-    assert runs.load(state.run_id).failed_node == "extract_claims"
+    assert runs.load(state.run_id).failed_node == "extract_text_claims"
     recovered = await workflow.resume(state.run_id)
     assert recovered is not None
     assert recovered.status == "completed"
@@ -141,6 +143,8 @@ async def test_commit_rejects_missing_evidence(tmp_path: Path) -> None:
     graph_store = JSONGraphStore(tmp_path / "graph")
     nodes = WorkflowNodes(
         MockLLMProvider(),
+        DisabledOCRProvider(),
+        DisabledVLMProvider(),
         graph_store,
         FileEvidenceStore(tmp_path / "evidence"),
         ParserRegistry(),

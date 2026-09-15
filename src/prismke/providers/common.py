@@ -9,7 +9,13 @@ from prismke.domain import CandidateClaim, EntityMention, Modality
 
 
 def candidate_from_payload(
-    item: dict[str, Any], evidence_id: str, context: str
+    item: dict[str, Any],
+    evidence_id: str,
+    context: str,
+    *,
+    modality: Modality = Modality.TEXT,
+    source_tool: str = "text_extraction",
+    visual_observation_ids: list[str] | None = None,
 ) -> CandidateClaim:
     subject_name = str(item["subject"]).strip()
     object_name = str(item["object"]).strip()
@@ -20,7 +26,7 @@ def candidate_from_payload(
         name=subject_name,
         entity_type=subject_type,
         context=context,
-        modality=Modality.TEXT,
+        modality=modality,
         evidence_ids=[evidence_id],
     )
     if object_type:
@@ -29,7 +35,7 @@ def candidate_from_payload(
             name=object_name,
             entity_type=str(object_type),
             context=context,
-            modality=Modality.TEXT,
+            modality=modality,
             evidence_ids=[evidence_id],
         )
     else:
@@ -43,4 +49,7 @@ def candidate_from_payload(
         confidence=float(item.get("confidence", 0.5)),
         evidence_ids=[evidence_id],
         qualifiers=dict(item.get("qualifiers", {})),
+        modalities=[modality],
+        source_tool=source_tool,
+        visual_observation_ids=visual_observation_ids or [],
     )

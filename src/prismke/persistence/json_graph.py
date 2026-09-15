@@ -66,9 +66,7 @@ class JSONGraphStore:
         merged.confidence = max(merged.confidence, incoming.confidence)
         return merged
 
-    def _apply(
-        self, data: dict[str, Any], transaction: GraphCommit
-    ) -> tuple[dict[str, Any], bool]:
+    def _apply(self, data: dict[str, Any], transaction: GraphCommit) -> tuple[dict[str, Any], bool]:
         revisions = data["revisions"]
         existing_revision = next(
             (item for item in revisions if item["id"] == transaction.revision.id), None

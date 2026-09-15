@@ -28,9 +28,7 @@ def _oriented_claims(claim: Claim, schema: SchemaIndex) -> list[tuple[str, str, 
     result = [(claim.subject_id, claim.relation_id, _object_key(claim), claim)]
     relation = schema.relation_by_id(claim.relation_id)
     if relation and relation.inverse_relation and claim.object_entity_id:
-        result.append(
-            (claim.object_entity_id, relation.inverse_relation, claim.subject_id, claim)
-        )
+        result.append((claim.object_entity_id, relation.inverse_relation, claim.subject_id, claim))
     return result
 
 

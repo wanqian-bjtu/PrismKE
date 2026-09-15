@@ -78,9 +78,7 @@ class OutputSchema(BaseModel):
             if relation.inverse_relation is not None:
                 inverse = known_relations.get(relation.inverse_relation)
                 if inverse is None:
-                    raise ValueError(
-                        f"relation {relation.id} references unknown inverse relation"
-                    )
+                    raise ValueError(f"relation {relation.id} references unknown inverse relation")
                 if inverse.inverse_relation != relation.id:
                     raise ValueError(
                         f"inverse relation {inverse.id} must point back to {relation.id}"

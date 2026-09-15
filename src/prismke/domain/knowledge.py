@@ -53,6 +53,19 @@ class CandidateClaim(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     evidence_ids: list[str] = Field(min_length=1)
     qualifiers: dict[str, Any] = Field(default_factory=dict)
+    modalities: list[Modality] = Field(default_factory=lambda: [Modality.TEXT])
+    source_tool: str = "text_extraction"
+    visual_observation_ids: list[str] = Field(default_factory=list)
+
+
+class AlignmentRecord(BaseModel):
+    id: str
+    candidate_ids: list[str] = Field(min_length=1)
+    modalities: list[Modality] = Field(min_length=1)
+    decision: Literal["support", "conflict", "related", "independent"]
+    confidence_before: list[float] = Field(default_factory=list)
+    confidence_after: float | None = Field(default=None, ge=0.0, le=1.0)
+    reasons: list[str] = Field(default_factory=list)
 
 
 class Claim(BaseModel):

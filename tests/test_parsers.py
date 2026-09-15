@@ -48,12 +48,12 @@ async def test_scanned_pdf_is_marked_for_ocr(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_image_becomes_evidence_asset(tmp_path: Path) -> None:
     path = tmp_path / "image.png"
-    Image.new("RGB", (32, 16), "white").save(path)
+    Image.new("RGB", (128, 96), "white").save(path)
     document = await ParserRegistry().parse(SourceDocument(path=path))
-    assert document.media_assets[0].width == 32
-    assert document.media_assets[0].height == 16
+    assert document.media_assets[0].width == 128
+    assert document.media_assets[0].height == 96
     assert document.evidence[0].kind == EvidenceKind.IMAGE
-    assert "visual_extraction_not_enabled" in document.warnings
+    assert document.media_assets[0].requires_ocr
 
 
 @pytest.mark.asyncio

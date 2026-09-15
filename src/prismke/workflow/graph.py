@@ -13,7 +13,7 @@ from prismke.parsing import ParserRegistry
 from prismke.persistence.base import EvidenceStore, GraphStore
 from prismke.persistence.checkpoints import open_checkpointer
 from prismke.persistence.runs import RunRepository
-from prismke.providers.base import LLMProvider
+from prismke.providers.base import LLMProvider, OCRProvider, VLMProvider
 from prismke.workflow.nodes import WorkflowNodes
 
 
@@ -28,6 +28,8 @@ class PrismKEWorkflow:
     def __init__(
         self,
         provider: LLMProvider,
+        ocr_provider: OCRProvider,
+        vlm_provider: VLMProvider,
         graph_store: GraphStore,
         evidence_store: EvidenceStore,
         checkpoint_path: Path,
@@ -37,7 +39,12 @@ class PrismKEWorkflow:
         self.checkpoint_path = checkpoint_path
         self.runs = runs
         self.nodes = WorkflowNodes(
-            provider, graph_store, evidence_store, parsers or ParserRegistry()
+            provider,
+            ocr_provider,
+            vlm_provider,
+            graph_store,
+            evidence_store,
+            parsers or ParserRegistry(),
         )
 
     @staticmethod
@@ -78,9 +85,13 @@ class PrismKEWorkflow:
         ordered = [
             ("ingest", self.nodes.ingest),
             ("parse_document", self.nodes.parse_document),
+            ("materialize_visual_assets", self.nodes.materialize_visual_assets),
+            ("run_ocr", self.nodes.run_ocr),
             ("persist_evidence", self.nodes.persist_evidence),
             ("load_schema", self.nodes.load_schema),
-            ("extract_claims", self.nodes.extract_claims),
+            ("extract_text_claims", self.nodes.extract_text_claims),
+            ("extract_visual_claims", self.nodes.extract_visual_claims),
+            ("align_modalities", self.nodes.align_modalities),
             ("resolve_entities", self.nodes.resolve_entities),
             ("normalize_claims", self.nodes.normalize_claims),
             ("detect_conflicts", self.nodes.detect_conflicts),

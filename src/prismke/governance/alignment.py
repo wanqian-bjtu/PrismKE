@@ -1,0 +1,114 @@
+"""Deterministic, auditable cross-modal candidate alignment."""
+
+from __future__ import annotations
+
+from collections import defaultdict
+
+from prismke.core.ids import stable_id
+from prismke.domain import (
+    AlignmentRecord,
+    CandidateClaim,
+    EntityMention,
+    Modality,
+    SchemaIndex,
+    normalize_label,
+)
+
+
+def _object_key(candidate: CandidateClaim) -> str:
+    value = (
+        candidate.object.name if isinstance(candidate.object, EntityMention) else candidate.object
+    )
+    return normalize_label(value)
+
+
+def _signature(candidate: CandidateClaim, schema: SchemaIndex) -> tuple[str, str, str]:
+    relation = schema.relation(candidate.relation)
+    return (
+        normalize_label(candidate.subject.name),
+        relation.id if relation else normalize_label(candidate.relation),
+        _object_key(candidate),
+    )
+
+
+class MultimodalAlignmentService:
+    def align(
+        self,
+        text_candidates: list[CandidateClaim],
+        visual_candidates: list[CandidateClaim],
+        schema: SchemaIndex,
+    ) -> tuple[list[CandidateClaim], list[AlignmentRecord]]:
+        all_candidates = [*text_candidates, *visual_candidates]
+        groups: dict[tuple[str, str, str], list[CandidateClaim]] = defaultdict(list)
+        for candidate in all_candidates:
+            groups[_signature(candidate, schema)].append(candidate)
+        aligned: list[CandidateClaim] = []
+        records: list[AlignmentRecord] = []
+        for signature, members in groups.items():
+            modalities = sorted({modality for item in members for modality in item.modalities})
+            cross_modal = Modality.IMAGE in modalities and bool(
+                {Modality.TEXT, Modality.OCR} & set(modalities)
+            )
+            if len(members) == 1:
+                aligned.append(members[0])
+                records.append(
+                    AlignmentRecord(
+                        id=stable_id("alignment", members[0].id),
+                        candidate_ids=[members[0].id],
+                        modalities=modalities,
+                        decision="independent",
+                        confidence_before=[members[0].confidence],
+                        confidence_after=members[0].confidence,
+                        reasons=["no_equivalent_candidate"],
+                    )
+                )
+                continue
+            primary = members[0].model_copy(deep=True)
+            primary.evidence_ids = sorted(
+                {value for item in members for value in item.evidence_ids}
+            )
+            primary.visual_observation_ids = sorted(
+                {value for item in members for value in item.visual_observation_ids}
+            )
+            primary.modalities = modalities
+            primary.confidence = min(
+                0.99, max(item.confidence for item in members) + (0.05 if cross_modal else 0.0)
+            )
+            primary.id = stable_id("candidate", *signature, *sorted(item.id for item in members))
+            primary.qualifiers = dict(primary.qualifiers)
+            primary.qualifiers["cross_modal_support"] = cross_modal
+            aligned.append(primary)
+            records.append(
+                AlignmentRecord(
+                    id=stable_id("alignment", *sorted(item.id for item in members)),
+                    candidate_ids=[item.id for item in members],
+                    modalities=modalities,
+                    decision="support",
+                    confidence_before=[item.confidence for item in members],
+                    confidence_after=primary.confidence,
+                    reasons=["canonical_candidate_signature_match"],
+                )
+            )
+        by_subject_relation: dict[tuple[str, str], list[CandidateClaim]] = defaultdict(list)
+        for candidate in all_candidates:
+            sig = _signature(candidate, schema)
+            by_subject_relation[sig[:2]].append(candidate)
+        for members in by_subject_relation.values():
+            objects = {_object_key(item) for item in members}
+            modalities = {modality for item in members for modality in item.modalities}
+            if (
+                len(objects) > 1
+                and Modality.IMAGE in modalities
+                and ({Modality.TEXT, Modality.OCR} & modalities)
+            ):
+                records.append(
+                    AlignmentRecord(
+                        id=stable_id("alignment-conflict", *sorted(item.id for item in members)),
+                        candidate_ids=[item.id for item in members],
+                        modalities=sorted(modalities),
+                        decision="conflict",
+                        confidence_before=[item.confidence for item in members],
+                        reasons=["same_subject_relation_different_object"],
+                    )
+                )
+        return aligned, records

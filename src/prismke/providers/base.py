@@ -7,6 +7,8 @@ from typing import Protocol
 from prismke.domain import (
     ExtractionRequest,
     ExtractionResult,
+    OCRRequest,
+    OCRResult,
     VisualExtractionRequest,
 )
 
@@ -21,3 +23,9 @@ class VLMProvider(Protocol):
     def fingerprint(self) -> str: ...
 
     async def extract(self, request: VisualExtractionRequest) -> ExtractionResult: ...
+
+
+class OCRProvider(Protocol):
+    def fingerprint(self) -> str: ...
+
+    async def recognize(self, request: OCRRequest) -> OCRResult: ...

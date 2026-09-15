@@ -2,15 +2,20 @@
 
 from prismke.domain.documents import (
     BBox,
+    CoordinateSpace,
     DocumentIR,
+    DocumentPage,
     EvidenceKind,
     EvidenceRef,
+    LocalizationLevel,
     MediaAsset,
     Modality,
     SourceDocument,
     TextBlock,
+    VisualObservation,
 )
 from prismke.domain.knowledge import (
+    AlignmentRecord,
     CandidateClaim,
     CanonicalEntity,
     Claim,
@@ -35,6 +40,8 @@ from prismke.domain.schema import (
 from prismke.domain.workflow import (
     ExtractionRequest,
     ExtractionResult,
+    OCRRequest,
+    OCRResult,
     ResolutionDecision,
     VisualExtractionRequest,
     WorkflowState,
@@ -42,6 +49,13 @@ from prismke.domain.workflow import (
 
 __all__ = [
     "BBox",
+    "CoordinateSpace",
+    "DocumentPage",
+    "LocalizationLevel",
+    "VisualObservation",
+    "AlignmentRecord",
+    "OCRRequest",
+    "OCRResult",
     "CandidateClaim",
     "CanonicalEntity",
     "Claim",
