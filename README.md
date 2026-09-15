@@ -2,7 +2,7 @@
 
 PrismKE 是一个面向通用多模态知识图谱构建的研究型项目，目标是实现模式引导、证据感知、可审核和可持续更新的知识抽取流程。
 
-当前稳定版本为 `v0.2.1`，`dev/v0.3` 分支正在开发图谱服务化能力。稳定版在 v0.1.1 的可信写图基础上加入真实 OCR、OpenAI-compatible VLM、文档内图片解析、视觉观察和跨模态事实对齐，并完成阿里云百炼真实多模态联调。
+当前稳定版本为 `v0.2.1`，`dev/v0.3` 分支正在开发图谱服务化能力。开发版已经接入 Neo4j、版本差异与补偿回滚、FastAPI、Gradio 研究工作台和 Docker Compose，尚未发布为稳定版本。
 
 ## 当前能力
 
@@ -48,6 +48,8 @@ PrismKE 是一个面向通用多模态知识图谱构建的研究型项目，目
 - 实体、Claim、冲突集合和不可变 Revision 在一个事务中提交。
 - 原始文件按 SHA-256 保存，Claim 的每个证据引用均可独立读取和校验。
 - LangGraph SQLite Checkpointer 保存节点状态，失败恢复不会重复已经成功的节点。
+- `dev/v0.3` 可切换 JSON 或 Neo4j GraphStore，并提供版本差异和补偿回滚。
+- `dev/v0.3` 提供 `/api/v1` HTTP API 和挂载在 `/ui` 的 Gradio 研究工作台。
 
 ## 处理流程
 
@@ -85,6 +87,12 @@ uv sync --extra dev
 
 ```bash
 uv sync --extra dev --extra ocr
+```
+
+开发 v0.3 图谱与 Web 服务时安装：
+
+```bash
+uv sync --extra dev --extra neo4j --extra web
 ```
 
 在当前 AutoDL 服务器上，环境路径为：
@@ -229,6 +237,39 @@ prismke show-evidence EVIDENCE_ID
 prismke export-evidence EVIDENCE_ID --output evidence.png
 ```
 
+## Neo4j 与 Web 服务
+
+在 `.env` 中设置图存储和本机监听参数：
+
+```text
+PRISMKE_GRAPH_STORE=neo4j
+PRISMKE_NEO4J_URI=bolt://127.0.0.1:7687
+PRISMKE_NEO4J_USER=neo4j
+PRISMKE_NEO4J_PASSWORD=
+PRISMKE_NEO4J_DATABASE=neo4j
+PRISMKE_API_HOST=127.0.0.1
+PRISMKE_API_PORT=8000
+```
+
+启动服务：
+
+```bash
+prismke serve
+```
+
+API 位于 `http://127.0.0.1:8000/api/v1`，研究界面位于
+`http://127.0.0.1:8000/ui`。服务器保持本机监听，通过 SSH 端口转发访问。若改为非本地监听，必须设置 `PRISMKE_API_TOKEN`。
+
+JSON 图谱迁移预检与执行：
+
+```bash
+prismke migrate-graph --from-json runtime/graph/graph.json --to neo4j --dry-run
+prismke migrate-graph --from-json runtime/graph/graph.json --to neo4j
+```
+
+AutoDL 原生安装、Docker Compose、接口和回滚操作详见
+[`docs/PrismKE-v0.3-部署与操作.md`](docs/PrismKE-v0.3-部署与操作.md)。
+
 ## 运行产物
 
 运行数据默认写入 `runtime/`，该目录不会提交到 Git：
@@ -258,14 +299,12 @@ pytest
 
 ## 当前边界
 
-v0.2.0 尚未实现以下能力：
+当前尚未实现以下能力：
 
-- Neo4j 正式写入。
-- FastAPI 和 Gradio 页面。
-- Docker Compose 部署。
 - 表格和图表语义解析。
 - 向量召回、复杂实体消歧和 MSPT 式持续学习。
 - 本地 VLM 与结构化表格/图表数值解析。
+- 多租户、细粒度权限和面向公网的生产级任务队列。
 
 图片作为证据资产，而不是默认作为领域实体。VLM 从整图或图片区域生成 `VisualObservation`，其中识别出的真实领域对象才会链接到 `CanonicalEntity`。区域定位不可用时会保留整图证据并降低自动提交权限。
 

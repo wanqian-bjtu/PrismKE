@@ -2,6 +2,22 @@
 
 本项目遵循语义化版本管理。
 
+## 未发布 - v0.3.0
+
+### 新增
+
+- JSON 与 Neo4j 可配置 GraphStore，以及 JSON 到 Neo4j 的幂等迁移命令。
+- `GraphDocument`、`GraphChange`、Revision diff 和补偿回滚协议。
+- FastAPI 任务、证据、审核、邻域、版本和健康检查接口。
+- Gradio 文档构建、Claim 审核、证据定位、图谱与版本工作台。
+- AutoDL 原生 Neo4j 安装脚本、Dockerfile 和 Docker Compose。
+
+### 安全
+
+- 非本机 API 监听强制要求 Bearer Token。
+- 图数据库不保存服务器绝对路径，页面不接收或展示模型 API Key。
+- 审核和回滚操作写入追加式审计日志。
+
 ## v0.2.1 - 2026-09-16
 
 ### 新增

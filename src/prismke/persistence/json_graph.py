@@ -260,6 +260,8 @@ class JSONGraphStore:
                     "legacy revision has no snapshots and cannot be rolled back"
                 )
             latest = GraphRevision.model_validate(data["revisions"][-1])
+            if latest.run_id == f"rollback:{revision_id}":
+                return latest
             timestamp = datetime.now(UTC)
             inverse: list[GraphChange] = []
             for change in reversed(target.changes):

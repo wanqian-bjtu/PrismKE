@@ -100,6 +100,11 @@ class Neo4jGraphStore:
     @staticmethod
     async def _commit_tx(tx: Any, transaction: GraphCommit) -> None:
         result = await tx.run(
+            "MERGE (h:GraphHead {id: 'singleton'}) "
+            "SET h.lock_nonce=randomUUID() RETURN h.latest_id AS latest_id"
+        )
+        head = await result.single()
+        result = await tx.run(
             "MATCH (r:Revision {id: $id}) RETURN r.payload AS payload", id=transaction.revision.id
         )
         record = await result.single()
@@ -109,11 +114,13 @@ class Neo4jGraphStore:
                     f"revision id already exists with different content: {transaction.revision.id}"
                 )
             return
-        result = await tx.run(
-            "MATCH (r:Revision) RETURN r.id AS id ORDER BY r.created_at DESC LIMIT 1"
-        )
-        latest = await result.single()
-        latest_id = latest["id"] if latest is not None else None
+        latest_id = head["latest_id"] if head is not None else None
+        if latest_id is None:
+            result = await tx.run(
+                "MATCH (r:Revision) RETURN r.id AS id ORDER BY r.created_at DESC LIMIT 1"
+            )
+            latest = await result.single()
+            latest_id = latest["id"] if latest is not None else None
         if transaction.revision.parent_id != latest_id:
             raise GraphIntegrityError(
                 f"revision parent mismatch: expected {latest_id}, "
@@ -142,6 +149,22 @@ class Neo4jGraphStore:
                 payload=_dump(evidence),
             )
         for entity in transaction.entities:
+            if not entity.active:
+                closing_claim_ids = [
+                    claim.id for claim in transaction.claims if claim.tx_to is not None
+                ]
+                result = await tx.run(
+                    "MATCH (e:Entity {id: $id})<-[:SUBJECT|OBJECT]-(c:Claim) "
+                    "WHERE c.tx_to IS NULL AND NOT c.id IN $closing_claim_ids "
+                    "RETURN count(c) AS active_count",
+                    id=entity.id,
+                    closing_claim_ids=closing_claim_ids,
+                )
+                record = await result.single()
+                if record is not None and record["active_count"]:
+                    raise GraphIntegrityError(
+                        f"entity {entity.id} still has active claim references"
+                    )
             await tx.run(
                 "MERGE (n:Entity {id: $id}) "
                 "SET n.name=$name, n.entity_type=$entity_type, n.active=$active, "
@@ -176,6 +199,8 @@ class Neo4jGraphStore:
                 "MERGE (c:Claim {id: $id}) "
                 "SET c.relation_id=$relation_id, c.status=$status, c.tx_from=$tx_from, "
                 "c.tx_to=$tx_to, c.payload=$payload "
+                "WITH c, s OPTIONAL MATCH (c)-[old:SUBJECT|OBJECT|SUPPORTED_BY]->() "
+                "DELETE old "
                 "MERGE (c)-[:SUBJECT]->(s)",
                 subject_id=claim.subject_id,
                 id=claim.id,
@@ -246,6 +271,10 @@ class Neo4jGraphStore:
                 change_id=change_id,
                 resource_id=change.resource_id,
             )
+        await tx.run(
+            "MATCH (h:GraphHead {id: 'singleton'}) SET h.latest_id=$revision_id",
+            revision_id=revision.id,
+        )
 
     async def commit(self, transaction: GraphCommit) -> None:
         await self._ensure_schema()
@@ -297,16 +326,15 @@ class Neo4jGraphStore:
         if depth < 1 or depth > 3:
             raise ValueError("depth must be between 1 and 3")
         async with self.driver.session(database=self.database) as session:
+            hops = depth * 2
             result = await session.run(
                 "MATCH (center:Entity {id: $id}) "
-                "OPTIONAL MATCH path=(center)<-[:SUBJECT|OBJECT]-(:Claim)"
-                "-[:SUBJECT|OBJECT]->(e:Entity) "
-                "WHERE length(path) <= $path_depth "
-                "WITH center, collect(DISTINCT e.payload) AS entities, "
-                "collect(DISTINCT nodes(path)[1].payload) AS claims "
+                f"OPTIONAL MATCH (center)-[:SUBJECT|OBJECT*1..{hops}]-(n) "
+                "WITH center, "
+                "collect(DISTINCT CASE WHEN n:Entity THEN n.payload END) AS entities, "
+                "collect(DISTINCT CASE WHEN n:Claim THEN n.payload END) AS claims "
                 "RETURN center.payload AS center, entities, claims",
                 id=entity_id,
-                path_depth=depth * 2,
             )
             record = await result.single()
         if record is None:
@@ -346,6 +374,8 @@ class Neo4jGraphStore:
             raise GraphIntegrityError("legacy revision has no snapshots and cannot be rolled back")
         latest = await self.latest_revision()
         assert latest is not None
+        if latest.run_id == f"rollback:{revision_id}":
+            return latest
         entities: list[CanonicalEntity] = []
         claims: list[Claim] = []
         conflicts: list[ConflictSet] = []

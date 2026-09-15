@@ -10,6 +10,7 @@ from typing import Annotated
 from uuid import uuid4
 
 from fastapi import (
+    APIRouter,
     BackgroundTasks,
     Depends,
     FastAPI,
@@ -75,7 +76,7 @@ def create_app(
                 detail="invalid API token",
             )
 
-    api = FastAPI(dependencies=[Depends(authorize)])
+    api = APIRouter(prefix="/api/v1", dependencies=[Depends(authorize)])
 
     async def execute_safely(run_id: str) -> None:
         try:
@@ -88,14 +89,14 @@ def create_app(
     async def create_run(
         background_tasks: BackgroundTasks,
         document: Annotated[UploadFile, File()],
-        schema: Annotated[UploadFile, File()],
+        schema_file: Annotated[UploadFile, File(alias="schema")],
         provider: Annotated[str, Form()] = "mock",
         ocr_provider: Annotated[str, Form()] = "disabled",
         vlm_provider: Annotated[str, Form()] = "disabled",
         allow_remote_assets: Annotated[bool, Form()] = False,
     ) -> RunAccepted:
         document_path = await _save_upload(document, settings.uploads_dir / "documents")
-        schema_path = await _save_upload(schema, settings.uploads_dir / "schemas")
+        schema_path = await _save_upload(schema_file, settings.uploads_dir / "schemas")
         state, created = service.create_run(
             document_path,
             schema_path,
@@ -202,7 +203,7 @@ def create_app(
         graph = await service.graph_store.healthcheck()
         return {"status": "ok" if graph.healthy else "degraded", "graph": graph}
 
-    app.mount("/api/v1", api)
+    app.include_router(api)
     if mount_ui:
         try:
             from prismke.web.app import mount_gradio
