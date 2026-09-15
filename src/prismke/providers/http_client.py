@@ -54,8 +54,9 @@ def _record(
 ) -> ProviderCallRecord:
     payload = payload or {}
     input_tokens, output_tokens, total_tokens = _usage(payload)
+    response_model = str(payload["model"]) if payload.get("model") else None
     estimated_cost, snapshot = estimate_cost_cny(
-        requested_model, input_tokens, output_tokens
+        response_model or requested_model, input_tokens, output_tokens
     )
     request_id = payload.get("id")
     return ProviderCallRecord(
@@ -71,7 +72,7 @@ def _record(
         provider=provider,
         operation_id=operation_id,
         requested_model=requested_model,
-        response_model=str(payload["model"]) if payload.get("model") else None,
+        response_model=response_model,
         request_id=str(request_id) if request_id else None,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
