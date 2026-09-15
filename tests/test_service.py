@@ -57,6 +57,11 @@ def test_same_key_can_configure_text_and_visual_providers(tmp_path: Path) -> Non
     assert visual_provider.model == "qwen3.7-flash"
 
 
+def test_service_reuses_ocr_provider_instance(tmp_path: Path) -> None:
+    service = PrismKEService(Settings(runtime_dir=tmp_path / "runtime"))
+    assert service.ocr_provider("paddle") is service.ocr_provider("paddle")
+
+
 @pytest.mark.asyncio
 async def test_run_id_depends_on_content_not_path_or_mtime(
     tmp_path: Path, schema_path: Path

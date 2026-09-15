@@ -74,13 +74,18 @@ class PaddleOCRProvider:
         return nested if isinstance(nested, dict) else {}
 
     def _recognize_sync(self, request: OCRRequest) -> OCRResult:
-        engine = self._get_engine()
         blocks: list[TextBlock] = []
         evidence: list[EvidenceRef] = []
         warnings: list[str] = []
-        for asset in select_analysis_assets(request.document):
-            if asset.origin == "pdf_page_render" and not asset.requires_ocr:
-                continue
+        assets = [
+            asset
+            for asset in select_analysis_assets(request.document)
+            if not (asset.origin == "pdf_page_render" and not asset.requires_ocr)
+        ]
+        if not assets:
+            return OCRResult()
+        engine = self._get_engine()
+        for asset in assets:
             try:
                 for result_index, result in enumerate(engine.predict(asset.path)):
                     payload = self._payload(result)

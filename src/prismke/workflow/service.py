@@ -35,6 +35,7 @@ class PrismKEService:
         self.runs = RunRepository(self.settings.runs_dir)
         self.graph_store = JSONGraphStore(self.settings.graph_dir)
         self.evidence_store = FileEvidenceStore(self.settings.evidence_dir)
+        self._ocr_providers: dict[str, OCRProvider] = {}
 
     @staticmethod
     def _validate_endpoint(value: str, variable: str) -> None:
@@ -68,17 +69,23 @@ class PrismKEService:
         )
 
     def ocr_provider(self, name: str) -> OCRProvider:
+        cached = self._ocr_providers.get(name)
+        if cached is not None:
+            return cached
         if name == "disabled":
-            return DisabledOCRProvider()
-        if name == "mock":
-            return MockOCRProvider()
-        if name == "paddle":
-            return PaddleOCRProvider(
+            provider: OCRProvider = DisabledOCRProvider()
+        elif name == "mock":
+            provider = MockOCRProvider()
+        elif name == "paddle":
+            provider = PaddleOCRProvider(
                 device=self.settings.ocr_device,
                 lang=self.settings.ocr_lang,
                 model=self.settings.ocr_model,
             )
-        raise ProviderConfigurationError(f"unknown OCR provider: {name}")
+        else:
+            raise ProviderConfigurationError(f"unknown OCR provider: {name}")
+        self._ocr_providers[name] = provider
+        return provider
 
     def vlm_provider(self, name: str) -> VLMProvider:
         if name == "disabled":

@@ -296,6 +296,29 @@ async def test_paddle_provider_converts_lines_to_bbox(tmp_path: Path) -> None:
     assert result.evidence[0].bbox == BBox(x0=10, y0=20, x1=90, y1=50)
 
 
+@pytest.mark.asyncio
+async def test_paddle_provider_skips_engine_for_document_without_assets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = PaddleOCRProvider()
+
+    def unexpected_engine() -> object:
+        raise AssertionError("OCR engine should not initialize")
+
+    monkeypatch.setattr(provider, "_get_engine", unexpected_engine)
+    result = await provider.recognize(
+        OCRRequest(
+            document=DocumentIR(
+                id="doc:text-only",
+                source_path="text.md",
+                source_hash="d" * 64,
+                media_type="text/markdown",
+            )
+        )
+    )
+    assert result.text_blocks == []
+
+
 def test_scanned_pdf_render_suppresses_duplicate_embedded_asset() -> None:
     embedded = MediaAsset(
         id="media:embedded",

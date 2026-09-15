@@ -93,6 +93,10 @@ class WorkflowNodes:
 
     async def extract_text_claims(self, state: WorkflowState) -> WorkflowState:
         assert state.document is not None and state.output_schema is not None
+        if not state.document.text_blocks:
+            state.text_candidates = []
+            state.warnings.append("text_extraction_skipped:no_text_blocks")
+            return state
         result = await self.provider.extract(
             ExtractionRequest(document=state.document, output_schema=state.output_schema)
         )
