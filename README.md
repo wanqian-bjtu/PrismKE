@@ -2,7 +2,7 @@
 
 PrismKE 是一个面向通用多模态知识图谱构建的研究型项目，目标是实现模式引导、证据感知、可审核和可持续更新的知识抽取流程。
 
-当前稳定版本为 `v0.2.1`，`dev/v0.3` 分支正在开发图谱服务化能力。开发版已经接入 Neo4j、版本差异与补偿回滚、FastAPI、Gradio 研究工作台和 Docker Compose，尚未发布为稳定版本。
+当前稳定版本为 `v0.3.0`，已经接入 Neo4j、版本差异与补偿回滚、FastAPI、Gradio 研究工作台和 Docker Compose。
 
 ## 当前能力
 
@@ -48,8 +48,8 @@ PrismKE 是一个面向通用多模态知识图谱构建的研究型项目，目
 - 实体、Claim、冲突集合和不可变 Revision 在一个事务中提交。
 - 原始文件按 SHA-256 保存，Claim 的每个证据引用均可独立读取和校验。
 - LangGraph SQLite Checkpointer 保存节点状态，失败恢复不会重复已经成功的节点。
-- `dev/v0.3` 可切换 JSON 或 Neo4j GraphStore，并提供版本差异和补偿回滚。
-- `dev/v0.3` 提供 `/api/v1` HTTP API 和挂载在 `/ui` 的 Gradio 研究工作台。
+- 可切换 JSON 或 Neo4j GraphStore，并提供版本差异和补偿回滚。
+- 提供 `/api/v1` HTTP API 和挂载在 `/ui` 的 Gradio 研究工作台。
 
 ## 处理流程
 
