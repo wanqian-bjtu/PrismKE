@@ -19,6 +19,8 @@ from prismke.workflow.nodes import WorkflowNodes
 
 class GraphState(TypedDict, total=False):
     payload: dict[str, Any]
+    text_branch: dict[str, Any]
+    visual_branch: dict[str, Any]
 
 
 Node = Callable[[GraphState], Awaitable[GraphState]]
@@ -75,6 +77,53 @@ class PrismKEWorkflow:
 
         return wrapped
 
+    def _branch_node(
+        self,
+        name: str,
+        output_key: str,
+        handler: Callable[[WorkflowState], Awaitable[WorkflowState]],
+    ) -> Node:
+        async def wrapped(graph_state: GraphState) -> GraphState:
+            state = self._state(graph_state).model_copy(deep=True)
+            try:
+                state = await handler(state)
+            except Exception as exc:
+                state.status = "failed"
+                state.failed_node = name
+                state.current_node = name
+                state.retry_count += 1
+                state.errors.append(f"{name}:{type(exc).__name__}:{exc}")
+                self.runs.save(state)
+                raise
+            return cast(GraphState, {output_key: state.model_dump(mode="json")})
+
+        return wrapped
+
+    async def _join_modalities(self, graph_state: GraphState) -> GraphState:
+        state = self._state(graph_state)
+        text_state = WorkflowState.model_validate(graph_state["text_branch"])
+        visual_state = WorkflowState.model_validate(graph_state["visual_branch"])
+        state.text_candidates = text_state.text_candidates
+        state.visual_candidates = visual_state.visual_candidates
+        state.document = visual_state.document
+        state.warnings = list(
+            dict.fromkeys([*state.warnings, *text_state.warnings, *visual_state.warnings])
+        )
+        try:
+            state = await self.nodes.align_modalities(state)
+        except Exception as exc:
+            state.status = "failed"
+            state.failed_node = "align_modalities"
+            state.current_node = "align_modalities"
+            state.retry_count += 1
+            state.errors.append(f"align_modalities:{type(exc).__name__}:{exc}")
+            self.runs.save(state)
+            raise
+        state.current_node = "align_modalities"
+        state.failed_node = None
+        self.runs.save(state)
+        return {"payload": state.model_dump(mode="json")}
+
     @staticmethod
     def _after_risk(graph_state: GraphState) -> str:
         state = PrismKEWorkflow._state(graph_state)
@@ -82,23 +131,43 @@ class PrismKEWorkflow:
 
     def _build_graph(self, checkpointer: Any) -> Any:
         builder = StateGraph(GraphState)
-        ordered = [
+        before_extraction = [
             ("ingest", self.nodes.ingest),
             ("parse_document", self.nodes.parse_document),
             ("materialize_visual_assets", self.nodes.materialize_visual_assets),
             ("run_ocr", self.nodes.run_ocr),
             ("persist_evidence", self.nodes.persist_evidence),
             ("load_schema", self.nodes.load_schema),
-            ("extract_text_claims", self.nodes.extract_text_claims),
-            ("extract_visual_claims", self.nodes.extract_visual_claims),
-            ("align_modalities", self.nodes.align_modalities),
+        ]
+        after_extraction = [
             ("resolve_entities", self.nodes.resolve_entities),
             ("normalize_claims", self.nodes.normalize_claims),
             ("detect_conflicts", self.nodes.detect_conflicts),
             ("route_by_risk", self.nodes.route_by_risk),
         ]
-        for name, handler in ordered:
+        for name, handler in [*before_extraction, *after_extraction]:
             builder.add_node(name, cast(Any, self._node(name, handler)))
+        builder.add_node(
+            "extract_text_claims",
+            cast(
+                Any,
+                self._branch_node(
+                    "extract_text_claims", "text_branch", self.nodes.extract_text_claims
+                ),
+            ),
+        )
+        builder.add_node(
+            "extract_visual_claims",
+            cast(
+                Any,
+                self._branch_node(
+                    "extract_visual_claims",
+                    "visual_branch",
+                    self.nodes.extract_visual_claims,
+                ),
+            ),
+        )
+        builder.add_node("align_modalities", cast(Any, self._join_modalities))
         builder.add_node(
             "prepare_graph_commit",
             cast(Any, self._node("prepare_graph_commit", self.nodes.prepare_graph_commit)),
@@ -107,7 +176,19 @@ class PrismKEWorkflow:
             "commit_graph", cast(Any, self._node("commit_graph", self.nodes.commit_graph))
         )
         builder.add_edge(START, "ingest")
-        for (left, _), (right, _) in zip(ordered, ordered[1:], strict=False):
+        for (left, _), (right, _) in zip(
+            before_extraction, before_extraction[1:], strict=False
+        ):
+            builder.add_edge(left, right)
+        builder.add_edge("load_schema", "extract_text_claims")
+        builder.add_edge("load_schema", "extract_visual_claims")
+        builder.add_edge(
+            ["extract_text_claims", "extract_visual_claims"], "align_modalities"
+        )
+        builder.add_edge("align_modalities", "resolve_entities")
+        for (left, _), (right, _) in zip(
+            after_extraction, after_extraction[1:], strict=False
+        ):
             builder.add_edge(left, right)
         builder.add_conditional_edges(
             "route_by_risk",
