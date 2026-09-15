@@ -13,6 +13,11 @@ relations:
     aliases: [created_by, developed by]
     domain: [Software]
     range: [Organization, Person]
+    functional: false
+    min_cardinality: 0
+    max_cardinality: null
+    symmetric: false
+    inverse_relation: null
 entity_catalog:
   - id: entity:prismke
     name: PrismKE

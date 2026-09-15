@@ -25,5 +25,9 @@ class Settings(BaseSettings):
         return self.runtime_dir / "graph"
 
     @property
+    def evidence_dir(self) -> Path:
+        return self.runtime_dir / "evidence"
+
+    @property
     def checkpoint_path(self) -> Path:
         return self.runtime_dir / "checkpoints.sqlite3"

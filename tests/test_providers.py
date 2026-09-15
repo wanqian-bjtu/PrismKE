@@ -5,7 +5,7 @@ import json
 import httpx
 import pytest
 
-from prismke.models import (
+from prismke.domain import (
     DocumentIR,
     EvidenceKind,
     EvidenceRef,

@@ -1,5 +1,19 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
+from prismke.domain import (
+    CandidateClaim,
+    Claim,
+    ClaimStatus,
+    EntityMention,
+    EntityTypeDef,
+    Modality,
+    OutputSchema,
+    RelationDef,
+    SchemaIndex,
+    load_schema,
+)
 from prismke.governance import (
     EntityResolver,
     collect_mentions,
@@ -7,14 +21,6 @@ from prismke.governance import (
     normalize_claims,
     route_by_risk,
 )
-from prismke.models import (
-    CandidateClaim,
-    Claim,
-    ClaimStatus,
-    EntityMention,
-    Modality,
-)
-from prismke.schema import SchemaIndex, load_schema
 
 
 def candidate(confidence: float = 0.9) -> CandidateClaim:
@@ -53,11 +59,15 @@ def test_alias_linking_and_relation_normalization(schema_path) -> None:  # type:
     assert claims[0].relation_id == "developed_by"
 
 
-def test_conflicting_objects_are_preserved() -> None:
+def test_functional_relation_conflicting_objects_are_preserved(schema_path) -> None:  # type: ignore[no-untyped-def]
+    output_schema = load_schema(schema_path)
+    output_schema.relations[0].functional = True
+    output_schema.relations[0].max_cardinality = 1
+    schema = SchemaIndex(output_schema)
     first = Claim(
         id="claim:1",
         subject_id="entity:s",
-        relation_id="status",
+        relation_id="developed_by",
         object_literal="active",
         confidence=0.9,
         evidence_ids=["ev:1"],
@@ -65,8 +75,112 @@ def test_conflicting_objects_are_preserved() -> None:
     second = first.model_copy(
         update={"id": "claim:2", "object_literal": "inactive", "evidence_ids": ["ev:2"]}
     )
-    conflicts = detect_conflicts([second], [first])
+    conflicts = detect_conflicts([second], [first], schema)
     assert conflicts[0].claim_ids == ["claim:1", "claim:2"]
+
+
+def test_non_functional_relation_allows_multiple_objects(schema_path) -> None:  # type: ignore[no-untyped-def]
+    schema = SchemaIndex(load_schema(schema_path))
+    first = Claim(
+        id="claim:1",
+        subject_id="entity:s",
+        relation_id="developed_by",
+        object_literal="A",
+        confidence=0.9,
+        evidence_ids=["ev:1"],
+    )
+    second = first.model_copy(update={"id": "claim:2", "object_literal": "B"})
+    assert detect_conflicts([second], [first], schema) == []
+
+
+def test_non_overlapping_functional_values_do_not_conflict(schema_path) -> None:  # type: ignore[no-untyped-def]
+    output_schema = load_schema(schema_path)
+    output_schema.relations[0].functional = True
+    output_schema.relations[0].max_cardinality = 1
+    schema = SchemaIndex(output_schema)
+    first = Claim(
+        id="claim:1",
+        subject_id="entity:s",
+        relation_id="developed_by",
+        object_literal="A",
+        confidence=0.9,
+        evidence_ids=["ev:1"],
+        valid_from=datetime(2020, 1, 1, tzinfo=UTC),
+        valid_to=datetime(2021, 1, 1, tzinfo=UTC),
+    )
+    second = first.model_copy(
+        update={
+            "id": "claim:2",
+            "object_literal": "B",
+            "valid_from": datetime(2021, 1, 1, tzinfo=UTC),
+            "valid_to": None,
+        }
+    )
+    assert detect_conflicts([second], [first], schema) == []
+
+
+def test_inverse_relations_share_claim_identity() -> None:
+    schema = SchemaIndex(
+        OutputSchema(
+            schema_id="family",
+            version="1",
+            entity_types=[EntityTypeDef(id="Person")],
+            relations=[
+                RelationDef(
+                    id="parent_of",
+                    domain=["Person"],
+                    range=["Person"],
+                    inverse_relation="child_of",
+                ),
+                RelationDef(
+                    id="child_of",
+                    domain=["Person"],
+                    range=["Person"],
+                    inverse_relation="parent_of",
+                ),
+            ],
+        )
+    )
+    parent = EntityMention(
+        id="mention:parent",
+        name="A",
+        entity_type="Person",
+        evidence_ids=["ev:1"],
+    )
+    child = EntityMention(
+        id="mention:child",
+        name="B",
+        entity_type="Person",
+        evidence_ids=["ev:1"],
+    )
+    candidates = [
+        CandidateClaim(
+            id="candidate:1",
+            subject=parent,
+            relation="parent_of",
+            object=child,
+            confidence=0.9,
+            evidence_ids=["ev:1"],
+        ),
+        CandidateClaim(
+            id="candidate:2",
+            subject=child,
+            relation="child_of",
+            object=parent,
+            confidence=0.8,
+            evidence_ids=["ev:2"],
+        ),
+    ]
+    entities = {
+        "entity:a": EntityResolver(schema, []).resolve([parent]).entities[-1],
+        "entity:b": EntityResolver(schema, []).resolve([child]).entities[-1],
+    }
+    entities = {entity.id: entity for entity in entities.values()}
+    mapping = {parent.id: next(e.id for e in entities.values() if e.name == "A")}
+    mapping[child.id] = next(e.id for e in entities.values() if e.name == "B")
+    claims = normalize_claims(candidates, schema, entities, mapping)
+    assert len(claims) == 1
+    assert claims[0].evidence_ids == ["ev:1", "ev:2"]
 
 
 def test_risk_routing_has_three_bands() -> None:

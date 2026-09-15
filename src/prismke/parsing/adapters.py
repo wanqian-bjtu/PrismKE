@@ -1,4 +1,4 @@
-"""Document parsers that preserve evidence location and source identity."""
+"""Built-in parsers that preserve evidence coordinates."""
 
 from __future__ import annotations
 
@@ -8,10 +8,8 @@ from pathlib import Path
 import pymupdf
 from PIL import Image
 
-from prismke.errors import UnsupportedDocumentError
-from prismke.ids import file_sha256, stable_id
-from prismke.interfaces import ParserAdapter
-from prismke.models import (
+from prismke.core.ids import file_sha256, stable_id
+from prismke.domain import (
     BBox,
     DocumentIR,
     EvidenceKind,
@@ -53,10 +51,9 @@ class TextParser:
             if not text.strip():
                 continue
             evidence_id = stable_id("ev", document_id, start, end)
-            block_id = stable_id("block", document_id, start, end)
             blocks.append(
                 TextBlock(
-                    id=block_id,
+                    id=stable_id("block", document_id, start, end),
                     text=text,
                     char_start=start,
                     char_end=end,
@@ -115,10 +112,11 @@ class PDFParser:
                         **dict(zip(("x0", "y0", "x1", "y1"), raw_block["bbox"], strict=True))
                     )
                     evidence_id = stable_id("ev", document_id, page_number, *raw_block["bbox"])
-                    block_id = stable_id("block", document_id, page_number, *raw_block["bbox"])
                     blocks.append(
                         TextBlock(
-                            id=block_id,
+                            id=stable_id(
+                                "block", document_id, page_number, *raw_block["bbox"]
+                            ),
                             text=text,
                             page_number=page_number,
                             bbox=bbox,
@@ -189,15 +187,3 @@ class ImageParser:
             ],
             warnings=["visual_extraction_not_enabled"],
         )
-
-
-class ParserRegistry:
-    def __init__(self) -> None:
-        self._parsers: list[ParserAdapter] = [TextParser(), PDFParser(), ImageParser()]
-
-    async def parse(self, source: SourceDocument) -> DocumentIR:
-        media_type = detect_media_type(source.path, source.media_type)
-        for parser in self._parsers:
-            if parser.supports(media_type):
-                return await parser.parse(source)
-        raise UnsupportedDocumentError(f"unsupported media type: {media_type or 'unknown'}")

@@ -1,0 +1,180 @@
+"""Workflow node implementations."""
+
+from __future__ import annotations
+
+from prismke.core.errors import EvidenceIntegrityError
+from prismke.core.ids import stable_id
+from prismke.domain import (
+    ClaimStatus,
+    ExtractionRequest,
+    GraphCommit,
+    GraphRevision,
+    SchemaIndex,
+    SourceDocument,
+    WorkflowState,
+    load_schema,
+)
+from prismke.governance import (
+    EntityResolver,
+    collect_mentions,
+    detect_conflicts,
+    normalize_claims,
+    route_by_risk,
+)
+from prismke.parsing import ParserRegistry
+from prismke.persistence.base import EvidenceStore, GraphStore
+from prismke.providers.base import LLMProvider
+
+
+class WorkflowNodes:
+    def __init__(
+        self,
+        provider: LLMProvider,
+        graph_store: GraphStore,
+        evidence_store: EvidenceStore,
+        parsers: ParserRegistry,
+    ) -> None:
+        self.provider = provider
+        self.graph_store = graph_store
+        self.evidence_store = evidence_store
+        self.parsers = parsers
+
+    async def ingest(self, state: WorkflowState) -> WorkflowState:
+        if not SourceDocument(path=state.input_path).path.is_file():
+            raise FileNotFoundError(state.input_path)
+        return state
+
+    async def parse_document(self, state: WorkflowState) -> WorkflowState:
+        state.document = await self.parsers.parse(SourceDocument(path=state.input_path))
+        state.warnings.extend(state.document.warnings)
+        return state
+
+    async def persist_evidence(self, state: WorkflowState) -> WorkflowState:
+        assert state.document is not None
+        await self.evidence_store.put_document(state.document)
+        return state
+
+    async def load_schema(self, state: WorkflowState) -> WorkflowState:
+        state.output_schema = load_schema(SourceDocument(path=state.schema_path).path)
+        return state
+
+    async def extract_claims(self, state: WorkflowState) -> WorkflowState:
+        assert state.document is not None and state.output_schema is not None
+        result = await self.provider.extract(
+            ExtractionRequest(document=state.document, output_schema=state.output_schema)
+        )
+        state.candidates = result.candidates
+        state.warnings.extend(result.warnings)
+        return state
+
+    async def resolve_entities(self, state: WorkflowState) -> WorkflowState:
+        assert state.output_schema is not None
+        resolver = EntityResolver(
+            SchemaIndex(state.output_schema), await self.graph_store.list_entities()
+        )
+        resolution = resolver.resolve(collect_mentions(state.candidates))
+        state.entities = resolution.entities
+        state.warnings.extend(
+            f"review_required:{mention_id}:{','.join(reasons)}"
+            for mention_id, reasons in resolution.review_reasons.items()
+        )
+        return state
+
+    async def normalize_claims(self, state: WorkflowState) -> WorkflowState:
+        assert state.output_schema is not None
+        resolver = EntityResolver(SchemaIndex(state.output_schema), state.entities)
+        resolution = resolver.resolve(collect_mentions(state.candidates))
+        entities = {item.id: item for item in resolution.entities}
+        state.entities = list(entities.values())
+        state.claims = normalize_claims(
+            state.candidates,
+            SchemaIndex(state.output_schema),
+            entities,
+            resolution.mention_to_entity,
+        )
+        return state
+
+    async def detect_conflicts(self, state: WorkflowState) -> WorkflowState:
+        assert state.output_schema is not None
+        state.conflicts = detect_conflicts(
+            state.claims,
+            await self.graph_store.list_claims(),
+            SchemaIndex(state.output_schema),
+        )
+        return state
+
+    async def route_by_risk(self, state: WorkflowState) -> WorkflowState:
+        state.claims, new_reviews = route_by_risk(
+            state.run_id, state.claims, state.conflicts
+        )
+        resolved = {item.claim_id: item for item in state.review_tasks if item.status == "resolved"}
+        state.review_tasks = [resolved.get(item.claim_id, item) for item in new_reviews]
+        for task in state.review_tasks:
+            if task.status != "resolved":
+                continue
+            claim = next(item for item in state.claims if item.id == task.claim_id)
+            claim.status = (
+                ClaimStatus.APPROVED
+                if task.decision and task.decision.value == "approve"
+                else ClaimStatus.REJECTED
+            )
+        state.status = (
+            "awaiting_review"
+            if any(item.status == "pending" for item in state.review_tasks)
+            else "running"
+        )
+        return state
+
+    async def prepare_graph_commit(self, state: WorkflowState) -> WorkflowState:
+        accepted = [
+            claim
+            for claim in state.claims
+            if claim.status in {ClaimStatus.AUTO_APPROVED, ClaimStatus.APPROVED}
+        ]
+        existing_claim_ids = {claim.id for claim in await self.graph_store.list_claims()}
+        persisted_claim_ids = existing_claim_ids | {claim.id for claim in accepted}
+        conflicts = [
+            conflict
+            for conflict in state.conflicts
+            if set(conflict.claim_ids) <= persisted_claim_ids
+        ]
+        parent = await self.graph_store.latest_revision()
+        entity_ids = {
+            entity_id
+            for claim in accepted
+            for entity_id in (claim.subject_id, claim.object_entity_id)
+            if entity_id is not None
+        }
+        revision = GraphRevision(
+            id=stable_id(
+                "revision",
+                state.run_id,
+                parent.id if parent else "root",
+                *sorted(claim.id for claim in accepted),
+            ),
+            run_id=state.run_id,
+            parent_id=parent.id if parent else None,
+            entity_ids=sorted(entity_ids),
+            claim_ids=sorted(claim.id for claim in accepted),
+            conflict_ids=sorted(conflict.id for conflict in conflicts),
+        )
+        state.revision = revision
+        state.graph_commit = GraphCommit(
+            entities=[entity for entity in state.entities if entity.id in entity_ids],
+            claims=accepted,
+            conflicts=conflicts,
+            revision=revision,
+        )
+        return state
+
+    async def commit_graph(self, state: WorkflowState) -> WorkflowState:
+        assert state.graph_commit is not None
+        for claim in state.graph_commit.claims:
+            for evidence_id in claim.evidence_ids:
+                if not await self.evidence_store.verify(evidence_id):
+                    raise EvidenceIntegrityError(
+                        f"claim {claim.id} references invalid evidence {evidence_id}"
+                    )
+        await self.graph_store.commit(state.graph_commit)
+        state.status = "completed"
+        return state

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from prismke.models import Claim
+from prismke.domain import Claim
 
 
 def test_claim_requires_exactly_one_object() -> None:

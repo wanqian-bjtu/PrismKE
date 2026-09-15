@@ -5,20 +5,22 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from prismke.checkpoint import RunRepository, SQLiteCheckpointStore
 from prismke.cli import app
-from prismke.models import (
+from prismke.core.ids import stable_id
+from prismke.core.settings import Settings
+from prismke.domain import (
     ClaimStatus,
     ExtractionRequest,
     ExtractionResult,
     ReviewDecision,
+    SourceDocument,
     WorkflowState,
 )
+from prismke.parsing import ParserRegistry
+from prismke.parsing.adapters import TextParser
+from prismke.persistence import FileEvidenceStore, JSONGraphStore, RunRepository
 from prismke.providers import MockLLMProvider
-from prismke.service import PrismKEService
-from prismke.settings import Settings
-from prismke.stores import JSONGraphStore
-from prismke.workflow import PrismKEWorkflow
+from prismke.workflow import PrismKEService, PrismKEWorkflow
 
 
 @pytest.mark.asyncio
@@ -50,20 +52,34 @@ async def test_review_then_resume(tmp_path: Path, schema_path: Path) -> None:
     state = await service.run(sample, schema_path, "mock")
     assert state.status == "awaiting_review"
     claim_id = state.claims[0].id
-    service.review(state.run_id, claim_id, ReviewDecision.APPROVE)
+    await service.review(state.run_id, claim_id, ReviewDecision.APPROVE)
     completed = await service.resume(state.run_id)
     assert completed.status == "completed"
     assert completed.claims[0].status == ClaimStatus.APPROVED
 
 
 @pytest.mark.asyncio
-async def test_failed_node_can_resume_from_sqlite_snapshot(
+async def test_failed_node_resumes_without_repeating_parser(
     tmp_path: Path, schema_path: Path
 ) -> None:
-    class FailingProvider:
+    class CountingTextParser(TextParser):
+        calls = 0
+
+        async def parse(self, source: SourceDocument):  # type: ignore[no-untyped-def]
+            self.calls += 1
+            return await super().parse(source)
+
+    class FlakyProvider:
+        calls = 0
+
+        def fingerprint(self) -> str:
+            return stable_id("provider", "flaky")
+
         async def extract(self, request: ExtractionRequest) -> ExtractionResult:
-            del request
-            raise RuntimeError("simulated provider outage")
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("simulated provider outage")
+            return await MockLLMProvider().extract(request)
 
     sample = tmp_path / "sample.md"
     sample.write_text(
@@ -71,26 +87,33 @@ async def test_failed_node_can_resume_from_sqlite_snapshot(
         encoding="utf-8",
     )
     runtime = tmp_path / "runtime"
-    checkpoints = SQLiteCheckpointStore(runtime / "checkpoints.sqlite3")
+    parser = CountingTextParser()
+    provider = FlakyProvider()
     runs = RunRepository(runtime / "runs")
-    graph_store = JSONGraphStore(runtime / "graph")
     state = WorkflowState(
         run_id="run:recover",
         input_path=str(sample),
         schema_path=str(schema_path),
         provider_name="mock",
+        provider_fingerprint=provider.fingerprint(),
     )
-    failing = PrismKEWorkflow(FailingProvider(), graph_store, checkpoints, runs)
+    runs.save(state)
+    workflow = PrismKEWorkflow(
+        provider,
+        JSONGraphStore(runtime / "graph"),
+        FileEvidenceStore(runtime / "evidence"),
+        runtime / "checkpoints.sqlite3",
+        runs,
+        ParserRegistry([parser]),
+    )
     with pytest.raises(RuntimeError, match="simulated provider outage"):
-        await failing.invoke(state)
-    saved = checkpoints.load_latest(state.run_id)
-    assert saved is not None
-    assert saved.current_node == "extract_claims"
-    assert saved.status == "failed"
-    recovered = PrismKEWorkflow(MockLLMProvider(), graph_store, checkpoints, runs)
-    saved.status = "running"
-    result = await recovered.invoke(saved)
-    assert result.status == "completed"
+        await workflow.invoke(state)
+    assert runs.load(state.run_id).failed_node == "extract_claims"
+    recovered = await workflow.resume(state.run_id)
+    assert recovered is not None
+    assert recovered.status == "completed"
+    assert parser.calls == 1
+    assert provider.calls == 2
 
 
 def test_cli_generates_run(tmp_path: Path, schema_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]

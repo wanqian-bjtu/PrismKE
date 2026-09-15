@@ -11,9 +11,8 @@ import typer
 from pydantic import BaseModel
 from rich.console import Console
 
-from prismke.models import ReviewDecision
-from prismke.schema import load_schema
-from prismke.service import PrismKEService
+from prismke.domain import ReviewDecision, load_schema
+from prismke.workflow import PrismKEService
 
 app = typer.Typer(no_args_is_help=True, help="PrismKE knowledge construction CLI")
 console = Console()
@@ -62,7 +61,7 @@ def review(
     decision: Annotated[ReviewDecision, typer.Option("--decision")],
 ) -> None:
     """Record a human decision for one claim."""
-    state = PrismKEService().review(run_id, claim_id, decision)
+    state = asyncio.run(PrismKEService().review(run_id, claim_id, decision))
     console.print(f"review recorded: run_id={state.run_id} claim_id={claim_id}")
 
 
