@@ -1,0 +1,48 @@
+services:
+  neo4j:
+    image: neo4j:5.26-community
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: ${PRISMKE_NEO4J_USER:-neo4j}/${PRISMKE_NEO4J_PASSWORD:?set PRISMKE_NEO4J_PASSWORD}
+      NEO4J_server_default__listen__address: 0.0.0.0
+    volumes:
+      - ./runtime/compose/neo4j/data:/data
+      - ./runtime/compose/neo4j/logs:/logs
+    ports:
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "AUTH=$${NEO4J_AUTH}; cypher-shell -u \"$${AUTH%%/*}\" -p \"$${AUTH#*/}\" 'RETURN 1' >/dev/null 2>&1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  prismke:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PRISMKE_GRAPH_STORE: neo4j
+      PRISMKE_NEO4J_URI: bolt://neo4j:7687
+      PRISMKE_API_HOST: 0.0.0.0
+      PRISMKE_RUNTIME_DIR: /app/runtime
+    volumes:
+      - ./runtime/compose/prismke:/app/runtime
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import os,urllib.request; r=urllib.request.Request('http://127.0.0.1:8000/api/v1/health',headers={'Authorization':'Bearer '+os.environ.get('PRISMKE_API_TOKEN','')}); urllib.request.urlopen(r,timeout=5)\"",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 12

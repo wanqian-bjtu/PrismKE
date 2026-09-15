@@ -10,7 +10,14 @@ from prismke.core.ids import canonical_hash, file_sha256, stable_id
 from prismke.core.settings import Settings
 from prismke.domain import ClaimStatus, ReviewDecision, WorkflowState, load_schema, utc_now
 from prismke.parsing import ParserRegistry
-from prismke.persistence import FileEvidenceStore, JSONGraphStore, RunRepository
+from prismke.persistence import (
+    AuditLog,
+    FileEvidenceStore,
+    JSONGraphStore,
+    Neo4jGraphStore,
+    RunRepository,
+)
+from prismke.persistence.base import GraphStore
 from prismke.providers import (
     DisabledOCRProvider,
     DisabledVLMProvider,
@@ -24,18 +31,38 @@ from prismke.providers import (
 from prismke.providers.base import LLMProvider, OCRProvider, VLMProvider
 from prismke.workflow.graph import PrismKEWorkflow
 
-PIPELINE_VERSION = "0.2.0"
+PIPELINE_VERSION = "0.3.0"
 ASSET_POLICY_VERSION = "assets-v2"
 ALIGNMENT_POLICY_VERSION = "alignment-v1"
 
 
 class PrismKEService:
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(
+        self, settings: Settings | None = None, graph_store: GraphStore | None = None
+    ) -> None:
         self.settings = settings or Settings()
         self.runs = RunRepository(self.settings.runs_dir)
-        self.graph_store = JSONGraphStore(self.settings.graph_dir)
+        self.graph_store = graph_store or self._create_graph_store()
         self.evidence_store = FileEvidenceStore(self.settings.evidence_dir)
+        self.audit = AuditLog(self.settings.audit_path)
         self._ocr_providers: dict[str, OCRProvider] = {}
+
+    def _create_graph_store(self) -> GraphStore:
+        if self.settings.graph_store == "json":
+            return JSONGraphStore(self.settings.graph_dir)
+        if self.settings.graph_store != "neo4j":
+            raise ValueError(f"unknown graph store: {self.settings.graph_store}")
+        if not self.settings.neo4j_password:
+            raise ProviderConfigurationError("neo4j graph store requires PRISMKE_NEO4J_PASSWORD")
+        return Neo4jGraphStore(
+            uri=self.settings.neo4j_uri,
+            user=self.settings.neo4j_user,
+            password=self.settings.neo4j_password,
+            database=self.settings.neo4j_database,
+        )
+
+    async def close(self) -> None:
+        await self.graph_store.close()
 
     @staticmethod
     def _validate_endpoint(value: str, variable: str) -> None:
@@ -47,9 +74,7 @@ class PrismKEService:
             or parsed.scheme not in {"http", "https"}
             or not parsed.netloc
         ):
-            raise ProviderConfigurationError(
-                f"openai-compatible requires a valid {variable}"
-            )
+            raise ProviderConfigurationError(f"openai-compatible requires a valid {variable}")
 
     def provider(self, name: str) -> LLMProvider:
         if name == "mock":
@@ -137,6 +162,28 @@ class PrismKEService:
         vlm_provider_name: str = "disabled",
         allow_remote_assets: bool = False,
     ) -> WorkflowState:
+        state, created = self.create_run(
+            input_path,
+            schema_path,
+            provider_name,
+            ocr_provider_name,
+            vlm_provider_name,
+            allow_remote_assets,
+        )
+        if not created:
+            return state
+        return await self.execute_run(state.run_id)
+
+    def create_run(
+        self,
+        input_path: Path,
+        schema_path: Path,
+        provider_name: str,
+        ocr_provider_name: str = "disabled",
+        vlm_provider_name: str = "disabled",
+        allow_remote_assets: bool = False,
+    ) -> tuple[WorkflowState, bool]:
+        """Validate a request and persist its initial state without executing it."""
         input_path = input_path.resolve()
         schema_path = schema_path.resolve()
         provider = self.provider(provider_name)
@@ -158,7 +205,7 @@ class PrismKEService:
             PIPELINE_VERSION,
         )
         if self.runs.exists(run_id):
-            return self.runs.load(run_id)
+            return self.runs.load(run_id), False
         state = WorkflowState(
             run_id=run_id,
             input_path=str(input_path),
@@ -173,8 +220,15 @@ class PrismKEService:
             pipeline_version=PIPELINE_VERSION,
         )
         self.runs.save(state)
+        return state, True
+
+    async def execute_run(self, run_id: str) -> WorkflowState:
+        state = self.runs.load(run_id)
+        provider = self.provider(state.provider_name)
+        ocr_provider = self.ocr_provider(state.ocr_provider_name)
+        vlm_provider = self.vlm_provider(state.vlm_provider_name)
         return await self._workflow(
-            provider, ocr_provider, vlm_provider, allow_remote_assets
+            provider, ocr_provider, vlm_provider, state.allow_remote_assets
         ).invoke(state)
 
     def show_run(self, run_id: str) -> WorkflowState:
@@ -184,7 +238,7 @@ class PrismKEService:
         state = self.runs.load(run_id)
         if state.pipeline_version != PIPELINE_VERSION:
             raise LegacyCheckpointError(
-                "this run was created by an older pipeline and cannot be resumed with v0.2"
+                "this run was created by an older pipeline and cannot be resumed with v0.3"
             )
         claim = next((item for item in state.claims if item.id == claim_id), None)
         if claim is None:
@@ -195,6 +249,11 @@ class PrismKEService:
         task.status = "resolved"
         task.decision = decision
         task.resolved_at = utc_now()
+        self.audit.record(
+            "review",
+            task.id,
+            {"run_id": run_id, "claim_id": claim_id, "decision": decision.value},
+        )
         claim.status = (
             ClaimStatus.APPROVED if decision == ReviewDecision.APPROVE else ClaimStatus.REJECTED
         )
@@ -228,7 +287,7 @@ class PrismKEService:
         state = self.runs.load(run_id)
         if state.pipeline_version != PIPELINE_VERSION:
             raise LegacyCheckpointError(
-                "this run was created by an older pipeline and cannot be resumed with v0.2"
+                "this run was created by an older pipeline and cannot be resumed with v0.3"
             )
         provider = self.provider(state.provider_name)
         ocr_provider = self.ocr_provider(state.ocr_provider_name)

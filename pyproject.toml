@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "prismke"
-version = "0.2.1"
+version = "0.3.0"
 description = "Schema-guided, evidence-aware multimodal knowledge graph construction"
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
@@ -40,6 +40,17 @@ ocr = [
   "paddleocr>=3,<4",
   "paddlepaddle>=3,<4",
 ]
+neo4j = [
+  "neo4j>=5.26,<6",
+]
+web = [
+  "fastapi>=0.115,<1",
+  "gradio>=5,<7",
+  "networkx>=3.4,<4",
+  "plotly>=6,<7",
+  "python-multipart>=0.0.20,<1",
+  "uvicorn>=0.34,<1",
+]
 
 [project.scripts]
 prismke = "prismke.cli:app"
@@ -51,6 +62,7 @@ packages = ["src/prismke"]
 addopts = "-q"
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = ["neo4j: requires a live dedicated Neo4j database"]
 
 [tool.ruff]
 line-length = 100
@@ -66,5 +78,5 @@ packages = ["prismke"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["pymupdf", "pymupdf.*"]
+module = ["networkx", "networkx.*", "plotly", "plotly.*", "pymupdf", "pymupdf.*"]
 ignore_missing_imports = true

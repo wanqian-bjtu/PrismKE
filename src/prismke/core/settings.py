@@ -24,6 +24,14 @@ class Settings(BaseSettings):
     allow_remote_assets: bool = False
     runtime_dir: Path = Path("runtime")
     request_timeout: float = 60.0
+    graph_store: str = "json"
+    neo4j_uri: str = "bolt://127.0.0.1:7687"
+    neo4j_user: str = "neo4j"
+    neo4j_password: str | None = None
+    neo4j_database: str = "neo4j"
+    api_token: str | None = None
+    api_host: str = "127.0.0.1"
+    api_port: int = 8000
 
     @property
     def runs_dir(self) -> Path:
@@ -44,3 +52,11 @@ class Settings(BaseSettings):
     @property
     def checkpoint_path(self) -> Path:
         return self.runtime_dir / "checkpoints.sqlite3"
+
+    @property
+    def uploads_dir(self) -> Path:
+        return self.runtime_dir / "uploads"
+
+    @property
+    def audit_path(self) -> Path:
+        return self.runtime_dir / "audit.jsonl"

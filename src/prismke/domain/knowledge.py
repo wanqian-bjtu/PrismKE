@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from prismke.domain.documents import Modality
+from prismke.domain.documents import EvidenceRef, Modality
 
 
 def utc_now() -> datetime:
@@ -42,6 +42,7 @@ class CanonicalEntity(BaseModel):
     name: str
     entity_type: str
     aliases: list[str] = Field(default_factory=list)
+    active: bool = True
     created_at: datetime = Field(default_factory=utc_now)
 
 
@@ -117,6 +118,24 @@ class ReviewTask(BaseModel):
     resolved_at: datetime | None = None
 
 
+class GraphDocument(BaseModel):
+    """Portable document metadata stored in a graph backend."""
+
+    id: str
+    filename: str
+    content_hash: str
+    media_type: str
+    imported_at: datetime = Field(default_factory=utc_now)
+
+
+class GraphChange(BaseModel):
+    resource_type: Literal["entity", "claim", "conflict"]
+    resource_id: str
+    action: Literal["create", "update", "close", "restore"]
+    before: dict[str, Any] | None = None
+    after: dict[str, Any] | None = None
+
+
 class GraphRevision(BaseModel):
     id: str
     run_id: str
@@ -124,11 +143,37 @@ class GraphRevision(BaseModel):
     entity_ids: list[str] = Field(default_factory=list)
     claim_ids: list[str] = Field(default_factory=list)
     conflict_ids: list[str] = Field(default_factory=list)
+    changes: list[GraphChange] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utc_now)
 
 
 class GraphCommit(BaseModel):
+    documents: list[GraphDocument] = Field(default_factory=list)
+    evidence: list[EvidenceRef] = Field(default_factory=list)
     entities: list[CanonicalEntity] = Field(default_factory=list)
     claims: list[Claim] = Field(default_factory=list)
     conflicts: list[ConflictSet] = Field(default_factory=list)
     revision: GraphRevision
+
+
+class GraphHealth(BaseModel):
+    backend: Literal["json", "neo4j"]
+    healthy: bool
+    message: str = "ok"
+
+
+class GraphNeighborhood(BaseModel):
+    center_entity_id: str
+    depth: int = Field(default=1, ge=1, le=3)
+    entities: list[CanonicalEntity] = Field(default_factory=list)
+    claims: list[Claim] = Field(default_factory=list)
+
+
+class RevisionDiff(BaseModel):
+    from_revision_id: str
+    to_revision_id: str
+    changes: list[GraphChange] = Field(default_factory=list)
+    legacy_id_only: bool = False
+    entity_ids: list[str] = Field(default_factory=list)
+    claim_ids: list[str] = Field(default_factory=list)
+    conflict_ids: list[str] = Field(default_factory=list)

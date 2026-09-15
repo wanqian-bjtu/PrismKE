@@ -9,7 +9,9 @@ from prismke.core.ids import stable_id
 from prismke.domain import (
     ClaimStatus,
     ExtractionRequest,
+    GraphChange,
     GraphCommit,
+    GraphDocument,
     GraphRevision,
     LocalizationLevel,
     OCRRequest,
@@ -203,12 +205,15 @@ class WorkflowNodes:
         return state
 
     async def prepare_graph_commit(self, state: WorkflowState) -> WorkflowState:
+        assert state.document is not None
         accepted = [
             claim
             for claim in state.claims
             if claim.status in {ClaimStatus.AUTO_APPROVED, ClaimStatus.APPROVED}
         ]
-        existing_claim_ids = {claim.id for claim in await self.graph_store.list_claims()}
+        existing_claims = {claim.id: claim for claim in await self.graph_store.list_claims()}
+        existing_entities = {entity.id: entity for entity in await self.graph_store.list_entities()}
+        existing_claim_ids = set(existing_claims)
         persisted_claim_ids = existing_claim_ids | {claim.id for claim in accepted}
         conflicts = [item for item in state.conflicts if set(item.claim_ids) <= persisted_claim_ids]
         parent = await self.graph_store.latest_revision()
@@ -218,6 +223,48 @@ class WorkflowNodes:
             for entity_id in (claim.subject_id, claim.object_entity_id)
             if entity_id
         }
+        entities = [
+            entity.model_copy(update={"active": True})
+            for entity in state.entities
+            if entity.id in entity_ids
+        ]
+        changes = [
+            GraphChange(
+                resource_type="entity",
+                resource_id=entity.id,
+                action="update" if entity.id in existing_entities else "create",
+                before=(
+                    existing_entities[entity.id].model_dump(mode="json")
+                    if entity.id in existing_entities
+                    else None
+                ),
+                after=entity.model_dump(mode="json"),
+            )
+            for entity in entities
+        ]
+        changes.extend(
+            GraphChange(
+                resource_type="claim",
+                resource_id=claim.id,
+                action="update" if claim.id in existing_claims else "create",
+                before=(
+                    existing_claims[claim.id].model_dump(mode="json")
+                    if claim.id in existing_claims
+                    else None
+                ),
+                after=claim.model_dump(mode="json"),
+            )
+            for claim in accepted
+        )
+        changes.extend(
+            GraphChange(
+                resource_type="conflict",
+                resource_id=conflict.id,
+                action="create",
+                after=conflict.model_dump(mode="json"),
+            )
+            for conflict in conflicts
+        )
         revision = GraphRevision(
             id=stable_id(
                 "revision",
@@ -230,10 +277,25 @@ class WorkflowNodes:
             entity_ids=sorted(entity_ids),
             claim_ids=sorted(claim.id for claim in accepted),
             conflict_ids=sorted(conflict.id for conflict in conflicts),
+            changes=changes,
         )
         state.revision = revision
         state.graph_commit = GraphCommit(
-            entities=[entity for entity in state.entities if entity.id in entity_ids],
+            documents=[
+                GraphDocument(
+                    id=state.document.id,
+                    filename=Path(state.document.source_path).name,
+                    content_hash=state.document.source_hash,
+                    media_type=state.document.media_type,
+                )
+            ],
+            evidence=[
+                evidence
+                for evidence in state.document.evidence
+                if evidence.id
+                in {evidence_id for claim in accepted for evidence_id in claim.evidence_ids}
+            ],
+            entities=entities,
             claims=accepted,
             conflicts=conflicts,
             revision=revision,

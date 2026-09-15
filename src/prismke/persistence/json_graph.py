@@ -1,8 +1,10 @@
-"""Atomic local graph persistence and future Neo4j boundary."""
+"""Atomic local graph persistence with revisions and compensating rollback."""
 
 from __future__ import annotations
 
 import os
+from copy import deepcopy
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
@@ -11,7 +13,18 @@ import orjson
 from filelock import FileLock
 
 from prismke.core.errors import EvidenceRequiredError, GraphIntegrityError
-from prismke.domain import CanonicalEntity, Claim, GraphCommit, GraphRevision
+from prismke.core.ids import stable_id
+from prismke.domain import (
+    CanonicalEntity,
+    Claim,
+    EvidenceRef,
+    GraphChange,
+    GraphCommit,
+    GraphHealth,
+    GraphNeighborhood,
+    GraphRevision,
+    RevisionDiff,
+)
 
 
 class JSONGraphStore:
@@ -25,10 +38,28 @@ class JSONGraphStore:
 
     @staticmethod
     def _empty_graph() -> dict[str, Any]:
-        return {"entities": {}, "claims": {}, "conflicts": {}, "revisions": []}
+        return {
+            "documents": {},
+            "evidence": {},
+            "entities": {},
+            "claims": {},
+            "conflicts": {},
+            "revisions": [],
+        }
+
+    @staticmethod
+    def _upgrade(data: dict[str, Any]) -> dict[str, Any]:
+        for key, default in JSONGraphStore._empty_graph().items():
+            data.setdefault(key, deepcopy(default))
+        return data
 
     def _read(self) -> dict[str, Any]:
-        return cast(dict[str, Any], orjson.loads(self.path.read_bytes()))
+        return self._upgrade(cast(dict[str, Any], orjson.loads(self.path.read_bytes())))
+
+    def snapshot(self) -> dict[str, Any]:
+        """Return a detached snapshot for migration and diagnostics."""
+        with self.lock:
+            return deepcopy(self._read())
 
     def _write_atomic(self, payload: dict[str, Any]) -> None:
         temporary = self.path.with_name(f".{self.path.name}.{uuid4().hex}.tmp")
@@ -40,6 +71,14 @@ class JSONGraphStore:
             os.replace(temporary, self.path)
         finally:
             temporary.unlink(missing_ok=True)
+
+    async def healthcheck(self) -> GraphHealth:
+        try:
+            with self.lock:
+                self._read()
+        except (OSError, orjson.JSONDecodeError, TypeError, ValueError) as exc:
+            return GraphHealth(backend="json", healthy=False, message=str(exc))
+        return GraphHealth(backend="json", healthy=True)
 
     async def list_entities(self) -> list[CanonicalEntity]:
         with self.lock:
@@ -55,6 +94,55 @@ class JSONGraphStore:
         with self.lock:
             revisions = self._read()["revisions"]
         return GraphRevision.model_validate(revisions[-1]) if revisions else None
+
+    async def list_revisions(self, limit: int = 50) -> list[GraphRevision]:
+        if limit < 1:
+            return []
+        with self.lock:
+            revisions = self._read()["revisions"][-limit:]
+        return [GraphRevision.model_validate(item) for item in reversed(revisions)]
+
+    async def get_claim(self, claim_id: str) -> Claim | None:
+        with self.lock:
+            payload = self._read()["claims"].get(claim_id)
+        return Claim.model_validate(payload) if payload is not None else None
+
+    async def get_evidence(self, evidence_id: str) -> EvidenceRef | None:
+        with self.lock:
+            payload = self._read()["evidence"].get(evidence_id)
+        return EvidenceRef.model_validate(payload) if payload is not None else None
+
+    async def get_neighborhood(self, entity_id: str, depth: int = 1) -> GraphNeighborhood:
+        if depth < 1 or depth > 3:
+            raise ValueError("depth must be between 1 and 3")
+        with self.lock:
+            data = self._read()
+        if entity_id not in data["entities"]:
+            raise KeyError(f"entity not found: {entity_id}")
+        seen = {entity_id}
+        frontier = {entity_id}
+        selected_claims: dict[str, Claim] = {}
+        for _ in range(depth):
+            next_frontier: set[str] = set()
+            for payload in data["claims"].values():
+                claim = Claim.model_validate(payload)
+                endpoints = {claim.subject_id}
+                if claim.object_entity_id:
+                    endpoints.add(claim.object_entity_id)
+                if endpoints & frontier:
+                    selected_claims[claim.id] = claim
+                    next_frontier.update(endpoints - seen)
+            seen.update(next_frontier)
+            frontier = next_frontier
+            if not frontier:
+                break
+        entities = [CanonicalEntity.model_validate(data["entities"][item]) for item in sorted(seen)]
+        return GraphNeighborhood(
+            center_entity_id=entity_id,
+            depth=depth,
+            entities=entities,
+            claims=list(selected_claims.values()),
+        )
 
     @staticmethod
     def _merge_claim(current: dict[str, Any], incoming: Claim) -> Claim:
@@ -73,7 +161,7 @@ class JSONGraphStore:
         )
         revision_payload = transaction.revision.model_dump(mode="json")
         if existing_revision is not None:
-            if existing_revision != revision_payload:
+            if GraphRevision.model_validate(existing_revision) != transaction.revision:
                 raise GraphIntegrityError(
                     f"revision id already exists with different content: {transaction.revision.id}"
                 )
@@ -86,6 +174,14 @@ class JSONGraphStore:
                 f"got {transaction.revision.parent_id}"
             )
 
+        for document in transaction.documents:
+            data["documents"][document.id] = document.model_dump(mode="json")
+        for evidence in transaction.evidence:
+            if evidence.document_id not in data["documents"]:
+                raise GraphIntegrityError(
+                    f"evidence {evidence.id} references missing document {evidence.document_id}"
+                )
+            data["evidence"][evidence.id] = evidence.model_dump(mode="json")
         for entity in transaction.entities:
             data["entities"][entity.id] = entity.model_dump(mode="json")
         for claim in transaction.claims:
@@ -101,12 +197,15 @@ class JSONGraphStore:
         known_entities = set(data["entities"])
         known_claims = set(data["claims"])
         known_conflicts = set(data["conflicts"])
+        known_evidence = set(data["evidence"])
         for claim in transaction.claims:
             entity_refs = {claim.subject_id}
             if claim.object_entity_id:
                 entity_refs.add(claim.object_entity_id)
             if not entity_refs <= known_entities:
                 raise GraphIntegrityError(f"claim {claim.id} references missing entities")
+            if transaction.evidence and not set(claim.evidence_ids) <= known_evidence:
+                raise GraphIntegrityError(f"claim {claim.id} references missing evidence")
         if not set(transaction.revision.entity_ids) <= known_entities:
             raise GraphIntegrityError("revision references missing entities")
         if not set(transaction.revision.claim_ids) <= known_claims:
@@ -123,14 +222,118 @@ class JSONGraphStore:
     async def commit(self, transaction: GraphCommit) -> None:
         with self.lock:
             data = self._read()
-            updated, is_noop = self._apply(data, transaction)
+            updated, is_noop = self._apply(deepcopy(data), transaction)
             if is_noop:
                 return
             self._write_atomic(updated)
 
+    async def diff_revisions(self, from_id: str, to_id: str) -> RevisionDiff:
+        with self.lock:
+            revisions = [GraphRevision.model_validate(item) for item in self._read()["revisions"]]
+        positions = {revision.id: index for index, revision in enumerate(revisions)}
+        if from_id not in positions or to_id not in positions:
+            raise KeyError("revision not found")
+        if positions[from_id] > positions[to_id]:
+            raise ValueError("from revision must not be newer than to revision")
+        selected = revisions[positions[from_id] + 1 : positions[to_id] + 1]
+        return RevisionDiff(
+            from_revision_id=from_id,
+            to_revision_id=to_id,
+            changes=[change for revision in selected for change in revision.changes],
+            legacy_id_only=any(not revision.changes for revision in selected),
+            entity_ids=sorted({item for revision in selected for item in revision.entity_ids}),
+            claim_ids=sorted({item for revision in selected for item in revision.claim_ids}),
+            conflict_ids=sorted({item for revision in selected for item in revision.conflict_ids}),
+        )
 
-class Neo4jGraphStore:
-    """Reserved interface for the Neo4j milestone."""
+    async def rollback_revision(self, revision_id: str) -> GraphRevision:
+        with self.lock:
+            data = self._read()
+            target_payload = next(
+                (item for item in data["revisions"] if item["id"] == revision_id), None
+            )
+            if target_payload is None:
+                raise KeyError(f"revision not found: {revision_id}")
+            target = GraphRevision.model_validate(target_payload)
+            if not target.changes:
+                raise GraphIntegrityError(
+                    "legacy revision has no snapshots and cannot be rolled back"
+                )
+            latest = GraphRevision.model_validate(data["revisions"][-1])
+            if latest.run_id == f"rollback:{revision_id}":
+                return latest
+            timestamp = datetime.now(UTC)
+            inverse: list[GraphChange] = []
+            for change in reversed(target.changes):
+                bucket_name = {
+                    "entity": "entities",
+                    "claim": "claims",
+                    "conflict": "conflicts",
+                }[change.resource_type]
+                bucket = data[bucket_name]
+                current = bucket.get(change.resource_id)
+                if change.action == "create":
+                    if change.resource_type == "claim" and current is not None:
+                        current["tx_to"] = timestamp.isoformat().replace("+00:00", "Z")
+                    elif change.resource_type == "entity" and current is not None:
+                        active_claims = [
+                            claim
+                            for claim in data["claims"].values()
+                            if claim.get("tx_to") is None
+                            and change.resource_id
+                            in {claim.get("subject_id"), claim.get("object_entity_id")}
+                        ]
+                        if active_claims:
+                            raise GraphIntegrityError(
+                                f"entity {change.resource_id} still has active claim references"
+                            )
+                        current["active"] = False
+                    elif change.resource_type == "conflict" and current is not None:
+                        current["status"] = "resolved"
+                    inverse.append(
+                        GraphChange(
+                            resource_type=change.resource_type,
+                            resource_id=change.resource_id,
+                            action="close",
+                            before=deepcopy(change.after),
+                            after=deepcopy(current),
+                        )
+                    )
+                elif change.before is not None:
+                    bucket[change.resource_id] = deepcopy(change.before)
+                    inverse.append(
+                        GraphChange(
+                            resource_type=change.resource_type,
+                            resource_id=change.resource_id,
+                            action="restore",
+                            before=deepcopy(current),
+                            after=deepcopy(change.before),
+                        )
+                    )
+            compensation = GraphRevision(
+                id=stable_id("revision", "rollback", revision_id, latest.id),
+                run_id=f"rollback:{revision_id}",
+                parent_id=latest.id,
+                entity_ids=sorted(
+                    {item.resource_id for item in inverse if item.resource_type == "entity"}
+                ),
+                claim_ids=sorted(
+                    {item.resource_id for item in inverse if item.resource_type == "claim"}
+                ),
+                conflict_ids=sorted(
+                    {item.resource_id for item in inverse if item.resource_type == "conflict"}
+                ),
+                changes=inverse,
+                created_at=timestamp,
+            )
+            existing = next(
+                (item for item in data["revisions"] if item["id"] == compensation.id), None
+            )
+            if existing is not None:
+                return GraphRevision.model_validate(existing)
+            data["revisions"].append(compensation.model_dump(mode="json"))
+            self._write_atomic(data)
+            return compensation
 
-    def __init__(self, *_: object, **__: object) -> None:
-        raise NotImplementedError("Neo4j persistence is deferred until PrismKE v0.2")
+    async def close(self) -> None:
+        return None

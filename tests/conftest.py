@@ -5,6 +5,12 @@ from pathlib import Path
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def isolate_default_graph_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unit tests never inherit a developer machine's live graph backend."""
+    monkeypatch.setenv("PRISMKE_GRAPH_STORE", "json")
+
+
 @pytest.fixture
 def schema_path(tmp_path: Path) -> Path:
     path = tmp_path / "schema.yaml"
