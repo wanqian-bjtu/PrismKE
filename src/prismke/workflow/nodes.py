@@ -223,7 +223,11 @@ class WorkflowNodes:
             for entity_id in (claim.subject_id, claim.object_entity_id)
             if entity_id
         }
-        entities = [entity for entity in state.entities if entity.id in entity_ids]
+        entities = [
+            entity.model_copy(update={"active": True})
+            for entity in state.entities
+            if entity.id in entity_ids
+        ]
         changes = [
             GraphChange(
                 resource_type="entity",
