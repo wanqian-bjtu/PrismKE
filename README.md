@@ -2,7 +2,7 @@
 
 PrismKE 是一个面向通用多模态知识图谱构建的研究型项目，目标是实现模式引导、证据感知、可审核和可持续更新的知识抽取流程。
 
-当前开发代码位于 `dev/v0.2` 分支。v0.2.0 在 v0.1.1 的可信写图基础上加入真实 OCR、OpenAI-compatible VLM、文档内图片解析、视觉观察和跨模态事实对齐。
+当前稳定版本为 `v0.2.1`。该版本在 v0.1.1 的可信写图基础上加入真实 OCR、OpenAI-compatible VLM、文档内图片解析、视觉观察和跨模态事实对齐，并完成阿里云百炼真实多模态联调。
 
 ## 当前能力
 
@@ -156,11 +156,11 @@ PrismKE | developed_by | OpenAI | Software | Organization | 0.92
 复制 `.env.example` 中的配置项并通过环境变量或本地 `.env` 提供：
 
 ```text
-PRISMKE_LLM_BASE_URL=https://api.openai.com/v1
+PRISMKE_LLM_BASE_URL=https://<WorkspaceId>.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
 PRISMKE_LLM_API_KEY=
-PRISMKE_LLM_MODEL=
+PRISMKE_LLM_MODEL=qwen3.7-flash
 PRISMKE_RUNTIME_DIR=runtime
-PRISMKE_REQUEST_TIMEOUT=60
+PRISMKE_REQUEST_TIMEOUT=120
 ```
 
 `.env` 已被 Git 忽略，禁止将 API Key 提交到仓库。
@@ -186,11 +186,17 @@ PRISMKE_OCR_MODEL=PP-OCRv5
 VLM 使用与文本模型相互独立的配置，缺少配置时不会静默回退 Mock：
 
 ```text
-PRISMKE_VLM_BASE_URL=https://api.openai.com/v1
+PRISMKE_VLM_BASE_URL=https://<WorkspaceId>.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
 PRISMKE_VLM_API_KEY=
-PRISMKE_VLM_MODEL=
+PRISMKE_VLM_MODEL=qwen3.7-flash
 PRISMKE_VLM_TIMEOUT=120
 ```
+
+北京地域推荐使用百炼业务空间专属 API Host。`<WorkspaceId>` 可在 API Key 创建结果或
+业务空间管理页面中查看。服务器上的真实配置应写入
+`/root/autodl-tmp/PrismKE/.env`：先复制 `.env.example`，再将同一个 API Key 分别填入
+`PRISMKE_LLM_API_KEY` 和 `PRISMKE_VLM_API_KEY`。`.env` 已被 Git 忽略，禁止将密钥
+写入 `.env.example`、命令行参数、日志或运行结果。
 
 真实多模态运行：
 
@@ -203,6 +209,18 @@ prismke run INPUT \
 ```
 
 不调用真实 API 的结构测试可以使用 `--ocr-provider mock --vlm-provider mock`。HTML 与 Markdown 远程图片只有显式添加 `--allow-remote-assets` 才会下载。
+
+运行仓库内 12 份可复现的公开多模态样例并生成汇总报告：
+
+```bash
+prismke evaluate examples/eval_v0_2/manifest.json \
+  --output runtime/evaluation/qwen3.7-flash-report.json \
+  --provider openai-compatible \
+  --ocr-provider paddle \
+  --vlm-provider openai-compatible
+```
+
+报告包含 Claim 与实体指标、证据覆盖率、bbox 合法率、请求模型与响应模型、Token、延迟、重试次数及估算成本。费用只是按带日期的价格快照估算，最终以阿里云账单为准。
 
 查看或导出 Claim 引用的证据：
 

@@ -11,7 +11,7 @@ from urllib.parse import unquote, urlparse
 
 import httpx
 import pymupdf
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 from docx import Document
 from PIL import Image
 
@@ -36,6 +36,7 @@ MARKDOWN_TYPES = {"text/markdown"}
 HTML_TYPES = {"text/html"}
 DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 MIN_ASSET_EDGE = 64
+MAX_HTML_CONTEXT_CHARS = 500
 MARKDOWN_IMAGE = re.compile(r"!\[(?P<alt>[^]]*)]\((?P<src>[^ )]+)(?:\s+['\"][^'\"]*['\"])?\)")
 
 
@@ -182,6 +183,49 @@ async def _resolve_image(
     return candidate.read_bytes(), detect_media_type(candidate), str(candidate)
 
 
+def _html_image_context(image: Tag) -> str:
+    """Keep image context local and label it as auxiliary evidence."""
+
+    parts: list[tuple[str, str]] = []
+    for attribute in ("alt", "title"):
+        value = " ".join(str(image.get(attribute, "")).split())
+        if value:
+            parts.append((attribute, value))
+
+    figure = image.find_parent("figure")
+    if isinstance(figure, Tag):
+        caption = figure.find("figcaption")
+        if isinstance(caption, Tag):
+            text = " ".join(caption.get_text(" ", strip=True).split())
+            if text:
+                parts.append(("figcaption", text))
+
+    container = figure if isinstance(figure, Tag) else image
+    for sibling in (container.find_previous_sibling(), container.find_next_sibling()):
+        if not isinstance(sibling, Tag) or sibling.name not in {
+            "p",
+            "li",
+            "h1",
+            "h2",
+            "h3",
+            "figcaption",
+        }:
+            continue
+        text = " ".join(sibling.get_text(" ", strip=True).split())
+        if text:
+            parts.append(("nearby", text))
+
+    unique: list[str] = []
+    seen: set[str] = set()
+    for label, value in parts:
+        normalized = value.casefold()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        unique.append(f"{label}: {value}")
+    return "\n".join(unique)[:MAX_HTML_CONTEXT_CHARS]
+
+
 class TextParser:
     def supports(self, media_type: str) -> bool:
         return media_type in TEXT_TYPES
@@ -325,8 +369,7 @@ class HTMLParser:
                 warnings.append(f"{kind}:{src}")
                 continue
             data, media_type, ref_name = resolved
-            parent_text = image.parent.get_text(" ", strip=True) if image.parent else ""
-            context = " ".join(filter(None, [str(image.get("alt", "")), parent_text]))
+            context = _html_image_context(image)
             asset, asset_ref, warning = _asset(
                 self.writer,
                 document_id,

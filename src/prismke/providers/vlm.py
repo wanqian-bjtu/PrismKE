@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import json
 from io import BytesIO
@@ -11,23 +10,83 @@ from typing import Any, cast
 import httpx
 from PIL import Image
 
+from prismke.core.errors import ProviderResponseError
 from prismke.core.ids import stable_id
 from prismke.domain import (
     BBox,
+    CandidateClaim,
     CoordinateSpace,
+    EntityMention,
     EvidenceKind,
     EvidenceRef,
     ExtractionResult,
     LocalizationLevel,
     Modality,
+    ProviderCallRecord,
     VisualExtractionRequest,
     VisualObservation,
+    normalize_label,
 )
 from prismke.providers.common import candidate_from_payload
+from prismke.providers.http_client import post_chat_completion
 
-PROMPT_VERSION = "visual-schema-claims-v1"
+PROMPT_VERSION = "visual-schema-claims-v2"
 PROTOCOL_VERSION = "chat-completions-vision-v1"
 PROVIDER_VERSION = "0.2.0"
+
+
+def _visual_prompt(request: VisualExtractionRequest) -> str:
+    ocr_text = [block.text for block in request.ocr_blocks]
+    return (
+        "Extract knowledge facts that are directly supported by the supplied image. "
+        "Return one JSON object containing arrays named 'observations' and 'claims'.\n"
+        "Evidence priority:\n"
+        "1. PRIMARY evidence is the image pixels and IMAGE-DERIVED OCR below.\n"
+        "2. AUXILIARY document context may help interpretation but may contradict the image. "
+        "Never replace visible image content with auxiliary context.\n"
+        "First transcribe or describe visible objects and text as observations. If the image "
+        "and auxiliary context disagree, output the fact visible in the image. Omit any visual "
+        "claim that cannot be confirmed from image pixels or image-derived OCR.\n"
+        "Observation fields: label, description, confidence, optional "
+        "bbox=[x0,y0,x1,y1] normalized to 0..1, attributes. Claim fields: subject, relation, "
+        "object, subject_type, optional object_type, confidence, observation_index. A claim "
+        "with region-level support must reference its supporting observation_index. Use source "
+        "surface forms and obey the schema relation direction. Do not invent unsupported facts.\n"
+        f"Schema: {request.output_schema.model_dump_json()}\n"
+        f"IMAGE-DERIVED OCR (PRIMARY): {json.dumps(ocr_text, ensure_ascii=False)}\n"
+        f"AUXILIARY DOCUMENT CONTEXT (UNTRUSTED): {request.asset.context_text}"
+    )
+
+
+def _candidate_names(candidate: CandidateClaim) -> list[str]:
+    names = [candidate.subject.name]
+    obj = candidate.object.name if isinstance(candidate.object, EntityMention) else candidate.object
+    names.append(obj)
+    return [str(name) for name in names if str(name).strip()]
+
+
+def _is_context_only_visual_claim(
+    candidate: CandidateClaim,
+    observation: VisualObservation | None,
+    ocr_text: str,
+    auxiliary_context: str,
+) -> bool:
+    primary_parts = [ocr_text]
+    if observation is not None:
+        primary_parts.extend(
+            [
+                observation.label,
+                observation.description,
+                json.dumps(observation.attributes, ensure_ascii=False),
+            ]
+        )
+    primary = normalize_label(" ".join(primary_parts))
+    auxiliary = normalize_label(auxiliary_context)
+    for name in _candidate_names(candidate):
+        normalized = normalize_label(name)
+        if normalized and normalized in auxiliary and normalized not in primary:
+            return True
+    return False
 
 
 class DisabledVLMProvider:
@@ -76,45 +135,23 @@ class OpenAICompatibleVLMProvider:
             image.save(output, format="PNG")
         return f"data:image/png;base64,{base64.b64encode(output.getvalue()).decode('ascii')}"
 
-    async def _post(self, body: dict[str, Any]) -> dict[str, Any]:
-        headers = {"Authorization": f"Bearer {self.api_key}"}
-        delay = 0.5
-        for attempt in range(3):
-            try:
-                async with httpx.AsyncClient(
-                    timeout=self.timeout, transport=self.transport
-                ) as client:
-                    response = await client.post(
-                        f"{self.base_url}/chat/completions", headers=headers, json=body
-                    )
-                response.raise_for_status()
-                return dict(response.json())
-            except httpx.HTTPStatusError as exc:
-                status = exc.response.status_code
-                if status != 429 and status < 500:
-                    raise
-                if attempt == 2:
-                    raise
-                await asyncio.sleep(delay)
-                delay *= 2
-            except (httpx.TimeoutException, httpx.NetworkError):
-                if attempt == 2:
-                    raise
-                await asyncio.sleep(delay)
-                delay *= 2
-        raise RuntimeError("unreachable")
+    async def _post(
+        self, body: dict[str, Any], operation_id: str
+    ) -> tuple[dict[str, Any], ProviderCallRecord]:
+        return await post_chat_completion(
+            base_url=self.base_url,
+            api_key=self.api_key,
+            body=body,
+            timeout=self.timeout,
+            provider="vlm",
+            operation_id=operation_id,
+            prompt_version=PROMPT_VERSION,
+            transport=self.transport,
+        )
 
     async def extract(self, request: VisualExtractionRequest) -> ExtractionResult:
         asset = request.asset
-        prompt = (
-            "Analyze this image under the supplied knowledge schema. Return JSON arrays "
-            "'observations' and 'claims'. Observation fields: label, description, confidence, "
-            "optional bbox=[x0,y0,x1,y1] normalized to 0..1, attributes. Claim fields: "
-            "subject, relation, object, subject_type, optional object_type, confidence, "
-            "optional observation_index. Do not invent unsupported facts.\n"
-            f"Schema: {request.output_schema.model_dump_json()}\nContext: {asset.context_text}\n"
-            f"OCR: {[block.text for block in request.ocr_blocks]}"
-        )
+        prompt = _visual_prompt(request)
         body = {
             "model": self.model,
             "messages": [
@@ -132,8 +169,15 @@ class OpenAICompatibleVLMProvider:
             "temperature": 0,
             "response_format": {"type": "json_object"},
         }
-        response = await self._post(body)
-        content = response["choices"][0]["message"]["content"]
+        response, first_record = await self._post(body, asset.id)
+        records = [first_record]
+        try:
+            content = response["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ProviderResponseError(
+                "模型服务响应缺少 choices.message.content",
+                call_records=records,
+            ) from exc
         try:
             payload = json.loads(content)
         except (TypeError, json.JSONDecodeError):
@@ -147,8 +191,15 @@ class OpenAICompatibleVLMProvider:
                     "content": "Return the same result as one valid JSON object only.",
                 },
             ]
-            repaired = await self._post(repair_body)
-            payload = json.loads(repaired["choices"][0]["message"]["content"])
+            repaired, repair_record = await self._post(repair_body, f"{asset.id}:repair")
+            records.append(repair_record)
+            try:
+                payload = json.loads(repaired["choices"][0]["message"]["content"])
+            except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+                raise ProviderResponseError(
+                    "模型服务在一次修复后仍未返回有效的结构化 JSON",
+                    call_records=records,
+                ) from exc
         observations: list[VisualObservation] = []
         evidence: list[EvidenceRef] = []
         warnings: list[str] = []
@@ -213,24 +264,37 @@ class OpenAICompatibleVLMProvider:
                 )
             )
         candidates = []
+        ocr_context = "\n".join(block.text for block in request.ocr_blocks)
+        grounding_context = ocr_context or asset.context_text
         for item in payload.get("claims", []):
             oi = item.get("observation_index")
             observation = (
                 observations[oi] if isinstance(oi, int) and 0 <= oi < len(observations) else None
             )
             try:
-                candidates.append(
-                    candidate_from_payload(
-                        item,
-                        observation.evidence_id if observation else asset.evidence_id,
-                        asset.context_text,
-                        modality=Modality.IMAGE,
-                        source_tool="visual_extraction",
-                        visual_observation_ids=[observation.id] if observation else [],
-                    )
+                candidate = candidate_from_payload(
+                    item,
+                    observation.evidence_id if observation else asset.evidence_id,
+                    grounding_context,
+                    modality=Modality.IMAGE,
+                    source_tool="visual_extraction",
+                    visual_observation_ids=[observation.id] if observation else [],
+                    output_schema=request.output_schema,
                 )
+                if _is_context_only_visual_claim(
+                    candidate, observation, ocr_context, asset.context_text
+                ):
+                    candidate.context_only_visual_claim = True
+                    warnings.append(
+                        f"context_only_visual_claim:asset={asset.id}:candidate={candidate.id}"
+                    )
+                candidates.append(candidate)
             except (KeyError, TypeError, ValueError) as exc:
                 warnings.append(f"visual_claim_invalid:asset={asset.id}:{exc}")
         return ExtractionResult(
-            candidates=candidates, observations=observations, evidence=evidence, warnings=warnings
+            candidates=candidates,
+            observations=observations,
+            evidence=evidence,
+            warnings=warnings,
+            call_records=records,
         )

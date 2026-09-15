@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from urllib.parse import quote
 from uuid import uuid4
 
 import orjson
@@ -16,11 +17,17 @@ class RunRepository:
         self.directory = directory
         self.directory.mkdir(parents=True, exist_ok=True)
 
+    def _target(self, run_id: str) -> Path:
+        return self.directory / f"{quote(run_id, safe='')}.json"
+
+    def _legacy_target(self, run_id: str) -> Path:
+        return self.directory / f"{run_id}.json"
+
     def exists(self, run_id: str) -> bool:
-        return (self.directory / f"{run_id}.json").is_file()
+        return self._target(run_id).is_file() or self._legacy_target(run_id).is_file()
 
     def save(self, state: WorkflowState) -> Path:
-        target = self.directory / f"{state.run_id}.json"
+        target = self._target(state.run_id)
         temporary = target.with_name(f".{target.name}.{uuid4().hex}.tmp")
         try:
             with temporary.open("wb") as stream:
@@ -35,6 +42,9 @@ class RunRepository:
         return target
 
     def load(self, run_id: str) -> WorkflowState:
+        target = self._target(run_id)
+        if not target.is_file() and self._legacy_target(run_id).is_file():
+            target = self._legacy_target(run_id)
         return WorkflowState.model_validate(
-            orjson.loads((self.directory / f"{run_id}.json").read_bytes())
+            orjson.loads(target.read_bytes())
         )

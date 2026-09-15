@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from rich.console import Console
 
 from prismke.domain import ReviewDecision, load_schema
+from prismke.evaluation import evaluate_manifest
 from prismke.workflow import PrismKEService
 
 app = typer.Typer(no_args_is_help=True, help="PrismKE knowledge construction CLI")
@@ -99,6 +100,33 @@ def export_evidence(
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(payload)
     console.print(f"evidence exported: {output.resolve()}")
+
+
+@app.command("evaluate")
+def evaluate(
+    manifest: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    output: Annotated[Path, typer.Option("--output", dir_okay=False)],
+    provider: Annotated[str, typer.Option("--provider")] = "mock",
+    ocr_provider: Annotated[str, typer.Option("--ocr-provider")] = "disabled",
+    vlm_provider: Annotated[str, typer.Option("--vlm-provider")] = "disabled",
+) -> None:
+    """Run a reproducible evaluation manifest and write a JSON report."""
+
+    report = asyncio.run(
+        evaluate_manifest(
+            manifest,
+            PrismKEService(),
+            provider_name=provider,
+            ocr_provider_name=ocr_provider,
+            vlm_provider_name=vlm_provider,
+        )
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(orjson.dumps(report.model_dump(mode="json"), option=orjson.OPT_INDENT_2))
+    console.print(
+        f"evaluation completed={report.completed_cases} failed={report.failed_cases} "
+        f"claim_f1={report.claim_f1:.4f} output={output.resolve()}"
+    )
 
 
 if __name__ == "__main__":

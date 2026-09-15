@@ -50,8 +50,8 @@ class MultimodalAlignmentService:
         records: list[AlignmentRecord] = []
         for signature, members in groups.items():
             modalities = sorted({modality for item in members for modality in item.modalities})
-            cross_modal = Modality.IMAGE in modalities and bool(
-                {Modality.TEXT, Modality.OCR} & set(modalities)
+            cross_modal = (
+                Modality.IMAGE in modalities and Modality.TEXT in modalities
             )
             if len(members) == 1:
                 aligned.append(members[0])
@@ -81,6 +81,9 @@ class MultimodalAlignmentService:
             primary.id = stable_id("candidate", *signature, *sorted(item.id for item in members))
             primary.cross_modal_support = cross_modal
             primary.coarse_visual_evidence = all(item.coarse_visual_evidence for item in members)
+            primary.context_only_visual_claim = any(
+                item.context_only_visual_claim for item in members
+            )
             aligned.append(primary)
             records.append(
                 AlignmentRecord(

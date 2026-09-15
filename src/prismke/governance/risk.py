@@ -19,6 +19,8 @@ def route_by_risk(
             reasons.append("conflicting_claim")
         if claim.coarse_visual_evidence and not claim.cross_modal_support:
             reasons.append("coarse_visual_evidence")
+        if claim.context_only_visual_claim:
+            reasons.append("context_only_visual_claim")
         if claim.confidence < 0.55:
             claim.status = ClaimStatus.REJECTED
         elif claim.confidence < 0.85:

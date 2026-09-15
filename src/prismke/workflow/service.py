@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import urlparse
 
 from prismke.core.errors import LegacyCheckpointError, ProviderConfigurationError
 from prismke.core.ids import canonical_hash, file_sha256, stable_id
@@ -24,7 +25,7 @@ from prismke.providers.base import LLMProvider, OCRProvider, VLMProvider
 from prismke.workflow.graph import PrismKEWorkflow
 
 PIPELINE_VERSION = "0.2.0"
-ASSET_POLICY_VERSION = "assets-v1"
+ASSET_POLICY_VERSION = "assets-v2"
 ALIGNMENT_POLICY_VERSION = "alignment-v1"
 
 
@@ -34,6 +35,21 @@ class PrismKEService:
         self.runs = RunRepository(self.settings.runs_dir)
         self.graph_store = JSONGraphStore(self.settings.graph_dir)
         self.evidence_store = FileEvidenceStore(self.settings.evidence_dir)
+        self._ocr_providers: dict[str, OCRProvider] = {}
+
+    @staticmethod
+    def _validate_endpoint(value: str, variable: str) -> None:
+        parsed = urlparse(value.strip())
+        if (
+            not value.strip()
+            or "<" in value
+            or ">" in value
+            or parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+        ):
+            raise ProviderConfigurationError(
+                f"openai-compatible requires a valid {variable}"
+            )
 
     def provider(self, name: str) -> LLMProvider:
         if name == "mock":
@@ -44,6 +60,7 @@ class PrismKEService:
             raise ProviderConfigurationError("openai-compatible requires PRISMKE_LLM_API_KEY")
         if not self.settings.llm_model:
             raise ProviderConfigurationError("openai-compatible requires PRISMKE_LLM_MODEL")
+        self._validate_endpoint(self.settings.llm_base_url, "PRISMKE_LLM_BASE_URL")
         return OpenAICompatibleLLMProvider(
             base_url=self.settings.llm_base_url,
             api_key=self.settings.llm_api_key,
@@ -52,17 +69,23 @@ class PrismKEService:
         )
 
     def ocr_provider(self, name: str) -> OCRProvider:
+        cached = self._ocr_providers.get(name)
+        if cached is not None:
+            return cached
         if name == "disabled":
-            return DisabledOCRProvider()
-        if name == "mock":
-            return MockOCRProvider()
-        if name == "paddle":
-            return PaddleOCRProvider(
+            provider: OCRProvider = DisabledOCRProvider()
+        elif name == "mock":
+            provider = MockOCRProvider()
+        elif name == "paddle":
+            provider = PaddleOCRProvider(
                 device=self.settings.ocr_device,
                 lang=self.settings.ocr_lang,
                 model=self.settings.ocr_model,
             )
-        raise ProviderConfigurationError(f"unknown OCR provider: {name}")
+        else:
+            raise ProviderConfigurationError(f"unknown OCR provider: {name}")
+        self._ocr_providers[name] = provider
+        return provider
 
     def vlm_provider(self, name: str) -> VLMProvider:
         if name == "disabled":
@@ -75,6 +98,7 @@ class PrismKEService:
             raise ProviderConfigurationError("openai-compatible VLM requires PRISMKE_VLM_API_KEY")
         if not self.settings.vlm_model:
             raise ProviderConfigurationError("openai-compatible VLM requires PRISMKE_VLM_MODEL")
+        self._validate_endpoint(self.settings.vlm_base_url, "PRISMKE_VLM_BASE_URL")
         return OpenAICompatibleVLMProvider(
             base_url=self.settings.vlm_base_url,
             api_key=self.settings.vlm_api_key,

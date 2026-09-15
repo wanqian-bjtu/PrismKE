@@ -38,11 +38,33 @@ class VisualExtractionRequest(ExtractionRequest):
     ocr_blocks: list[TextBlock] = Field(default_factory=list)
 
 
+class ProviderCallRecord(BaseModel):
+    """Sanitized metadata for one external model request."""
+
+    id: str
+    provider: Literal["llm", "vlm"]
+    operation_id: str
+    requested_model: str
+    response_model: str | None = None
+    request_id: str | None = None
+    input_tokens: int = Field(default=0, ge=0)
+    output_tokens: int = Field(default=0, ge=0)
+    total_tokens: int = Field(default=0, ge=0)
+    latency_ms: float = Field(ge=0.0)
+    retry_count: int = Field(default=0, ge=0)
+    status: Literal["succeeded", "failed"]
+    error_code: str | None = None
+    prompt_version: str
+    estimated_cost_cny: float | None = Field(default=None, ge=0.0)
+    pricing_snapshot: str | None = None
+
+
 class ExtractionResult(BaseModel):
     candidates: list[CandidateClaim] = Field(default_factory=list)
     observations: list[VisualObservation] = Field(default_factory=list)
     evidence: list[EvidenceRef] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    call_records: list[ProviderCallRecord] = Field(default_factory=list)
 
 
 class OCRRequest(BaseModel):
@@ -95,3 +117,4 @@ class WorkflowState(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
     retry_count: int = 0
+    provider_calls: list[ProviderCallRecord] = Field(default_factory=list)

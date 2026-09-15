@@ -16,6 +16,7 @@ from prismke.domain import (
 )
 from prismke.governance import (
     EntityResolver,
+    MultimodalAlignmentService,
     collect_mentions,
     detect_conflicts,
     normalize_claims,
@@ -183,6 +184,56 @@ def test_inverse_relations_share_claim_identity() -> None:
     assert claims[0].evidence_ids == ["ev:1", "ev:2"]
 
 
+def test_inverse_relation_repairs_provider_direction_from_entity_types() -> None:
+    schema = SchemaIndex(
+        OutputSchema(
+            schema_id="software",
+            version="1",
+            entity_types=[EntityTypeDef(id="Software"), EntityTypeDef(id="Organization")],
+            relations=[
+                RelationDef(
+                    id="developed_by",
+                    domain=["Software"],
+                    range=["Organization"],
+                    inverse_relation="develops",
+                ),
+                RelationDef(
+                    id="develops",
+                    domain=["Organization"],
+                    range=["Software"],
+                    inverse_relation="developed_by",
+                ),
+            ],
+        )
+    )
+    organization = EntityMention(
+        id="mention:organization",
+        name="Northstar Labs",
+        entity_type="Organization",
+        evidence_ids=["ev:1"],
+    )
+    software = EntityMention(
+        id="mention:software",
+        name="AuroraGraph",
+        entity_type="Software",
+        evidence_ids=["ev:1"],
+    )
+    candidate = CandidateClaim(
+        id="candidate:inverse-direction",
+        subject=organization,
+        relation="developed_by",
+        object=software,
+        confidence=0.9,
+        evidence_ids=["ev:1"],
+    )
+    bundle = EntityResolver(schema, []).resolve([organization, software])
+    entities = {entity.id: entity for entity in bundle.entities}
+    claims = normalize_claims([candidate], schema, entities, bundle.mention_to_entity)
+    assert claims[0].relation_id == "develops"
+    assert claims[0].subject_id == bundle.mention_to_entity[organization.id]
+    assert claims[0].object_entity_id == bundle.mention_to_entity[software.id]
+
+
 def test_symmetric_relation_shares_claim_identity() -> None:
     schema = SchemaIndex(
         OutputSchema(
@@ -269,3 +320,90 @@ def test_risk_routing_has_three_bands() -> None:
         ClaimStatus.REJECTED,
     ]
     assert [task.claim_id for task in reviews] == ["claim:medium"]
+
+
+def test_context_only_visual_claim_always_requires_review() -> None:
+    claim = Claim(
+        id="claim:context-only",
+        subject_id="entity:s",
+        relation_id="r",
+        object_literal="v",
+        confidence=0.99,
+        evidence_ids=["ev:image"],
+        cross_modal_support=True,
+        context_only_visual_claim=True,
+    )
+    claims, reviews = route_by_risk("run:context-only", [claim], [])
+    assert claims[0].status == ClaimStatus.REVIEW_REQUIRED
+    assert reviews[0].reasons == ["context_only_visual_claim"]
+
+
+def test_atlasflow_cross_modal_conflict_is_preserved_for_review() -> None:
+    schema = SchemaIndex(
+        OutputSchema(
+            schema_id="software-conflict",
+            version="1",
+            entity_types=[
+                EntityTypeDef(id="Software"),
+                EntityTypeDef(id="Organization"),
+            ],
+            relations=[
+                RelationDef(
+                    id="developed_by",
+                    domain=["Software"],
+                    range=["Organization"],
+                    functional=True,
+                    max_cardinality=1,
+                )
+            ],
+        )
+    )
+
+    def conflict_candidate(
+        identifier: str,
+        organization: str,
+        modality: Modality,
+    ) -> CandidateClaim:
+        evidence_id = f"ev:{identifier}"
+        return CandidateClaim(
+            id=f"candidate:{identifier}",
+            subject=EntityMention(
+                id=f"mention:atlasflow:{identifier}",
+                name="AtlasFlow",
+                entity_type="Software",
+                modality=modality,
+                evidence_ids=[evidence_id],
+            ),
+            relation="developed_by",
+            object=EntityMention(
+                id=f"mention:{organization}:{identifier}",
+                name=organization,
+                entity_type="Organization",
+                modality=modality,
+                evidence_ids=[evidence_id],
+            ),
+            confidence=0.95,
+            evidence_ids=[evidence_id],
+            modalities=[modality],
+        )
+
+    text = conflict_candidate("text", "Harbor Research", Modality.TEXT)
+    visual = conflict_candidate("visual", "Contoso AI", Modality.IMAGE)
+    candidates, alignments = MultimodalAlignmentService().align([text], [visual], schema)
+    assert any(item.decision == "conflict" for item in alignments)
+
+    resolver = EntityResolver(schema, [])
+    resolution = resolver.resolve(collect_mentions(candidates))
+    entities = {entity.id: entity for entity in resolution.entities}
+    claims = normalize_claims(
+        candidates,
+        schema,
+        entities,
+        resolution.mention_to_entity,
+    )
+    conflicts = detect_conflicts(claims, [], schema)
+    routed_claims, reviews = route_by_risk("run:atlasflow", claims, conflicts)
+    assert len(routed_claims) == 2
+    assert len(conflicts) == 1
+    assert all(claim.status == ClaimStatus.REVIEW_REQUIRED for claim in routed_claims)
+    assert len(reviews) == 2

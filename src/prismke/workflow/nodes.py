@@ -27,7 +27,7 @@ from prismke.governance import (
     normalize_claims,
     route_by_risk,
 )
-from prismke.parsing import ParserRegistry
+from prismke.parsing import ParserRegistry, select_analysis_assets
 from prismke.persistence.base import EvidenceStore, GraphStore
 from prismke.providers.base import LLMProvider, OCRProvider, VLMProvider
 
@@ -93,17 +93,22 @@ class WorkflowNodes:
 
     async def extract_text_claims(self, state: WorkflowState) -> WorkflowState:
         assert state.document is not None and state.output_schema is not None
+        if not state.document.text_blocks:
+            state.text_candidates = []
+            state.warnings.append("text_extraction_skipped:no_text_blocks")
+            return state
         result = await self.provider.extract(
             ExtractionRequest(document=state.document, output_schema=state.output_schema)
         )
         state.text_candidates = result.candidates
         state.warnings.extend(result.warnings)
+        state.provider_calls.extend(result.call_records)
         return state
 
     async def extract_visual_claims(self, state: WorkflowState) -> WorkflowState:
         assert state.document is not None and state.output_schema is not None
         state.visual_candidates = []
-        for asset in state.document.media_assets:
+        for asset in select_analysis_assets(state.document):
             ocr_blocks = [
                 block
                 for block in state.document.text_blocks
@@ -133,6 +138,7 @@ class WorkflowNodes:
                 await self.evidence_store.put_ref(evidence)
                 state.document.evidence.append(evidence)
             state.warnings.extend(result.warnings)
+            state.provider_calls.extend(result.call_records)
         return state
 
     async def align_modalities(self, state: WorkflowState) -> WorkflowState:

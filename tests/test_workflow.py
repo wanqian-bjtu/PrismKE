@@ -31,6 +31,16 @@ from prismke.workflow import PrismKEService, PrismKEWorkflow
 from prismke.workflow.nodes import WorkflowNodes
 
 
+def test_run_repository_uses_cross_platform_safe_filename(tmp_path: Path) -> None:
+    repository = RunRepository(tmp_path / "runs")
+    state = WorkflowState(
+        run_id="run:portable", input_path="input.txt", schema_path="schema.yaml"
+    )
+    target = repository.save(state)
+    assert target.name == "run%3Aportable.json"
+    assert repository.load(state.run_id).run_id == state.run_id
+
+
 @pytest.mark.asyncio
 async def test_mock_vertical_slice(tmp_path: Path, schema_path: Path) -> None:
     sample = tmp_path / "sample.txt"
