@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -84,8 +84,9 @@ class OpenAICompatibleLLMProvider:
             payload = json.loads(content)
         except (KeyError, IndexError, TypeError, json.JSONDecodeError):
             repair_body = dict(body)
+            messages = cast(list[dict[str, Any]], body["messages"])
             repair_body["messages"] = [
-                *body["messages"],
+                *messages,
                 {"role": "assistant", "content": str(response)},
                 {"role": "user", "content": "Return one valid JSON object only."},
             ]
