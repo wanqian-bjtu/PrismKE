@@ -6,12 +6,16 @@ import pytest
 from typer.testing import CliRunner
 
 from prismke.cli import app
+from prismke.core.errors import EvidenceIntegrityError
 from prismke.core.ids import stable_id
 from prismke.core.settings import Settings
 from prismke.domain import (
+    Claim,
     ClaimStatus,
     ExtractionRequest,
     ExtractionResult,
+    GraphCommit,
+    GraphRevision,
     ReviewDecision,
     SourceDocument,
     WorkflowState,
@@ -21,6 +25,7 @@ from prismke.parsing.adapters import TextParser
 from prismke.persistence import FileEvidenceStore, JSONGraphStore, RunRepository
 from prismke.providers import MockLLMProvider
 from prismke.workflow import PrismKEService, PrismKEWorkflow
+from prismke.workflow.nodes import WorkflowNodes
 
 
 @pytest.mark.asyncio
@@ -129,3 +134,36 @@ def test_cli_generates_run(tmp_path: Path, schema_path: Path, monkeypatch) -> No
     )
     assert result.exit_code == 0, result.output
     assert "status=completed" in result.output
+
+
+@pytest.mark.asyncio
+async def test_commit_rejects_missing_evidence(tmp_path: Path) -> None:
+    graph_store = JSONGraphStore(tmp_path / "graph")
+    nodes = WorkflowNodes(
+        MockLLMProvider(),
+        graph_store,
+        FileEvidenceStore(tmp_path / "evidence"),
+        ParserRegistry(),
+    )
+    claim = Claim(
+        id="claim:missing",
+        subject_id="entity:missing",
+        relation_id="r",
+        object_literal="value",
+        confidence=0.9,
+        evidence_ids=["ev:missing"],
+        status=ClaimStatus.AUTO_APPROVED,
+    )
+    revision = GraphRevision(
+        id="revision:missing",
+        run_id="run:missing",
+        claim_ids=[claim.id],
+    )
+    state = WorkflowState(
+        run_id="run:missing",
+        input_path="missing",
+        schema_path="missing",
+        graph_commit=GraphCommit(claims=[claim], revision=revision),
+    )
+    with pytest.raises(EvidenceIntegrityError, match="invalid evidence"):
+        await nodes.commit_graph(state)

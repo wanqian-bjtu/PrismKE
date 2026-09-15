@@ -183,6 +183,78 @@ def test_inverse_relations_share_claim_identity() -> None:
     assert claims[0].evidence_ids == ["ev:1", "ev:2"]
 
 
+def test_symmetric_relation_shares_claim_identity() -> None:
+    schema = SchemaIndex(
+        OutputSchema(
+            schema_id="social",
+            version="1",
+            entity_types=[EntityTypeDef(id="Person")],
+            relations=[
+                RelationDef(
+                    id="knows",
+                    domain=["Person"],
+                    range=["Person"],
+                    symmetric=True,
+                )
+            ],
+        )
+    )
+    left = EntityMention(
+        id="mention:left", name="A", entity_type="Person", evidence_ids=["ev:1"]
+    )
+    right = EntityMention(
+        id="mention:right", name="B", entity_type="Person", evidence_ids=["ev:1"]
+    )
+    candidates = [
+        CandidateClaim(
+            id="candidate:1",
+            subject=left,
+            relation="knows",
+            object=right,
+            confidence=0.9,
+            evidence_ids=["ev:1"],
+        ),
+        CandidateClaim(
+            id="candidate:2",
+            subject=right,
+            relation="knows",
+            object=left,
+            confidence=0.8,
+            evidence_ids=["ev:2"],
+        ),
+    ]
+    resolver = EntityResolver(schema, [])
+    bundle = resolver.resolve([left, right])
+    entities = {entity.id: entity for entity in bundle.entities}
+    claims = normalize_claims(candidates, schema, entities, bundle.mention_to_entity)
+    assert len(claims) == 1
+
+
+def test_finite_max_cardinality_detects_overflow() -> None:
+    schema = SchemaIndex(
+        OutputSchema(
+            schema_id="limited",
+            version="1",
+            entity_types=[EntityTypeDef(id="Thing")],
+            relations=[RelationDef(id="has_member", max_cardinality=2)],
+        )
+    )
+    claims = [
+        Claim(
+            id=f"claim:{index}",
+            subject_id="entity:s",
+            relation_id="has_member",
+            object_literal=str(index),
+            confidence=0.9,
+            evidence_ids=[f"ev:{index}"],
+        )
+        for index in range(3)
+    ]
+    conflicts = detect_conflicts(claims, [], schema)
+    assert conflicts[0].reason == "relation_max_cardinality_exceeded"
+    assert len(conflicts[0].claim_ids) == 3
+
+
 def test_risk_routing_has_three_bands() -> None:
     base = Claim(
         id="claim:high",
