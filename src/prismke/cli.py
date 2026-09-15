@@ -8,6 +8,7 @@ from typing import Annotated
 
 import orjson
 import typer
+from pydantic import BaseModel
 from rich.console import Console
 
 from prismke.models import ReviewDecision
@@ -19,8 +20,8 @@ console = Console()
 
 
 def _print_model(model: object) -> None:
-    if hasattr(model, "model_dump"):
-        model = model.model_dump(mode="json")  # type: ignore[union-attr]
+    if isinstance(model, BaseModel):
+        model = model.model_dump(mode="json")
     console.print_json(orjson.dumps(model).decode())
 
 

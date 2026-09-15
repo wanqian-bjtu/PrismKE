@@ -12,7 +12,6 @@ from prismke.models import (
     ExtractionRequest,
     ExtractionResult,
     GraphRevision,
-    OutputSchema,
     SourceDocument,
     VisualExtractionRequest,
 )

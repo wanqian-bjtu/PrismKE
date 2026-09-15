@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 
 import orjson
 
@@ -25,30 +26,30 @@ class JSONGraphStore:
                 }
             )
 
-    def _read(self) -> dict[str, object]:
-        return orjson.loads(self.path.read_bytes())
+    def _read(self) -> dict[str, Any]:
+        return cast(dict[str, Any], orjson.loads(self.path.read_bytes()))
 
-    def _write(self, payload: dict[str, object]) -> None:
+    def _write(self, payload: dict[str, Any]) -> None:
         temporary = self.path.with_suffix(".json.tmp")
         temporary.write_bytes(orjson.dumps(payload, option=orjson.OPT_INDENT_2))
         temporary.replace(self.path)
 
     async def list_entities(self) -> list[CanonicalEntity]:
         data = self._read()
-        return [CanonicalEntity.model_validate(item) for item in data["entities"].values()]  # type: ignore[union-attr]
+        return [CanonicalEntity.model_validate(item) for item in data["entities"].values()]
 
     async def list_claims(self) -> list[Claim]:
         data = self._read()
-        return [Claim.model_validate(item) for item in data["claims"].values()]  # type: ignore[union-attr]
+        return [Claim.model_validate(item) for item in data["claims"].values()]
 
     async def latest_revision(self) -> GraphRevision | None:
         revisions = self._read()["revisions"]
-        return GraphRevision.model_validate(revisions[-1]) if revisions else None  # type: ignore[index]
+        return GraphRevision.model_validate(revisions[-1]) if revisions else None
 
     async def upsert_entity(self, entity: CanonicalEntity) -> None:
         data = self._read()
         entities = data["entities"]
-        entities[entity.id] = entity.model_dump(mode="json")  # type: ignore[index]
+        entities[entity.id] = entity.model_dump(mode="json")
         self._write(data)
 
     async def append_claim(self, claim: Claim) -> None:
@@ -56,7 +57,7 @@ class JSONGraphStore:
             raise EvidenceRequiredError(f"claim {claim.id} has no evidence")
         data = self._read()
         claims = data["claims"]
-        current = claims.get(claim.id)  # type: ignore[union-attr]
+        current = claims.get(claim.id)
         if current:
             merged = Claim.model_validate(current)
             merged.evidence_ids = sorted(set(merged.evidence_ids + claim.evidence_ids))
@@ -65,19 +66,19 @@ class JSONGraphStore:
             )
             merged.confidence = max(merged.confidence, claim.confidence)
             claim = merged
-        claims[claim.id] = claim.model_dump(mode="json")  # type: ignore[index]
+        claims[claim.id] = claim.model_dump(mode="json")
         self._write(data)
 
     async def open_conflict(self, conflict: ConflictSet) -> None:
         data = self._read()
-        data["conflicts"][conflict.id] = conflict.model_dump(mode="json")  # type: ignore[index]
+        data["conflicts"][conflict.id] = conflict.model_dump(mode="json")
         self._write(data)
 
     async def commit_revision(self, revision: GraphRevision) -> None:
         data = self._read()
         revisions = data["revisions"]
-        if not any(item["id"] == revision.id for item in revisions):  # type: ignore[union-attr]
-            revisions.append(revision.model_dump(mode="json"))  # type: ignore[union-attr]
+        if not any(item["id"] == revision.id for item in revisions):
+            revisions.append(revision.model_dump(mode="json"))
         self._write(data)
 
 

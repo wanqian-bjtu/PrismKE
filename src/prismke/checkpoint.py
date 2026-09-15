@@ -27,8 +27,7 @@ class SQLiteCheckpointStore:
                 """
             )
             connection.execute(
-                "CREATE INDEX IF NOT EXISTS idx_snapshots_run "
-                "ON snapshots(run_id, sequence DESC)"
+                "CREATE INDEX IF NOT EXISTS idx_snapshots_run ON snapshots(run_id, sequence DESC)"
             )
 
     def _connect(self) -> sqlite3.Connection:
@@ -45,8 +44,7 @@ class SQLiteCheckpointStore:
     def load_latest(self, run_id: str) -> WorkflowState | None:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT state_json FROM snapshots WHERE run_id = ? "
-                "ORDER BY sequence DESC LIMIT 1",
+                "SELECT state_json FROM snapshots WHERE run_id = ? ORDER BY sequence DESC LIMIT 1",
                 (run_id,),
             ).fetchone()
         return WorkflowState.model_validate(orjson.loads(row[0])) if row else None

@@ -60,18 +60,14 @@ class PrismKEService:
         claim = next((item for item in state.claims if item.id == claim_id), None)
         if claim is None:
             raise KeyError(f"claim not found: {claim_id}")
-        task = next(
-            (item for item in state.review_tasks if item.claim_id == claim_id), None
-        )
+        task = next((item for item in state.review_tasks if item.claim_id == claim_id), None)
         if task is None:
             raise KeyError(f"review task not found for claim: {claim_id}")
         task.status = "resolved"
         task.decision = decision
         task.resolved_at = utc_now()
         claim.status = (
-            ClaimStatus.APPROVED
-            if decision == ReviewDecision.APPROVE
-            else ClaimStatus.REJECTED
+            ClaimStatus.APPROVED if decision == ReviewDecision.APPROVE else ClaimStatus.REJECTED
         )
         state.status = "running"
         state.current_node = "route_by_risk"

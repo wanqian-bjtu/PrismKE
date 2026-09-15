@@ -89,9 +89,9 @@ class PrismKEWorkflow:
             ("commit_revision", self._commit_revision),
         ]
         for name, handler in ordered_nodes:
-            builder.add_node(name, self._node(name, handler))
+            builder.add_node(name, cast(Any, self._node(name, handler)))
         builder.add_edge(START, ordered_nodes[0][0])
-        for (left, _), (right, _) in zip(ordered_nodes, ordered_nodes[1:], strict=True):
+        for (left, _), (right, _) in zip(ordered_nodes, ordered_nodes[1:], strict=False):
             builder.add_edge(left, right)
         builder.add_edge(ordered_nodes[-1][0], END)
         return builder.compile()
@@ -111,8 +111,8 @@ class PrismKEWorkflow:
 
     async def _load_schema(self, graph_state: GraphState) -> GraphState:
         state = self._state(graph_state)
-        if state.schema is None:
-            state.schema = load_schema(SourceDocument(path=state.schema_path).path)
+        if state.output_schema is None:
+            state.output_schema = load_schema(SourceDocument(path=state.schema_path).path)
         return self._snapshot(state, "load_schema")
 
     async def _extract_claims(self, graph_state: GraphState) -> GraphState:
@@ -120,9 +120,9 @@ class PrismKEWorkflow:
 
         state = self._state(graph_state)
         if not state.candidates:
-            assert state.document is not None and state.schema is not None
+            assert state.document is not None and state.output_schema is not None
             result = await self.provider.extract(
-                ExtractionRequest(document=state.document, schema=state.schema)
+                ExtractionRequest(document=state.document, output_schema=state.output_schema)
             )
             state.candidates = result.candidates
             state.warnings.extend(result.warnings)
@@ -131,9 +131,9 @@ class PrismKEWorkflow:
     async def _resolve_entities(self, graph_state: GraphState) -> GraphState:
         state = self._state(graph_state)
         if not state.entities:
-            assert state.schema is not None
+            assert state.output_schema is not None
             resolver = EntityResolver(
-                SchemaIndex(state.schema), await self.graph_store.list_entities()
+                SchemaIndex(state.output_schema), await self.graph_store.list_entities()
             )
             resolution = resolver.resolve(collect_mentions(state.candidates))
             state.entities = resolution.entities
@@ -146,14 +146,14 @@ class PrismKEWorkflow:
     async def _normalize_claims(self, graph_state: GraphState) -> GraphState:
         state = self._state(graph_state)
         if not state.claims:
-            assert state.schema is not None
-            resolver = EntityResolver(SchemaIndex(state.schema), state.entities)
+            assert state.output_schema is not None
+            resolver = EntityResolver(SchemaIndex(state.output_schema), state.entities)
             resolution = resolver.resolve(collect_mentions(state.candidates))
             entities = {item.id: item for item in resolution.entities}
             state.entities = list(entities.values())
             state.claims = normalize_claims(
                 state.candidates,
-                SchemaIndex(state.schema),
+                SchemaIndex(state.output_schema),
                 entities,
                 resolution.mention_to_entity,
             )
@@ -161,20 +161,14 @@ class PrismKEWorkflow:
 
     async def _detect_conflicts(self, graph_state: GraphState) -> GraphState:
         state = self._state(graph_state)
-        state.conflicts = detect_conflicts(
-            state.claims, await self.graph_store.list_claims()
-        )
+        state.conflicts = detect_conflicts(state.claims, await self.graph_store.list_claims())
         return self._snapshot(state, "detect_conflicts")
 
     async def _route_by_risk(self, graph_state: GraphState) -> GraphState:
         state = self._state(graph_state)
-        state.claims, new_reviews = route_by_risk(
-            state.run_id, state.claims, state.conflicts
-        )
+        state.claims, new_reviews = route_by_risk(state.run_id, state.claims, state.conflicts)
         resolved = {item.claim_id: item for item in state.review_tasks if item.status == "resolved"}
-        state.review_tasks = [
-            resolved.get(item.claim_id, item) for item in new_reviews
-        ]
+        state.review_tasks = [resolved.get(item.claim_id, item) for item in new_reviews]
         state.status = (
             "awaiting_review"
             if any(item.status == "pending" for item in state.review_tasks)
@@ -203,11 +197,17 @@ class PrismKEWorkflow:
             if claim.status in {ClaimStatus.AUTO_APPROVED, ClaimStatus.APPROVED}
         ]
         parent = await self.graph_store.latest_revision()
+        entity_ids = {
+            entity_id
+            for claim in state.claims
+            for entity_id in (claim.subject_id, claim.object_entity_id)
+            if entity_id is not None
+        }
         state.revision = GraphRevision(
             id=stable_id("revision", state.run_id, *accepted_claim_ids),
             run_id=state.run_id,
             parent_id=parent.id if parent else None,
-            entity_ids=sorted({claim.subject_id for claim in state.claims}),
+            entity_ids=sorted(entity_ids),
             claim_ids=accepted_claim_ids,
             conflict_ids=[item.id for item in state.conflicts],
         )

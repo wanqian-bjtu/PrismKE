@@ -5,11 +5,12 @@ from __future__ import annotations
 import mimetypes
 from pathlib import Path
 
-import fitz
+import pymupdf
 from PIL import Image
 
 from prismke.errors import UnsupportedDocumentError
 from prismke.ids import file_sha256, stable_id
+from prismke.interfaces import ParserAdapter
 from prismke.models import (
     BBox,
     DocumentIR,
@@ -94,7 +95,7 @@ class PDFParser:
         blocks: list[TextBlock] = []
         evidence: list[EvidenceRef] = []
         warnings: list[str] = []
-        with fitz.open(path) as pdf:
+        with pymupdf.open(path) as pdf:  # type: ignore[no-untyped-call]
             for page_index, page in enumerate(pdf):
                 page_number = page_index + 1
                 page_dict = page.get_text("dict")
@@ -110,7 +111,9 @@ class PDFParser:
                     if not text:
                         continue
                     page_has_text = True
-                    bbox = BBox(**dict(zip(("x0", "y0", "x1", "y1"), raw_block["bbox"], strict=True)))
+                    bbox = BBox(
+                        **dict(zip(("x0", "y0", "x1", "y1"), raw_block["bbox"], strict=True))
+                    )
                     evidence_id = stable_id("ev", document_id, page_number, *raw_block["bbox"])
                     block_id = stable_id("block", document_id, page_number, *raw_block["bbox"])
                     blocks.append(
@@ -190,7 +193,7 @@ class ImageParser:
 
 class ParserRegistry:
     def __init__(self) -> None:
-        self._parsers = [TextParser(), PDFParser(), ImageParser()]
+        self._parsers: list[ParserAdapter] = [TextParser(), PDFParser(), ImageParser()]
 
     async def parse(self, source: SourceDocument) -> DocumentIR:
         media_type = detect_media_type(source.path, source.media_type)

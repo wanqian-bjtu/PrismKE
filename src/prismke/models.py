@@ -208,7 +208,9 @@ class OutputSchema(BaseModel):
 
 class ExtractionRequest(BaseModel):
     document: DocumentIR
-    schema: OutputSchema
+    output_schema: OutputSchema = Field(alias="schema")
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class VisualExtractionRequest(ExtractionRequest):
@@ -229,7 +231,7 @@ class ResolutionDecision(BaseModel):
 
 
 class WorkflowState(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, populate_by_name=True)
 
     run_id: str
     input_path: str
@@ -238,7 +240,7 @@ class WorkflowState(BaseModel):
     current_node: str = "ingest"
     status: Literal["running", "awaiting_review", "completed", "failed"] = "running"
     document: DocumentIR | None = None
-    schema: OutputSchema | None = None
+    output_schema: OutputSchema | None = Field(default=None, alias="schema")
     candidates: list[CandidateClaim] = Field(default_factory=list)
     entities: list[CanonicalEntity] = Field(default_factory=list)
     claims: list[Claim] = Field(default_factory=list)

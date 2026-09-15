@@ -51,9 +51,7 @@ class EntityResolver:
             entity_type = self.schema.entity_type(mention.entity_type)
             if entity_type is None:
                 if self.schema.schema.strict:
-                    raise SchemaValidationError(
-                        f"unknown entity type: {mention.entity_type}"
-                    )
+                    raise SchemaValidationError(f"unknown entity type: {mention.entity_type}")
                 entity_type = mention.entity_type
                 review_reasons[mention.id] = ["ontology_addition"]
             key = (normalize_label(mention.name), entity_type)
@@ -120,9 +118,7 @@ def normalize_claims(
             object_key = normalize_label(object_literal)
         claims.append(
             Claim(
-                id=stable_id(
-                    "claim", subject_id, relation_id, object_key, candidate.qualifiers
-                ),
+                id=stable_id("claim", subject_id, relation_id, object_key, candidate.qualifiers),
                 subject_id=subject_id,
                 relation_id=relation_id,
                 object_entity_id=object_entity_id,

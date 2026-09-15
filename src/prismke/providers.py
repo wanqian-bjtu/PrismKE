@@ -74,9 +74,7 @@ class MockLLMProvider:
                     "object_type": object_type or None,
                     "confidence": float(confidence),
                 }
-                candidates.append(
-                    _candidate_from_payload(payload, block.evidence_id, block.text)
-                )
+                candidates.append(_candidate_from_payload(payload, block.evidence_id, block.text))
             except (ValueError, KeyError) as exc:
                 warnings.append(f"mock_parse_failed:block={block.id}:{exc}")
         if request.document.media_assets:
@@ -115,7 +113,7 @@ class OpenAICompatibleLLMProvider:
             "Return a JSON object with key 'claims'. Each claim must contain subject, "
             "relation, object, subject_type, optional object_type, confidence, and "
             "evidence_id. Never invent an evidence_id.\n"
-            f"Schema: {request.schema.model_dump_json()}\n"
+            f"Schema: {request.output_schema.model_dump_json()}\n"
             f"Blocks: {json.dumps(blocks, ensure_ascii=False)}"
         )
         headers = {"Authorization": f"Bearer {self.api_key}"}
@@ -125,9 +123,7 @@ class OpenAICompatibleLLMProvider:
             "temperature": 0,
             "response_format": {"type": "json_object"},
         }
-        async with httpx.AsyncClient(
-            timeout=self.timeout, transport=self.transport
-        ) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, transport=self.transport) as client:
             response = await client.post(
                 f"{self.base_url}/chat/completions", headers=headers, json=body
             )
