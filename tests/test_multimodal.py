@@ -6,6 +6,8 @@ from pathlib import Path
 
 import httpx
 import pytest
+from docx import Document
+from docx.shared import Inches
 from PIL import Image
 
 from prismke.core.settings import Settings
@@ -63,6 +65,21 @@ async def test_html_data_uri_image(tmp_path: Path) -> None:
     document = await ParserRegistry(asset_dir=tmp_path / "assets").parse(SourceDocument(path=html))
     assert document.media_assets[0].origin == "html_embedded"
     assert "chart" in document.media_assets[0].context_text
+
+
+@pytest.mark.asyncio
+async def test_docx_embedded_image_keeps_paragraph_context(tmp_path: Path) -> None:
+    image = tmp_path / "figure.png"
+    _image(image)
+    path = tmp_path / "sample.docx"
+    docx = Document()
+    paragraph = docx.add_paragraph("PrismKE architecture")
+    paragraph.add_run().add_picture(str(image), width=Inches(1))
+    docx.save(path)
+    document = await ParserRegistry(asset_dir=tmp_path / "assets").parse(SourceDocument(path=path))
+    assert document.text_blocks[0].text == "PrismKE architecture"
+    assert document.media_assets[0].origin == "docx_embedded"
+    assert document.media_assets[0].context_text == "PrismKE architecture"
 
 
 @pytest.mark.asyncio
