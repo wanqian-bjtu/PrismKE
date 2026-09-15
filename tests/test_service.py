@@ -12,7 +12,14 @@ from prismke.workflow import PrismKEService
 
 
 def test_openai_provider_requires_explicit_configuration(tmp_path: Path) -> None:
-    service = PrismKEService(Settings(runtime_dir=tmp_path / "runtime"))
+    service = PrismKEService(
+        Settings(
+            _env_file=None,
+            runtime_dir=tmp_path / "runtime",
+            llm_api_key=None,
+            llm_model=None,
+        )
+    )
     with pytest.raises(ProviderConfigurationError, match="PRISMKE_LLM_API_KEY"):
         service.provider("openai-compatible")
 

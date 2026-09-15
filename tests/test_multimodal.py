@@ -211,7 +211,14 @@ def test_cross_modal_candidates_with_shared_subject_are_related() -> None:
 
 
 def test_vlm_configuration_is_strict(tmp_path: Path) -> None:
-    service = PrismKEService(Settings(runtime_dir=tmp_path / "runtime"))
+    service = PrismKEService(
+        Settings(
+            _env_file=None,
+            runtime_dir=tmp_path / "runtime",
+            vlm_api_key=None,
+            vlm_model=None,
+        )
+    )
     with pytest.raises(Exception, match="PRISMKE_VLM_API_KEY"):
         service.vlm_provider("openai-compatible")
 
