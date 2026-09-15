@@ -138,8 +138,9 @@ class OpenAICompatibleVLMProvider:
             payload = json.loads(content)
         except (TypeError, json.JSONDecodeError):
             repair_body = dict(body)
+            messages: list[dict[str, Any]] = list(body["messages"])
             repair_body["messages"] = [
-                *body["messages"],
+                *messages,
                 {"role": "assistant", "content": str(content)},
                 {
                     "role": "user",
