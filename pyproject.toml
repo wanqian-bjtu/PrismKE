@@ -78,5 +78,5 @@ packages = ["prismke"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["pymupdf", "pymupdf.*"]
+module = ["networkx", "networkx.*", "plotly", "plotly.*", "pymupdf", "pymupdf.*"]
 ignore_missing_imports = true
