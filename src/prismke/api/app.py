@@ -25,6 +25,7 @@ from fastapi import (
 from fastapi.responses import Response
 
 from prismke.api.models import ReviewRequest, RollbackRequest, RunAccepted
+from prismke.core.errors import GraphIntegrityError, LegacyCheckpointError
 from prismke.core.settings import Settings
 from prismke.workflow import PrismKEService
 
@@ -164,6 +165,8 @@ def create_app(
             return await service.review(state.run_id, claim_id, request.decision)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except LegacyCheckpointError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @api.get("/entities/{entity_id}/neighborhood")
     async def get_neighborhood(
@@ -186,6 +189,8 @@ def create_app(
             return await service.graph_store.diff_revisions(from_id, to_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @api.post("/revisions/{revision_id}/rollback")
     async def rollback_revision(revision_id: str, _: RollbackRequest) -> object:
@@ -193,6 +198,8 @@ def create_app(
             revision = await service.graph_store.rollback_revision(revision_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except GraphIntegrityError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         service.audit.record(
             "rollback", revision_id, {"compensation_revision_id": revision.id}
         )

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
 
 from prismke.api import create_app
+from prismke.core.errors import GraphIntegrityError
 from prismke.core.settings import Settings
 from prismke.workflow import PrismKEService
 
@@ -67,3 +69,106 @@ def test_unknown_run_returns_not_found(tmp_path: Path) -> None:
     with TestClient(create_app(settings, mount_ui=False)) as client:
         response = client.get("/api/v1/runs/missing")
     assert response.status_code == 404
+
+
+def test_review_and_resume_commit_an_awaiting_claim(
+    tmp_path: Path, schema_path: Path
+) -> None:
+    settings = Settings(_env_file=None, runtime_dir=tmp_path / "runtime")
+    service = PrismKEService(settings)
+    app = create_app(settings, service, mount_ui=False)
+    document = (
+        b"PrismKE | developed_by | OpenAI | Software | Organization | 0.70\n"
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/runs",
+            files={
+                "document": ("review.md", document, "text/markdown"),
+                "schema": ("schema.yaml", schema_path.read_bytes(), "application/yaml"),
+            },
+            data={"provider": "mock"},
+        )
+        run_id = response.json()["run_id"]
+        awaiting = client.get(f"/api/v1/runs/{run_id}").json()
+        assert awaiting["status"] == "awaiting_review"
+        task_id = awaiting["review_tasks"][0]["id"]
+
+        review = client.post(
+            f"/api/v1/reviews/{task_id}", json={"decision": "approve"}
+        )
+        assert review.status_code == 200
+        assert review.json()["review_tasks"][0]["status"] == "resolved"
+
+        resumed = client.post(f"/api/v1/runs/{run_id}/resume")
+        assert resumed.status_code == 202
+        completed = client.get(f"/api/v1/runs/{run_id}").json()
+
+    assert completed["status"] == "completed"
+    assert completed["claims"][0]["status"] == "approved"
+
+
+def test_revision_diff_and_rollback_endpoints(
+    tmp_path: Path, schema_path: Path
+) -> None:
+    settings = Settings(_env_file=None, runtime_dir=tmp_path / "runtime")
+    service = PrismKEService(settings)
+    app = create_app(settings, service, mount_ui=False)
+
+    with TestClient(app) as client:
+        revision_ids: list[str] = []
+        for index, organization in enumerate(("OpenAI", "Anthropic"), start=1):
+            document = (
+                f"PrismKE | developed_by | {organization} | Software | "
+                "Organization | 0.92\n"
+            ).encode()
+            response = client.post(
+                "/api/v1/runs",
+                files={
+                    "document": (f"sample-{index}.md", document, "text/markdown"),
+                    "schema": (
+                        "schema.yaml",
+                        schema_path.read_bytes(),
+                        "application/yaml",
+                    ),
+                },
+                data={"provider": "mock"},
+            )
+            state = client.get(f"/api/v1/runs/{response.json()['run_id']}").json()
+            assert state["status"] == "completed"
+            revision_ids.append(state["revision"]["id"])
+
+        revisions = client.get("/api/v1/revisions")
+        assert revisions.status_code == 200
+        assert len(revisions.json()) == 2
+
+        diff = client.get(
+            "/api/v1/revisions/diff",
+            params={"from": revision_ids[0], "to": revision_ids[1]},
+        )
+        assert diff.status_code == 200
+        assert diff.json()["changes"]
+
+        rollback = client.post(
+            f"/api/v1/revisions/{revision_ids[1]}/rollback",
+            json={"confirm": True},
+        )
+
+    assert rollback.status_code == 200
+    assert rollback.json()["parent_id"] == revision_ids[1]
+    assert "rollback" in rollback.json()["run_id"]
+
+
+def test_rollback_integrity_error_returns_conflict(tmp_path: Path) -> None:
+    settings = Settings(_env_file=None, runtime_dir=tmp_path / "runtime")
+    service = PrismKEService(settings)
+    service.graph_store.rollback_revision = AsyncMock(  # type: ignore[method-assign]
+        side_effect=GraphIntegrityError("legacy revision cannot be rolled back")
+    )
+    with TestClient(create_app(settings, service, mount_ui=False)) as client:
+        response = client.post(
+            "/api/v1/revisions/rev:legacy/rollback", json={"confirm": True}
+        )
+    assert response.status_code == 409
+    assert response.json()["detail"] == "legacy revision cannot be rolled back"

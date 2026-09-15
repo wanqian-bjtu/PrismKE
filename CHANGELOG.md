@@ -9,14 +9,21 @@
 - JSON 与 Neo4j 可配置 GraphStore，以及 JSON 到 Neo4j 的幂等迁移命令。
 - `GraphDocument`、`GraphChange`、Revision diff 和补偿回滚协议。
 - FastAPI 任务、证据、审核、邻域、版本和健康检查接口。
-- Gradio 文档构建、Claim 审核、证据定位、图谱与版本工作台。
+- Gradio 文档构建、Claim 审核、证据定位、交互式实体邻域图谱与版本工作台。
 - AutoDL 原生 Neo4j 安装脚本、Dockerfile 和 Docker Compose。
+- HTTP 审核、恢复、版本差异和补偿回滚的端到端测试。
 
 ### 安全
 
 - 非本机 API 监听强制要求 Bearer Token。
 - 图数据库不保存服务器绝对路径，页面不接收或展示模型 API Key。
 - 审核和回滚操作写入追加式审计日志。
+
+### 验证
+
+- AutoDL 原生部署使用 OpenJDK 17.0.20 和 Neo4j 5.26.30 Community。
+- JSON GraphStore、真实 Neo4j、FastAPI、Gradio 和迁移闭环均完成验收。
+- 75 项自动测试全部可通过，其中真实 Neo4j 测试默认跳过并在专用数据库上单独启用。
 
 ## v0.2.1 - 2026-09-16
 
