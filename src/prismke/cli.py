@@ -182,12 +182,11 @@ def serve(
         from prismke.api import create_app
     except ImportError as exc:
         raise typer.BadParameter("web dependencies are missing; run `uv sync --extra web`") from exc
-    overrides: dict[str, object] = {}
+    settings = Settings()
     if host is not None:
-        overrides["api_host"] = host
+        settings.api_host = host
     if port is not None:
-        overrides["api_port"] = port
-    settings = Settings(**overrides)
+        settings.api_port = port
     uvicorn.run(
         create_app(settings),
         host=settings.api_host,
