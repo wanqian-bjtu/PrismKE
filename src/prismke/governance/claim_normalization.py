@@ -96,6 +96,8 @@ def normalize_claims(
                 evidence_ids=candidate.evidence_ids,
                 source_candidate_ids=[candidate.id],
                 qualifiers=candidate.qualifiers,
+                cross_modal_support=candidate.cross_modal_support,
+                coarse_visual_evidence=candidate.coarse_visual_evidence,
             )
         )
     return merge_supporting_claims(claims)
@@ -113,4 +115,8 @@ def merge_supporting_claims(claims: list[Claim]) -> list[Claim]:
             set(current.source_candidate_ids + claim.source_candidate_ids)
         )
         current.confidence = max(current.confidence, claim.confidence)
+        current.cross_modal_support = current.cross_modal_support or claim.cross_modal_support
+        current.coarse_visual_evidence = (
+            current.coarse_visual_evidence and claim.coarse_visual_evidence
+        )
     return list(merged.values())

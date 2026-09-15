@@ -126,7 +126,7 @@ class WorkflowNodes:
                     for item in candidate.evidence_ids
                     if item in evidence_by_id
                 ):
-                    candidate.qualifiers["coarse_visual_evidence"] = True
+                    candidate.coarse_visual_evidence = True
             state.visual_candidates.extend(result.candidates)
             state.document.visual_observations.extend(result.observations)
             for evidence in result.evidence:

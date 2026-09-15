@@ -163,6 +163,7 @@ def test_cross_modal_support_merges_evidence() -> None:
     assert len(merged) == 1
     assert merged[0].confidence == pytest.approx(0.85)
     assert set(merged[0].evidence_ids) == {"ev:text", "ev:image"}
+    assert merged[0].cross_modal_support
     assert records[0].decision == "support"
 
 

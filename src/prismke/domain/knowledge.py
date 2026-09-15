@@ -56,6 +56,8 @@ class CandidateClaim(BaseModel):
     modalities: list[Modality] = Field(default_factory=lambda: [Modality.TEXT])
     source_tool: str = "text_extraction"
     visual_observation_ids: list[str] = Field(default_factory=list)
+    cross_modal_support: bool = False
+    coarse_visual_evidence: bool = False
 
 
 class AlignmentRecord(BaseModel):
@@ -79,6 +81,8 @@ class Claim(BaseModel):
     evidence_ids: list[str] = Field(min_length=1)
     source_candidate_ids: list[str] = Field(default_factory=list)
     qualifiers: dict[str, Any] = Field(default_factory=dict)
+    cross_modal_support: bool = False
+    coarse_visual_evidence: bool = False
     valid_from: datetime | None = None
     valid_to: datetime | None = None
     tx_from: datetime = Field(default_factory=utc_now)
