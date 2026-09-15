@@ -95,17 +95,17 @@ class MultimodalAlignmentService:
             by_subject_relation[sig[:2]].append(candidate)
         for members in by_subject_relation.values():
             objects = {_object_key(item) for item in members}
-            modalities = {modality for item in members for modality in item.modalities}
+            modality_set = {modality for item in members for modality in item.modalities}
             if (
                 len(objects) > 1
-                and Modality.IMAGE in modalities
-                and ({Modality.TEXT, Modality.OCR} & modalities)
+                and Modality.IMAGE in modality_set
+                and ({Modality.TEXT, Modality.OCR} & modality_set)
             ):
                 records.append(
                     AlignmentRecord(
                         id=stable_id("alignment-conflict", *sorted(item.id for item in members)),
                         candidate_ids=[item.id for item in members],
-                        modalities=sorted(modalities),
+                        modalities=sorted(modality_set),
                         decision="conflict",
                         confidence_before=[item.confidence for item in members],
                         reasons=["same_subject_relation_different_object"],

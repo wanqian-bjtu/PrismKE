@@ -261,7 +261,7 @@ class MarkdownParser:
                     warnings.append(f"{kind}:{src}")
                     continue
                 data, media_type, ref_name = resolved
-                asset, ref, warning = _asset(
+                asset, asset_ref, warning = _asset(
                     self.writer,
                     document_id,
                     data,
@@ -272,9 +272,9 @@ class MarkdownParser:
                 )
                 if warning:
                     warnings.append(warning)
-                if asset and ref:
+                if asset and asset_ref:
                     assets.append(asset)
-                    evidence.append(ref)
+                    evidence.append(asset_ref)
             cursor += len(raw_line)
         return DocumentIR(
             id=document_id,
@@ -327,7 +327,7 @@ class HTMLParser:
             data, media_type, ref_name = resolved
             parent_text = image.parent.get_text(" ", strip=True) if image.parent else ""
             context = " ".join(filter(None, [str(image.get("alt", "")), parent_text]))
-            asset, ref, warning = _asset(
+            asset, asset_ref, warning = _asset(
                 self.writer,
                 document_id,
                 data,
@@ -338,9 +338,9 @@ class HTMLParser:
             )
             if warning:
                 warnings.append(warning)
-            if asset and ref:
+            if asset and asset_ref:
                 assets.append(asset)
-                evidence.append(ref)
+                evidence.append(asset_ref)
         return DocumentIR(
             id=document_id,
             source_path=str(path),
@@ -364,7 +364,7 @@ class DOCXParser:
         path = source.path.resolve()
         source_hash = file_sha256(path)
         document_id = stable_id("doc", source_hash)
-        document = Document(path)
+        document = Document(str(path))
         blocks: list[TextBlock] = []
         assets: list[MediaAsset] = []
         evidence: list[EvidenceRef] = []
@@ -382,7 +382,7 @@ class DOCXParser:
                 if not rid or rid not in document.part.related_parts:
                     continue
                 part = document.part.related_parts[rid]
-                asset, ref, warning = _asset(
+                asset, asset_ref, warning = _asset(
                     self.writer,
                     document_id,
                     part.blob,
@@ -393,9 +393,9 @@ class DOCXParser:
                 )
                 if warning:
                     warnings.append(warning)
-                if asset and ref:
+                if asset and asset_ref:
                     assets.append(asset)
-                    evidence.append(ref)
+                    evidence.append(asset_ref)
         return DocumentIR(
             id=document_id,
             source_path=str(path),
@@ -457,7 +457,7 @@ class PDFParser:
                     seen_xrefs.add(xref)
                     extracted = pdf.extract_image(xref)
                     ext = extracted.get("ext", "png")
-                    asset, ref, warning = _asset(
+                    asset, asset_ref, warning = _asset(
                         self.writer,
                         document_id,
                         extracted["image"],
@@ -469,14 +469,14 @@ class PDFParser:
                     )
                     if warning:
                         warnings.append(warning)
-                    if asset and ref:
+                    if asset and asset_ref:
                         assets.append(asset)
-                        evidence.append(ref)
+                        evidence.append(asset_ref)
                         page_assets.append(asset.id)
                 requires_ocr = not page_blocks
                 if requires_ocr or len(page.get_drawings()) >= 5:
                     pixmap = page.get_pixmap(dpi=200, alpha=False)
-                    asset, ref, warning = _asset(
+                    asset, asset_ref, warning = _asset(
                         self.writer,
                         document_id,
                         pixmap.tobytes("png"),
@@ -489,9 +489,9 @@ class PDFParser:
                     )
                     if warning:
                         warnings.append(warning)
-                    if asset and ref:
+                    if asset and asset_ref:
                         assets.append(asset)
-                        evidence.append(ref)
+                        evidence.append(asset_ref)
                         page_assets.append(asset.id)
                 if requires_ocr:
                     warnings.append(f"ocr_required:page={page_number}")

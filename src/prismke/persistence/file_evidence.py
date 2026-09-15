@@ -153,12 +153,14 @@ class FileEvidenceStore:
                 if evidence.page_number is None:
                     raise EvidenceIntegrityError("PDF evidence has no page number")
                 page = pdf[evidence.page_number - 1]
-                pixmap = page.get_pixmap(
-                    matrix=pymupdf.Matrix(2, 2),
-                    clip=pymupdf.Rect(box.x0, box.y0, box.x1, box.y1),
+                pixmap = page.get_pixmap(  # type: ignore[no-untyped-call]
+                    matrix=pymupdf.Matrix(2, 2),  # type: ignore[no-untyped-call]
+                    clip=pymupdf.Rect(  # type: ignore[no-untyped-call]
+                        box.x0, box.y0, box.x1, box.y1
+                    ),
                     alpha=False,
                 )
-                return pixmap.tobytes("png")
+                return bytes(pixmap.tobytes("png"))
         with Image.open(BytesIO(content)) as image:
             if evidence.coordinate_space == CoordinateSpace.NORMALIZED:
                 coordinates = (
@@ -168,7 +170,12 @@ class FileEvidenceStore:
                     int(box.y1 * image.height),
                 )
             else:
-                coordinates = tuple(map(int, (box.x0, box.y0, box.x1, box.y1)))
+                coordinates = (
+                    int(box.x0),
+                    int(box.y0),
+                    int(box.x1),
+                    int(box.y1),
+                )
             cropped = image.crop(coordinates)
             output = BytesIO()
             cropped.save(output, format="PNG")
