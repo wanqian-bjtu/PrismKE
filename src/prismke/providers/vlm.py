@@ -6,7 +6,7 @@ import asyncio
 import base64
 import json
 from io import BytesIO
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from PIL import Image
@@ -138,7 +138,7 @@ class OpenAICompatibleVLMProvider:
             payload = json.loads(content)
         except (TypeError, json.JSONDecodeError):
             repair_body = dict(body)
-            messages: list[dict[str, Any]] = list(body["messages"])
+            messages = cast(list[dict[str, Any]], body["messages"])
             repair_body["messages"] = [
                 *messages,
                 {"role": "assistant", "content": str(content)},
