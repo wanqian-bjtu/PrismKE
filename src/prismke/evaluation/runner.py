@@ -6,7 +6,7 @@ from pathlib import Path
 
 import orjson
 
-from prismke.domain import CoordinateSpace, WorkflowState
+from prismke.domain import CoordinateSpace, SchemaIndex, WorkflowState, normalize_label
 from prismke.evaluation.models import (
     EvaluationCase,
     EvaluationCaseResult,
@@ -37,7 +37,47 @@ def _safe_error(exc: Exception, service: PrismKEService) -> str:
     return message
 
 
-def _predicted_claims(state: WorkflowState) -> set[tuple[str, str, str]]:
+def _canonical_entity_name(value: str, schema: SchemaIndex | None) -> str:
+    if schema is None:
+        return _normalize(value)
+    normalized = normalize_label(value)
+    matches = {
+        item.name
+        for item in schema.schema.entity_catalog
+        if normalized in {normalize_label(name) for name in [item.name, *item.aliases]}
+    }
+    return _normalize(next(iter(matches))) if len(matches) == 1 else _normalize(value)
+
+
+def _canonical_claim(
+    subject: str,
+    relation: str,
+    obj: str,
+    schema: SchemaIndex | None,
+) -> tuple[str, str, str]:
+    canonical_subject = _canonical_entity_name(subject, schema)
+    canonical_object = _canonical_entity_name(obj, schema)
+    if schema is None:
+        return canonical_subject, _normalize(relation), canonical_object
+    relation_def = schema.relation(relation)
+    if relation_def is None:
+        return canonical_subject, _normalize(relation), canonical_object
+    relation_id = relation_def.id
+    if relation_def.symmetric:
+        canonical_subject, canonical_object = sorted(
+            (canonical_subject, canonical_object)
+        )
+    elif relation_def.inverse_relation:
+        canonical_relation = min(relation_id, relation_def.inverse_relation)
+        if relation_id != canonical_relation:
+            canonical_subject, canonical_object = canonical_object, canonical_subject
+        relation_id = canonical_relation
+    return canonical_subject, _normalize(relation_id), canonical_object
+
+
+def _predicted_claims(
+    state: WorkflowState, schema: SchemaIndex | None
+) -> set[tuple[str, str, str]]:
     entities = {entity.id: entity.name for entity in state.entities}
     predicted: set[tuple[str, str, str]] = set()
     for claim in state.claims:
@@ -48,15 +88,15 @@ def _predicted_claims(state: WorkflowState) -> set[tuple[str, str, str]]:
             else claim.object_literal
         )
         if obj is not None:
-            predicted.add(
-                (_normalize(subject), _normalize(claim.relation_id), _normalize(obj))
-            )
+            predicted.add(_canonical_claim(subject, claim.relation_id, obj, schema))
     return predicted
 
 
-def _gold_claims(case: EvaluationCase) -> set[tuple[str, str, str]]:
+def _gold_claims(
+    case: EvaluationCase, schema: SchemaIndex | None
+) -> set[tuple[str, str, str]]:
     return {
-        (_normalize(item.subject), _normalize(item.relation), _normalize(item.object))
+        _canonical_claim(item.subject, item.relation, item.object, schema)
         for item in case.claims
     }
 
@@ -66,8 +106,9 @@ def _entity_names(claims: set[tuple[str, str, str]]) -> set[str]:
 
 
 def _case_result(case: EvaluationCase, state: WorkflowState) -> EvaluationCaseResult:
-    predicted = _predicted_claims(state)
-    gold = _gold_claims(case)
+    schema = SchemaIndex(state.output_schema) if state.output_schema else None
+    predicted = _predicted_claims(state, schema)
+    gold = _gold_claims(case, schema)
     predicted_entities = _entity_names(predicted)
     gold_entities = _entity_names(gold)
     evidence = state.document.evidence if state.document else []

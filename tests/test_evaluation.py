@@ -133,3 +133,78 @@ def test_public_evaluation_manifest_has_twelve_reproducible_cases() -> None:
     payload = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     assert len(payload["cases"]) == 12
     assert all((root / case["input"]).is_file() for case in payload["cases"])
+
+
+@pytest.mark.asyncio
+async def test_evaluation_treats_inverse_relations_and_aliases_as_same_fact(
+    tmp_path: Path,
+) -> None:
+    sample = tmp_path / "sample.md"
+    sample.write_text(
+        "Northstar Labs | develops | AuroraGraph | Organization | Software | 0.92\n",
+        encoding="utf-8",
+    )
+    schema = tmp_path / "schema.yaml"
+    schema.write_text(
+        """
+schema_id: inverse-evaluation
+version: "1"
+strict: true
+entity_types:
+  - id: Software
+  - id: Organization
+relations:
+  - id: developed_by
+    domain: [Software]
+    range: [Organization]
+    inverse_relation: develops
+  - id: develops
+    domain: [Organization]
+    range: [Software]
+    inverse_relation: developed_by
+entity_catalog:
+  - id: entity:northstar
+    name: Northstar Labs
+    type: Organization
+    aliases: [北辰实验室]
+  - id: entity:auroragraph
+    name: AuroraGraph
+    type: Software
+""".strip(),
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "version": "test-inverse",
+                "schema_path": schema.name,
+                "cases": [
+                    {
+                        "id": "inverse-alias",
+                        "input": sample.name,
+                        "language": "en",
+                        "claims": [
+                            {
+                                "subject": "AuroraGraph",
+                                "relation": "developed_by",
+                                "object": "北辰实验室",
+                            }
+                        ],
+                        "expected_alignment_decisions": ["independent"],
+                        "expected_localization_levels": ["text_span"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    report = await evaluate_manifest(
+        manifest,
+        PrismKEService(Settings(runtime_dir=tmp_path / "runtime")),
+        provider_name="mock",
+        ocr_provider_name="disabled",
+        vlm_provider_name="disabled",
+    )
+    assert report.claim_f1 == 1.0
+    assert report.entity_f1 == 1.0
