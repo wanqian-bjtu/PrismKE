@@ -58,9 +58,8 @@ ingest
   -> run_ocr
   -> persist_evidence
   -> load_schema
-  -> extract_text_claims
-  -> extract_visual_claims
-  -> align_modalities
+       |-> extract_text_claims ---|
+       |-> extract_visual_claims -|-> align_modalities
   -> resolve_entities
   -> normalize_claims
   -> detect_conflicts
@@ -69,7 +68,7 @@ ingest
   -> commit_graph
 ```
 
-工作流由 LangGraph 组织。解析、治理和持久化等确定性步骤不调用大模型；只有需要语义判断的抽取 Provider 使用 LLM。
+工作流由 LangGraph 组织。文本与视觉抽取并行执行并分别保存检查点；某一分支失败时，恢复任务不会重跑已完成分支。解析、治理和持久化等确定性步骤不调用大模型；只有需要语义判断的抽取 Provider 使用 LLM/VLM。
 
 ## 环境安装
 
