@@ -30,7 +30,7 @@ from prismke.workflow.nodes import WorkflowNodes
 
 @pytest.mark.asyncio
 async def test_mock_vertical_slice(tmp_path: Path, schema_path: Path) -> None:
-    sample = tmp_path / "sample.md"
+    sample = tmp_path / "sample.txt"
     sample.write_text(
         "PrismKE | developed_by | OpenAI | Software | Organization | 0.92\n",
         encoding="utf-8",
@@ -86,7 +86,7 @@ async def test_failed_node_resumes_without_repeating_parser(
                 raise RuntimeError("simulated provider outage")
             return await MockLLMProvider().extract(request)
 
-    sample = tmp_path / "sample.md"
+    sample = tmp_path / "sample.txt"
     sample.write_text(
         "PrismKE | developed_by | OpenAI | Software | Organization | 0.92\n",
         encoding="utf-8",
