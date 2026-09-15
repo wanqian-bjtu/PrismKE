@@ -153,7 +153,7 @@ class FileEvidenceStore:
                 if evidence.page_number is None:
                     raise EvidenceIntegrityError("PDF evidence has no page number")
                 page = pdf[evidence.page_number - 1]
-                pixmap = page.get_pixmap(  # type: ignore[no-untyped-call]
+                pixmap = page.get_pixmap(
                     matrix=pymupdf.Matrix(2, 2),  # type: ignore[no-untyped-call]
                     clip=pymupdf.Rect(  # type: ignore[no-untyped-call]
                         box.x0, box.y0, box.x1, box.y1
