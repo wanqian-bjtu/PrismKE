@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
 
@@ -353,38 +352,62 @@ class Neo4jGraphStore:
         inverse: list[GraphChange] = []
         now = datetime.now(UTC)
         for change in reversed(target.changes):
-            model = {"entity": CanonicalEntity, "claim": Claim, "conflict": ConflictSet}[
-                change.resource_type
-            ]
-            label = {"entity": "Entity", "claim": "Claim", "conflict": "ConflictSet"}[
-                change.resource_type
-            ]
-            current = await self._get(label, change.resource_id, model)
-            replacement: Any | None = None
-            if change.action == "create" and current is not None:
-                replacement = current.model_copy(deep=True)
-                if change.resource_type == "claim":
-                    replacement.tx_to = now
-                elif change.resource_type == "entity":
-                    replacement.active = False
+            current_payload: dict[str, Any] | None
+            replacement_payload: dict[str, Any]
+            if change.resource_type == "entity":
+                current_entity = await self._get("Entity", change.resource_id, CanonicalEntity)
+                if change.action == "create" and current_entity is not None:
+                    replacement_entity = current_entity.model_copy(update={"active": False})
+                    action = "close"
+                elif change.before is not None:
+                    replacement_entity = CanonicalEntity.model_validate(change.before)
+                    action = "restore"
                 else:
-                    replacement.status = "resolved"
-                action = "close"
-            elif change.before is not None:
-                replacement = model.model_validate(deepcopy(change.before))
-                action = "restore"
+                    continue
+                entities.append(replacement_entity)
+                current_payload = (
+                    current_entity.model_dump(mode="json") if current_entity else None
+                )
+                replacement_payload = replacement_entity.model_dump(mode="json")
+            elif change.resource_type == "claim":
+                current_claim = await self._get("Claim", change.resource_id, Claim)
+                if change.action == "create" and current_claim is not None:
+                    replacement_claim = current_claim.model_copy(update={"tx_to": now})
+                    action = "close"
+                elif change.before is not None:
+                    replacement_claim = Claim.model_validate(change.before)
+                    action = "restore"
+                else:
+                    continue
+                claims.append(replacement_claim)
+                current_payload = current_claim.model_dump(mode="json") if current_claim else None
+                replacement_payload = replacement_claim.model_dump(mode="json")
             else:
-                continue
-            {"entity": entities, "claim": claims, "conflict": conflicts}[
-                change.resource_type
-            ].append(replacement)
+                current_conflict = await self._get(
+                    "ConflictSet", change.resource_id, ConflictSet
+                )
+                if change.action == "create" and current_conflict is not None:
+                    replacement_conflict = current_conflict.model_copy(
+                        update={"status": "resolved"}
+                    )
+                    action = "close"
+                elif change.before is not None:
+                    replacement_conflict = ConflictSet.model_validate(change.before)
+                    action = "restore"
+                else:
+                    continue
+                conflicts.append(replacement_conflict)
+                current_payload = (
+                    current_conflict.model_dump(mode="json") if current_conflict else None
+                )
+                replacement_payload = replacement_conflict.model_dump(mode="json")
             inverse.append(
                 GraphChange(
                     resource_type=change.resource_type,
                     resource_id=change.resource_id,
                     action=action,
-                    before=current.model_dump(mode="json") if current else None,
-                    after=replacement.model_dump(mode="json"),
+                    before=current_payload,
+                    after=replacement_payload,
                 )
             )
         revision = GraphRevision(
