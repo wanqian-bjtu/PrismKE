@@ -89,7 +89,15 @@ class OpenAICompatibleVLMProvider:
                     )
                 response.raise_for_status()
                 return dict(response.json())
-            except (httpx.TimeoutException, httpx.NetworkError, httpx.HTTPStatusError):
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code
+                if status != 429 and status < 500:
+                    raise
+                if attempt == 2:
+                    raise
+                await asyncio.sleep(delay)
+                delay *= 2
+            except (httpx.TimeoutException, httpx.NetworkError):
                 if attempt == 2:
                     raise
                 await asyncio.sleep(delay)
@@ -125,7 +133,21 @@ class OpenAICompatibleVLMProvider:
             "response_format": {"type": "json_object"},
         }
         response = await self._post(body)
-        payload = json.loads(response["choices"][0]["message"]["content"])
+        content = response["choices"][0]["message"]["content"]
+        try:
+            payload = json.loads(content)
+        except (TypeError, json.JSONDecodeError):
+            repair_body = dict(body)
+            repair_body["messages"] = [
+                *body["messages"],
+                {"role": "assistant", "content": str(content)},
+                {
+                    "role": "user",
+                    "content": "Return the same result as one valid JSON object only.",
+                },
+            ]
+            repaired = await self._post(repair_body)
+            payload = json.loads(repaired["choices"][0]["message"]["content"])
         observations: list[VisualObservation] = []
         evidence: list[EvidenceRef] = []
         warnings: list[str] = []
