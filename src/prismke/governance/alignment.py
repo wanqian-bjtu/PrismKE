@@ -22,11 +22,15 @@ def _object_key(candidate: CandidateClaim) -> str:
     return normalize_label(value)
 
 
-def _signature(candidate: CandidateClaim, schema: SchemaIndex) -> tuple[str, str, str]:
+def _relation_key(candidate: CandidateClaim, schema: SchemaIndex) -> str:
     relation = schema.relation(candidate.relation)
+    return relation.id if relation else normalize_label(candidate.relation)
+
+
+def _signature(candidate: CandidateClaim, schema: SchemaIndex) -> tuple[str, str, str]:
     return (
         normalize_label(candidate.subject.name),
-        relation.id if relation else normalize_label(candidate.relation),
+        _relation_key(candidate, schema),
         _object_key(candidate),
     )
 
@@ -109,6 +113,36 @@ class MultimodalAlignmentService:
                         decision="conflict",
                         confidence_before=[item.confidence for item in members],
                         reasons=["same_subject_relation_different_object"],
+                    )
+                )
+        for text_candidate in text_candidates:
+            for visual_candidate in visual_candidates:
+                if normalize_label(text_candidate.subject.name) != normalize_label(
+                    visual_candidate.subject.name
+                ):
+                    continue
+                if _relation_key(text_candidate, schema) == _relation_key(
+                    visual_candidate, schema
+                ):
+                    continue
+                pair = sorted([text_candidate.id, visual_candidate.id])
+                modalities = sorted(
+                    {
+                        *text_candidate.modalities,
+                        *visual_candidate.modalities,
+                    }
+                )
+                records.append(
+                    AlignmentRecord(
+                        id=stable_id("alignment-related", *pair),
+                        candidate_ids=pair,
+                        modalities=modalities,
+                        decision="related",
+                        confidence_before=[
+                            text_candidate.confidence,
+                            visual_candidate.confidence,
+                        ],
+                        reasons=["shared_subject_different_relation"],
                     )
                 )
         return aligned, records

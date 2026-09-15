@@ -167,6 +167,36 @@ def test_cross_modal_support_merges_evidence() -> None:
     assert records[0].decision == "support"
 
 
+def test_cross_modal_candidates_with_shared_subject_are_related() -> None:
+    def candidate(identifier: str, relation: str, modality: Modality) -> CandidateClaim:
+        return CandidateClaim(
+            id=identifier,
+            subject=EntityMention(
+                id=f"mention:{identifier}",
+                name="PrismKE",
+                entity_type="System",
+                modality=modality,
+                evidence_ids=[f"ev:{identifier}"],
+            ),
+            relation=relation,
+            object="Value",
+            confidence=0.8,
+            evidence_ids=[f"ev:{identifier}"],
+            modalities=[modality],
+        )
+
+    schema = OutputSchema(schema_id="s", version="1", entity_types=[], relations=[])
+    _, records = MultimodalAlignmentService().align(
+        [candidate("text", "created_by", Modality.TEXT)],
+        [candidate("vision", "shown_with", Modality.IMAGE)],
+        SchemaIndex(schema),
+    )
+    related = [record for record in records if record.decision == "related"]
+    assert len(related) == 1
+    assert related[0].candidate_ids == ["text", "vision"]
+    assert related[0].reasons == ["shared_subject_different_relation"]
+
+
 def test_vlm_configuration_is_strict(tmp_path: Path) -> None:
     service = PrismKEService(Settings(runtime_dir=tmp_path / "runtime"))
     with pytest.raises(Exception, match="PRISMKE_VLM_API_KEY"):
