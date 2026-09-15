@@ -40,7 +40,7 @@ class PaddleOCRProvider:
         self._engine: Any = None
 
     def fingerprint(self) -> str:
-        return stable_id("provider", "paddleocr", self.device, self.lang, self.model, "v1")
+        return stable_id("provider", "paddleocr", self.device, self.lang, self.model, "v2")
 
     def _get_engine(self) -> Any:
         if self._engine is None:
@@ -48,6 +48,9 @@ class PaddleOCRProvider:
                 paddleocr = import_module("paddleocr")
             except ImportError as exc:
                 raise RuntimeError("PaddleOCR is not installed; run 'uv sync --extra ocr'") from exc
+            engine_options: dict[str, Any] = {}
+            if self.device == "cpu":
+                engine_options["enable_mkldnn"] = False
             self._engine = paddleocr.PaddleOCR(
                 lang=self.lang,
                 ocr_version=self.model,
@@ -55,6 +58,7 @@ class PaddleOCRProvider:
                 use_doc_orientation_classify=False,
                 use_doc_unwarping=False,
                 use_textline_orientation=False,
+                **engine_options,
             )
         return self._engine
 
