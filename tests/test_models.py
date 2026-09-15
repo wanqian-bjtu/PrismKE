@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from prismke.domain import Claim
+from prismke.domain import Claim, GraphChange, GraphRevision
 
 
 def test_claim_requires_exactly_one_object() -> None:
@@ -27,3 +27,15 @@ def test_claim_requires_evidence() -> None:
             confidence=0.9,
             evidence_ids=[],
         )
+
+
+def test_old_revision_payload_remains_compatible() -> None:
+    revision = GraphRevision.model_validate({"id": "r", "run_id": "run"})
+    assert revision.changes == []
+    change = GraphChange(
+        resource_type="claim",
+        resource_id="claim:1",
+        action="create",
+        after={"id": "claim:1"},
+    )
+    assert GraphRevision(id="r2", run_id="run", changes=[change]).changes == [change]

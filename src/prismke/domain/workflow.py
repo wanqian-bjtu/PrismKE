@@ -98,7 +98,7 @@ class WorkflowState(BaseModel):
     vlm_provider_name: str = "disabled"
     vlm_provider_fingerprint: str = "disabled"
     allow_remote_assets: bool = False
-    pipeline_version: str = "0.2.0"
+    pipeline_version: str = "0.3.0"
     current_node: str = "ingest"
     failed_node: str | None = None
     status: Literal["running", "awaiting_review", "completed", "failed"] = "running"

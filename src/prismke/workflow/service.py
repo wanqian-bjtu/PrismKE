@@ -10,7 +10,8 @@ from prismke.core.ids import canonical_hash, file_sha256, stable_id
 from prismke.core.settings import Settings
 from prismke.domain import ClaimStatus, ReviewDecision, WorkflowState, load_schema, utc_now
 from prismke.parsing import ParserRegistry
-from prismke.persistence import FileEvidenceStore, JSONGraphStore, RunRepository
+from prismke.persistence import FileEvidenceStore, JSONGraphStore, Neo4jGraphStore, RunRepository
+from prismke.persistence.base import GraphStore
 from prismke.providers import (
     DisabledOCRProvider,
     DisabledVLMProvider,
@@ -24,18 +25,37 @@ from prismke.providers import (
 from prismke.providers.base import LLMProvider, OCRProvider, VLMProvider
 from prismke.workflow.graph import PrismKEWorkflow
 
-PIPELINE_VERSION = "0.2.0"
+PIPELINE_VERSION = "0.3.0"
 ASSET_POLICY_VERSION = "assets-v2"
 ALIGNMENT_POLICY_VERSION = "alignment-v1"
 
 
 class PrismKEService:
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(
+        self, settings: Settings | None = None, graph_store: GraphStore | None = None
+    ) -> None:
         self.settings = settings or Settings()
         self.runs = RunRepository(self.settings.runs_dir)
-        self.graph_store = JSONGraphStore(self.settings.graph_dir)
+        self.graph_store = graph_store or self._create_graph_store()
         self.evidence_store = FileEvidenceStore(self.settings.evidence_dir)
         self._ocr_providers: dict[str, OCRProvider] = {}
+
+    def _create_graph_store(self) -> GraphStore:
+        if self.settings.graph_store == "json":
+            return JSONGraphStore(self.settings.graph_dir)
+        if self.settings.graph_store != "neo4j":
+            raise ValueError(f"unknown graph store: {self.settings.graph_store}")
+        if not self.settings.neo4j_password:
+            raise ProviderConfigurationError("neo4j graph store requires PRISMKE_NEO4J_PASSWORD")
+        return Neo4jGraphStore(
+            uri=self.settings.neo4j_uri,
+            user=self.settings.neo4j_user,
+            password=self.settings.neo4j_password,
+            database=self.settings.neo4j_database,
+        )
+
+    async def close(self) -> None:
+        await self.graph_store.close()
 
     @staticmethod
     def _validate_endpoint(value: str, variable: str) -> None:
@@ -47,9 +67,7 @@ class PrismKEService:
             or parsed.scheme not in {"http", "https"}
             or not parsed.netloc
         ):
-            raise ProviderConfigurationError(
-                f"openai-compatible requires a valid {variable}"
-            )
+            raise ProviderConfigurationError(f"openai-compatible requires a valid {variable}")
 
     def provider(self, name: str) -> LLMProvider:
         if name == "mock":
@@ -184,7 +202,7 @@ class PrismKEService:
         state = self.runs.load(run_id)
         if state.pipeline_version != PIPELINE_VERSION:
             raise LegacyCheckpointError(
-                "this run was created by an older pipeline and cannot be resumed with v0.2"
+                "this run was created by an older pipeline and cannot be resumed with v0.3"
             )
         claim = next((item for item in state.claims if item.id == claim_id), None)
         if claim is None:
@@ -228,7 +246,7 @@ class PrismKEService:
         state = self.runs.load(run_id)
         if state.pipeline_version != PIPELINE_VERSION:
             raise LegacyCheckpointError(
-                "this run was created by an older pipeline and cannot be resumed with v0.2"
+                "this run was created by an older pipeline and cannot be resumed with v0.3"
             )
         provider = self.provider(state.provider_name)
         ocr_provider = self.ocr_provider(state.ocr_provider_name)
