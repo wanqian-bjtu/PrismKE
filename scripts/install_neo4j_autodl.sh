@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-NEO4J_VERSION="${NEO4J_VERSION:-5.26.0}"
+NEO4J_VERSION="${NEO4J_VERSION:-5.26.30}"
 PROJECT_DIR="${PRISMKE_PROJECT_DIR:-/root/autodl-tmp/PrismKE}"
 RUNTIME_DIR="${PROJECT_DIR}/runtime/neo4j"
 ARCHIVE="${RUNTIME_DIR}/neo4j-community-${NEO4J_VERSION}-unix.tar.gz"
@@ -15,9 +15,11 @@ fi
 
 mkdir -p "${RUNTIME_DIR}"
 if [[ ! -d "${INSTALL_DIR}" ]]; then
-  curl --fail --location --retry 3 \
-    "https://dist.neo4j.org/neo4j-community-${NEO4J_VERSION}-unix.tar.gz" \
-    --output "${ARCHIVE}"
+  if [[ ! -f "${ARCHIVE}" ]]; then
+    curl --fail --location --retry 3 \
+      "https://dist.neo4j.org/neo4j-community-${NEO4J_VERSION}-unix.tar.gz" \
+      --output "${ARCHIVE}"
+  fi
   tar -xzf "${ARCHIVE}" -C "${RUNTIME_DIR}"
 fi
 ln -sfn "${INSTALL_DIR}" "${RUNTIME_DIR}/current"
