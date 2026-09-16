@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import httpx
+import orjson
 import pytest
 from fastapi.testclient import TestClient
 from filelock import Timeout
@@ -23,7 +24,7 @@ from prismke.domain import ExtractionResult, ReviewDecision
 from prismke.persistence.execution import ExecutionConflict
 from prismke.persistence.neo4j_graph import Neo4jGraphStore
 from prismke.providers import MockLLMProvider
-from prismke.providers.http_client import post_chat_completion
+from prismke.providers.http_client import _usage, post_chat_completion
 from prismke.workflow import PrismKEService
 from prismke.workflow.execution import RunControl
 
@@ -249,6 +250,7 @@ async def http_call(transport: httpx.MockTransport) -> object:
         provider="llm",
         operation_id="document",
         prompt_version="test-v1",
+        provider_fingerprint="test-provider-v1",
         transport=transport,
     )
 
@@ -285,6 +287,10 @@ async def test_http_response_replay_and_private_journal(tmp_path: Path, schema_p
         data = db.execute("SELECT response,metadata FROM requests").fetchone()
         assert b"sensitive-test-key" not in data[0] and b"base64,AAAA" not in data[0]
         assert b"messages" not in data[1]
+        metadata = orjson.loads(data[1])
+        assert metadata["provider_fingerprint"] == "test-provider-v1"
+        assert metadata["latency_ms"] >= 0
+        assert metadata["dispatched_at"] <= metadata["settled_at"]
     await service.close()
 
 
@@ -388,8 +394,17 @@ async def test_changed_input_blocks_auto_resume(tmp_path: Path, schema_path: Pat
     sample.write_text("changed")
     await service.executions.start()
     assert service.executions.view(run_id)["error_code"] == "EXECUTION_INPUT_CHANGED"
+    assert service.executions.view(run_id)["blocked"]
+    assert not service.review_progress(run_id)["can_resume"]
     assert service.executions.repository.get(run_id).attempt == 0
     await service.close()
+
+
+@pytest.mark.parametrize(
+    "usage", [None, {}, "invalid", {"prompt_tokens": True, "completion_tokens": 1}]
+)
+def test_unknown_usage_never_becomes_zero(usage: object) -> None:
+    assert _usage({"usage": usage}) == (None, None, None)
 
 
 @pytest.mark.asyncio

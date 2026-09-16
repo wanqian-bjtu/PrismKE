@@ -149,7 +149,17 @@ class ExecutionRepository:
                 raise ExecutionConflict("UNKNOWN_PROVIDER_REQUEST")
             db.execute(
                 "INSERT OR REPLACE INTO requests VALUES (?,?,?,?,NULL,0)",
-                (run_id, key, "sent", orjson.dumps(metadata)),
+                (
+                    run_id,
+                    key,
+                    "sent",
+                    orjson.dumps(
+                        {
+                            **metadata,
+                            "dispatched_at": datetime.now(UTC).isoformat(),
+                        }
+                    ),
+                ),
             )
         return None
 
@@ -162,12 +172,29 @@ class ExecutionRepository:
         usage_known: bool = False,
     ) -> None:
         with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT metadata FROM requests WHERE run_id=? AND key=?", (run_id, key)
+            ).fetchone()
+            if row is None:
+                raise ExecutionConflict("REQUEST_JOURNAL_MISSING")
+            metadata = dict(orjson.loads(row[0]))
+            settled = datetime.now(UTC)
+            metadata["settled_at"] = settled.isoformat()
+            if metadata.get("dispatched_at"):
+                metadata["latency_ms"] = round(
+                    (settled - datetime.fromisoformat(metadata["dispatched_at"])).total_seconds()
+                    * 1000,
+                    3,
+                )
             changed = db.execute(
-                "UPDATE requests SET status=?,response=?,usage_known=? WHERE run_id=? AND key=?",
+                "UPDATE requests SET status=?,response=?,usage_known=?,metadata=? "
+                "WHERE run_id=? AND key=?",
                 (
                     status,
                     orjson.dumps(response) if response is not None else None,
                     int(usage_known),
+                    orjson.dumps(metadata),
                     run_id,
                     key,
                 ),

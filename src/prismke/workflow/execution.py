@@ -221,6 +221,15 @@ class ExecutionManager:
         status = task.status if task else self.business_status(state)
         active = task is not None and task.status in ACTIVE
         blocked = self.blockers(state, include_sent=not active)
+        hard_blocks = {
+            "PROJECTION_SYNC_PENDING",
+            "EXECUTION_INPUT_CHANGED",
+            "PROVIDER_CONFIGURATION_CHANGED",
+            "EXECUTION_EVIDENCE_INVALID",
+            "CHECKPOINT_MISSING",
+        }
+        if task and task.error_code in hard_blocks:
+            blocked = blocked or task.error_code
         # A final manual decision changes business state before the next attempt is enqueued.
         if (
             task
@@ -234,7 +243,9 @@ class ExecutionManager:
             "business_status": state.status,
             "version": task.version if task else 0,
             "attempt": task.attempt if task else 0,
-            "node": task.node if task and active else state.current_node,
+            "node": task.node
+            if task and task.status in ACTIVE | {"cancelled", "interrupted", "failed"}
+            else state.current_node,
             "updated_at": task.updated_at.isoformat() if task else None,
             "reason": task.reason if task else None,
             "error_code": "LEGACY_EXECUTION_READ_ONLY"

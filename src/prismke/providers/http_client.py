@@ -18,15 +18,17 @@ from prismke.providers.pricing import estimate_cost_cny
 
 def _usage(payload: dict[str, Any]) -> tuple[int | None, int | None, int | None]:
     usage = payload.get("usage") or {}
+    if not isinstance(usage, dict):
+        return None, None, None
     input_raw = usage.get("prompt_tokens", usage.get("input_tokens"))
     output_raw = usage.get("completion_tokens", usage.get("output_tokens"))
-    if not isinstance(input_raw, int) or not isinstance(output_raw, int):
+    if type(input_raw) is not int or type(output_raw) is not int:
         return None, None, None
     input_tokens, output_tokens = input_raw, output_raw
     if min(input_tokens, output_tokens) < 0:
         return None, None, None
     total_tokens = usage.get("total_tokens", input_tokens + output_tokens)
-    if not isinstance(total_tokens, int) or total_tokens != input_tokens + output_tokens:
+    if type(total_tokens) is not int or total_tokens != input_tokens + output_tokens:
         return None, None, None
     return input_tokens, output_tokens, total_tokens
 

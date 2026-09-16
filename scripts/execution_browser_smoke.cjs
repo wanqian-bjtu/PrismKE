@@ -36,7 +36,8 @@ async function main() {
       }
       throw new Error('execution did not reach expected state');
     }
-    await settle(value => value.status === 'running' && value.node === 'extract_text_claims');
+    await settle(value => value.status === 'running');
+    assert.equal((await (await page.request.get(`${base}/offline-test/calls`)).json()).calls, 1);
     await page.goto(`${base}/ui/`, { waitUntil: 'domcontentloaded' });
     await page.getByRole('tab', { name: '执行任务', exact: true }).click();
     await page.getByRole('button', { name: '刷新任务', exact: true }).click();
