@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -11,14 +13,16 @@ from typing import Any
 from prismke.core.ids import file_sha256, stable_id
 from prismke.core.settings import Settings
 from prismke.domain import (
+    CandidateClaim,
     CanonicalEntity,
     ExtractionRequest,
     ExtractionResult,
     GraphCommit,
     GraphRevision,
+    ProviderCallRecord,
     TextBlock,
 )
-from prismke.evaluation.request_budget import BudgetedTransport, RequestBudget
+from prismke.evaluation.request_budget import BudgetedTransport, EvaluationBudgetStop, RequestBudget
 from prismke.governance.entity_index import rebuild_entity_index
 from prismke.persistence.json_graph import JSONGraphStore
 from prismke.providers.base import LLMProvider, VLMProvider
@@ -28,17 +32,97 @@ from prismke.workflow.service import PrismKEService
 
 
 class _EvaluationLLM(OpenAICompatibleLLMProvider):
+    cached_state: dict[str, Any] | None = None
+    cache_dir: Path | None = None
+
     def fingerprint(self) -> str:
         return stable_id(
-            "provider", super().fingerprint(), "evaluation-output-limit-v3", 4096, 12000
+            "provider",
+            super().fingerprint(),
+            "evaluation-output-limit-v4",
+            4096,
+            12000,
+            self.cached_state.get("run_id") if self.cached_state else None,
         )
 
     async def extract(self, request: ExtractionRequest) -> ExtractionResult:
-        batches = text_batches(request.document.text_blocks)
         combined = ExtractionResult()
+        blocks = request.document.text_blocks
+        if self.cached_state:
+            cached = self.cached_state
+            old_doc = cached["document"]
+            expected_fingerprint = stable_id(
+                "provider", super().fingerprint(), "evaluation-output-limit-v3", 4096, 12000
+            )
+            if cached.get("provider_fingerprint") != expected_fingerprint or cached.get(
+                "status"
+            ) not in {"completed", "awaiting_review"}:
+                raise ValueError("cached text provider or completion provenance mismatch")
+            if old_doc["source_hash"] != request.document.source_hash:
+                raise ValueError("cached text source hash mismatch")
+            if cached["output_schema"] != request.output_schema.model_dump(mode="json"):
+                raise ValueError("cached text schema mismatch")
+            old_blocks = [TextBlock.model_validate(row) for row in old_doc["text_blocks"]]
+            ids = {block.id for block in old_blocks}
+            if [block for block in blocks if block.id in ids] != old_blocks:
+                raise ValueError("cached text blocks or evidence changed")
+            llm_calls = [row for row in cached["provider_calls"] if row["provider"] == "llm"]
+            if not llm_calls or any(
+                row["requested_model"] != self.model
+                or row["status"] != "succeeded"
+                or row["prompt_version"] != "schema-claims-v1"
+                for row in llm_calls
+            ):
+                raise ValueError("cached text model/protocol does not match real completed calls")
+            combined.candidates = [
+                CandidateClaim.model_validate(row) for row in cached["text_candidates"]
+            ]
+            current_refs = {ref.id for ref in request.document.evidence}
+            if any(
+                eid not in current_refs
+                for candidate in combined.candidates
+                for eid in candidate.evidence_ids
+            ):
+                raise ValueError("cached candidate evidence missing")
+            combined.warnings.extend(w for w in cached["warnings"] if w.startswith("provider_"))
+            combined.warnings.append(f"evaluation_reused_text_run:{cached['run_id']}")
+            combined.warnings.append(f"evaluation_cached_text_blocks:{len(old_blocks)}")
+            blocks = [block for block in blocks if block.id not in ids]
+        batches = text_batches(blocks)
         for batch in batches:
             subset = request.document.model_copy(update={"text_blocks": batch})
-            result = await super().extract(request.model_copy(update={"document": subset}))
+            cache_path = None
+            if self.cache_dir:
+                self.cache_dir.mkdir(parents=True, exist_ok=True)
+                key = stable_id(
+                    "text-batch",
+                    super().fingerprint(),
+                    "batch-v1",
+                    request.document.source_hash,
+                    request.output_schema.model_dump(mode="json"),
+                    [block.model_dump(mode="json") for block in batch],
+                )
+                cache_path = self.cache_dir / f"{key.replace(':', '-')}.json"
+            if cache_path and cache_path.exists():
+                result = ExtractionResult.model_validate_json(
+                    cache_path.read_text(encoding="utf-8")
+                )
+                result.call_records = []
+                result.warnings.append("evaluation_text_batch_cache_hit")
+            else:
+                result = await super().extract(request.model_copy(update={"document": subset}))
+                if cache_path:
+                    with tempfile.NamedTemporaryFile(
+                        mode="w", encoding="utf-8", dir=cache_path.parent, delete=False
+                    ) as stream:
+                        temporary = Path(stream.name)
+                        stream.write(result.model_dump_json())
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    try:
+                        os.replace(temporary, cache_path)
+                    finally:
+                        temporary.unlink(missing_ok=True)
             combined.candidates.extend(result.candidates)
             combined.warnings.extend(result.warnings)
             combined.call_records.extend(result.call_records)
@@ -66,10 +150,19 @@ def text_batches(blocks: list[TextBlock], max_bytes: int = 12000) -> list[list[T
 
 class _EvaluationVLM(OpenAICompatibleVLMProvider):
     def fingerprint(self) -> str:
-        return stable_id("provider", super().fingerprint(), "evaluation-output-limit-v2", 4096)
+        return stable_id(
+            "provider", super().fingerprint(), "evaluation-vision-output-limit-v3", 8192
+        )
+
+    async def _post(
+        self, body: dict[str, Any], operation_id: str
+    ) -> tuple[dict[str, Any], ProviderCallRecord]:
+        return await super()._post({**body, "max_tokens": 8192}, operation_id)
 
 
 class _EvaluationService(PrismKEService):
+    cached_text_state: dict[str, Any] | None = None
+
     def __init__(self, settings: Settings, store: JSONGraphStore, budget: RequestBudget) -> None:
         super().__init__(settings, graph_store=store)
         self.budget = budget
@@ -78,13 +171,16 @@ class _EvaluationService(PrismKEService):
         original = super().provider(name)
         if not isinstance(original, OpenAICompatibleLLMProvider):
             raise ValueError("live validation requires a real text provider")
-        return _EvaluationLLM(
+        provider = _EvaluationLLM(
             original.base_url,
             original.api_key,
             original.model,
             original.timeout,
             transport=BudgetedTransport(self.budget),
         )
+        provider.cached_state = self.cached_text_state
+        provider.cache_dir = self.settings.runtime_dir / "extraction-cache" / "text"
+        return provider
 
     def vlm_provider(self, name: str) -> VLMProvider:
         original = super().vlm_provider(name)
@@ -107,10 +203,15 @@ async def validate_documents(
     *,
     token_limit: int = 100_000,
     stop_at: int = 90_000,
+    budget_ledger: Path | None = None,
 ) -> dict[str, Any]:
     budget = RequestBudget(
-        limit=token_limit, stop_at=stop_at, ledger_path=output / "request-ledger.json"
+        limit=token_limit,
+        stop_at=stop_at,
+        ledger_path=budget_ledger or output / "request-ledger.json",
+        resume_ledger=budget_ledger is not None,
     )
+    starting_tokens = budget.total_tokens
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if output.exists():
         raise ValueError("choose a fresh validation output directory")
@@ -149,6 +250,7 @@ async def validate_documents(
         "max_output_tokens": budget.max_output_tokens,
         "bailian_qwen_enable_thinking": False,
         "text_batch_max_utf8_bytes": 12000,
+        "vision_max_output_tokens": 8192,
     }
     try:
         service.provider("openai-compatible")
@@ -181,6 +283,12 @@ async def validate_documents(
                 break
             print(f"Validating {case_id}; used tokens={budget.total_tokens}", flush=True)
             budget.case_id = case_id
+            cache = cases[index].get("reuse_text_run")
+            service.cached_text_state = (
+                json.loads((manifest_path.parent / cache).resolve().read_text(encoding="utf-8"))
+                if cache
+                else None
+            )
             started = time.perf_counter()
             try:
                 state = await service.run(
@@ -191,11 +299,21 @@ async def validate_documents(
                 report["cases"].append(
                     {
                         "id": case_id,
-                        "status": "budget_stopped" if budget.stopped_reason else "failed",
+                        "status": "budget_stopped"
+                        if isinstance(exc, EvaluationBudgetStop)
+                        else "failed",
                         "error_type": type(exc).__name__,
                         "seconds": time.perf_counter() - started,
                     }
                 )
+                matching = [
+                    saved
+                    for saved in service.runs.list()
+                    if saved.input_path == str(path) and saved.schema_path == str(schema)
+                ]
+                if matching:
+                    report["cases"][-1]["run_id"] = matching[0].run_id
+                    report["cases"][-1]["failed_node"] = matching[0].failed_node
                 if not budget.stopped_reason:
                     budget.stopped_reason = "document workflow failed; inspect saved run"
                 break
@@ -240,6 +358,8 @@ async def validate_documents(
                 "production_json_before": before,
                 "production_json_after": after,
                 "total_tokens": budget.total_tokens,
+                "starting_tokens": starting_tokens,
+                "new_tokens": budget.total_tokens - starting_tokens,
                 "token_accounting_complete": budget.accounting_complete,
                 "request_ledger": budget.calls,
                 "stop_reason": budget.stopped_reason,

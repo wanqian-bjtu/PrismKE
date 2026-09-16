@@ -207,6 +207,7 @@ def validate_real_documents(
     output: Annotated[Path, typer.Option("--output", file_okay=False)],
     token_limit: Annotated[int, typer.Option("--token-limit")] = 100_000,
     stop_at: Annotated[int, typer.Option("--stop-at")] = 90_000,
+    budget_ledger: Annotated[Path | None, typer.Option("--budget-ledger", exists=True)] = None,
 ) -> None:
     """Run budgeted real-model document validation on an isolated JSON graph."""
     from prismke.evaluation.document_validation import validate_documents
@@ -214,9 +215,19 @@ def validate_real_documents(
     if not 0 < stop_at < token_limit:
         raise typer.BadParameter("budget must satisfy 0 < stop_at < token_limit")
     report = asyncio.run(
-        validate_documents(manifest, Settings(), output, token_limit=token_limit, stop_at=stop_at)
+        validate_documents(
+            manifest,
+            Settings(),
+            output,
+            token_limit=token_limit,
+            stop_at=stop_at,
+            budget_ledger=budget_ledger,
+        )
     )
-    console.print(f"Validated {len(report['cases'])} documents; tokens={report['total_tokens']}")
+    finished = sum(case["status"] in {"completed", "awaiting_review"} for case in report["cases"])
+    console.print(
+        f"Attempted {len(report['cases'])}; finished {finished}; tokens={report['total_tokens']}"
+    )
     console.print(f"Report: {output / 'document-validation.json'}")
 
 

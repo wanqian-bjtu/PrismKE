@@ -10,7 +10,7 @@ import httpx
 from prismke.core.errors import ProviderResponseError
 from prismke.core.ids import stable_id
 from prismke.domain import ExtractionRequest, ExtractionResult, ProviderCallRecord
-from prismke.providers.common import candidate_from_payload
+from prismke.providers.common import candidate_from_payload, parse_json_object
 from prismke.providers.http_client import post_chat_completion
 
 PROMPT_VERSION = "schema-claims-v1"
@@ -86,7 +86,7 @@ class OpenAICompatibleLLMProvider:
         records = [first_record]
         try:
             content = response["choices"][0]["message"]["content"]
-            payload = json.loads(content)
+            payload = parse_json_object(content)
         except (KeyError, IndexError, TypeError, json.JSONDecodeError):
             repair_body = dict(body)
             messages = cast(list[dict[str, Any]], body["messages"])
@@ -95,12 +95,10 @@ class OpenAICompatibleLLMProvider:
                 {"role": "assistant", "content": str(response)},
                 {"role": "user", "content": "Return one valid JSON object only."},
             ]
-            repaired, repair_record = await self._post(
-                repair_body, f"{request.document.id}:repair"
-            )
+            repaired, repair_record = await self._post(repair_body, f"{request.document.id}:repair")
             records.append(repair_record)
             try:
-                payload = json.loads(repaired["choices"][0]["message"]["content"])
+                payload = parse_json_object(repaired["choices"][0]["message"]["content"])
             except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
                 raise ProviderResponseError(
                     "模型服务在一次修复后仍未返回有效的结构化 JSON",

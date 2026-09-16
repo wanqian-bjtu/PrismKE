@@ -50,7 +50,7 @@ from prismke.providers.base import EmbeddingProvider, LLMProvider, OCRProvider, 
 from prismke.workflow.graph import PrismKEWorkflow
 
 PIPELINE_VERSION = "0.4.0"
-ASSET_POLICY_VERSION = "assets-v2"
+ASSET_POLICY_VERSION = "assets-v3"
 ALIGNMENT_POLICY_VERSION = "alignment-v1"
 
 

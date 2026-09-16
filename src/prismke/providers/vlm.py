@@ -27,10 +27,10 @@ from prismke.domain import (
     VisualObservation,
     normalize_label,
 )
-from prismke.providers.common import candidate_from_payload
+from prismke.providers.common import candidate_from_payload, parse_json_object
 from prismke.providers.http_client import post_chat_completion
 
-PROMPT_VERSION = "visual-schema-claims-v2"
+PROMPT_VERSION = "visual-schema-claims-v3"
 PROTOCOL_VERSION = "chat-completions-vision-v1"
 PROVIDER_VERSION = "0.2.0"
 
@@ -45,6 +45,9 @@ def _visual_prompt(request: VisualExtractionRequest) -> str:
         "2. AUXILIARY document context may help interpretation but may contradict the image. "
         "Never replace visible image content with auxiliary context.\n"
         "First transcribe or describe visible objects and text as observations. If the image "
+        "contains body paragraphs, do not copy them or the full OCR transcript into observations. "
+        "Use short labels and concise descriptions (at most 160 characters each), retaining "
+        "only the visible details needed to support claims. "
         "and auxiliary context disagree, output the fact visible in the image. Omit any visual "
         "claim that cannot be confirmed from image pixels or image-derived OCR.\n"
         "Observation fields: label, description, confidence, optional "
@@ -179,7 +182,7 @@ class OpenAICompatibleVLMProvider:
                 call_records=records,
             ) from exc
         try:
-            payload = json.loads(content)
+            payload = parse_json_object(content)
         except (TypeError, json.JSONDecodeError):
             repair_body = dict(body)
             messages = cast(list[dict[str, Any]], body["messages"])
@@ -194,7 +197,7 @@ class OpenAICompatibleVLMProvider:
             repaired, repair_record = await self._post(repair_body, f"{asset.id}:repair")
             records.append(repair_record)
             try:
-                payload = json.loads(repaired["choices"][0]["message"]["content"])
+                payload = parse_json_object(repaired["choices"][0]["message"]["content"])
             except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
                 raise ProviderResponseError(
                     "模型服务在一次修复后仍未返回有效的结构化 JSON",

@@ -33,6 +33,7 @@ class RequestBudget:
     accounting_complete: bool = True
     ledger_path: Path | None = None
     case_id: str | None = None
+    resume_ledger: bool = False
 
     def __post_init__(self) -> None:
         if not 0 < self.stop_at < self.limit:
@@ -44,6 +45,22 @@ class RequestBudget:
             ]
             if pending:
                 raise EvaluationBudgetStop(f"unsettled requests require inspection: {pending}")
+            if self.resume_ledger:
+                if (saved.get("token_limit"), saved.get("stop_at")) != (self.limit, self.stop_at):
+                    raise EvaluationBudgetStop("continued ledger budget parameters must not change")
+                settled_stop = saved.get("stop_reason") in {
+                    None,
+                    "workflow interrupted; settling dispatched requests",
+                }
+                if not saved.get("accounting_complete") or not settled_stop:
+                    raise EvaluationBudgetStop(
+                        "stopped or uncertain ledger cannot dispatch new calls"
+                    )
+                self.calls = saved["calls"]
+                self.total_tokens = saved["total_tokens"]
+                if self.total_tokens != sum(row.get("total_tokens", 0) for row in self.calls):
+                    raise EvaluationBudgetStop("ledger token accounting mismatch")
+                return
             raise EvaluationBudgetStop("existing ledger cannot be reset; choose a fresh ledger")
 
     def _persist(self) -> None:
@@ -99,7 +116,9 @@ class RequestBudget:
                         images += 1
                     else:
                         text_bytes += len(str(part.get("text", "")).encode("utf-8"))
-        return text_bytes + images * 8192 + self.max_output_tokens + 1024
+        return (
+            text_bytes + images * 8192 + int(body.get("max_tokens", self.max_output_tokens)) + 1024
+        )
 
     async def reserve(self, estimate: int, requested_model: str | None = None) -> int:
         async with self.lock:
@@ -183,7 +202,7 @@ class BudgetedTransport(httpx.AsyncBaseTransport):
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         body = json.loads(await request.aread())
-        body["max_tokens"] = self.budget.max_output_tokens
+        body.setdefault("max_tokens", self.budget.max_output_tokens)
         # Bound evaluation output without hidden reasoning on Bailian hybrid models.
         if "aliyuncs.com" in request.url.host and str(body.get("model", "")).startswith("qwen"):
             body["enable_thinking"] = False

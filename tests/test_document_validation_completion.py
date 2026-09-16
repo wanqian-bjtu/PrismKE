@@ -68,6 +68,19 @@ def test_unsettled_ledger_is_not_reset(tmp_path):
     assert ledger.read_text() == raw
 
 
+@pytest.mark.asyncio
+async def test_explicit_ledger_continuation_preserves_round_budget(tmp_path):
+    ledger = tmp_path / "ledger.json"
+    first = RequestBudget(limit=300000, stop_at=270000, ledger_path=ledger)
+    number = await first.reserve(100)
+    await first.record(100, httpx.Response(200, json={"usage": {"total_tokens": 20}}), number)
+    continued = RequestBudget(limit=300000, stop_at=270000, ledger_path=ledger, resume_ledger=True)
+    assert continued.total_tokens == 20
+    assert await continued.reserve(100) == 2
+    with pytest.raises(EvaluationBudgetStop, match="unsettled"):
+        RequestBudget(limit=300000, stop_at=270000, ledger_path=ledger, resume_ledger=True)
+
+
 def test_batches_preserve_order_evidence_and_coordinates():
     blocks = [
         TextBlock(id=f"block{i}", text="中文" * 1000, evidence_id=f"ev{i}", page_number=i)
@@ -114,6 +127,87 @@ async def test_evaluation_provider_processes_every_batch_without_replacing_docum
     )
     assert seen == ["ev0", "ev1", "ev2"]
     assert "evaluation_text_batches_completed:3" in result.warnings
+
+
+@pytest.mark.asyncio
+async def test_completed_text_batches_are_cached_without_new_calls(tmp_path, monkeypatch):
+    block = TextBlock(id="b", text="original", evidence_id="ev")
+    document = DocumentIR(
+        id="doc",
+        source_path="x.txt",
+        source_hash="a" * 64,
+        media_type="text/plain",
+        text_blocks=[block],
+    )
+    request = ExtractionRequest(
+        document=document,
+        output_schema=OutputSchema(schema_id="test", version="1", entity_types=[], relations=[]),
+    )
+    calls = 0
+
+    async def extract(self, request):
+        nonlocal calls
+        calls += 1
+        return ExtractionResult()
+
+    monkeypatch.setattr(OpenAICompatibleLLMProvider, "extract", extract)
+    provider = _EvaluationLLM("https://test.invalid", "test", "test")
+    provider.cache_dir = tmp_path
+    await provider.extract(request)
+    result = await provider.extract(request)
+    assert calls == 1
+    assert "evaluation_text_batch_cache_hit" in result.warnings
+
+
+@pytest.mark.asyncio
+async def test_verified_text_cache_reuses_body_but_extracts_new_ocr(monkeypatch):
+    from prismke.core.ids import stable_id
+
+    body = TextBlock(id="body", text="original", evidence_id="ev0")
+    ocr = TextBlock(id="ocr", text="new image text", evidence_id="ev1", modality="ocr")
+    old = DocumentIR(
+        id="doc",
+        source_path="x.md",
+        source_hash="a" * 64,
+        media_type="text/markdown",
+        text_blocks=[body],
+    )
+    schema = OutputSchema(schema_id="test", version="1", entity_types=[], relations=[])
+    provider = _EvaluationLLM("https://test.invalid", "test", "test")
+    base = OpenAICompatibleLLMProvider.fingerprint(provider)
+    provider.cached_state = {
+        "run_id": "old",
+        "status": "awaiting_review",
+        "document": old.model_dump(mode="json"),
+        "output_schema": schema.model_dump(mode="json"),
+        "text_candidates": [],
+        "warnings": [],
+        "provider_fingerprint": stable_id(
+            "provider", base, "evaluation-output-limit-v3", 4096, 12000
+        ),
+        "provider_calls": [
+            {
+                "provider": "llm",
+                "requested_model": "test",
+                "status": "succeeded",
+                "prompt_version": "schema-claims-v1",
+            }
+        ],
+    }
+    seen = []
+
+    async def extract(self, request):
+        seen.extend(block.id for block in request.document.text_blocks)
+        return ExtractionResult()
+
+    monkeypatch.setattr(OpenAICompatibleLLMProvider, "extract", extract)
+    result = await provider.extract(
+        ExtractionRequest(
+            document=old.model_copy(update={"text_blocks": [body, ocr]}), output_schema=schema
+        )
+    )
+    assert seen == ["ocr"]
+    assert "evaluation_reused_text_run:old" in result.warnings
 
 
 @pytest.mark.asyncio
