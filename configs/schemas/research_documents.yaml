@@ -1,0 +1,37 @@
+schema_id: prismke-research-documents
+version: "1"
+strict: false
+entity_types:
+  - id: SoftwareSystem
+  - id: Software
+  - id: Framework
+  - id: Model
+  - id: Dataset
+  - id: Community
+  - id: Organization
+  - id: Paper
+  - id: Person
+relations:
+  - id: authored_by
+    domain: [Paper]
+    range: [Person]
+  - id: affiliated_with
+    domain: [Person]
+    range: [Organization]
+  - id: developed_by
+    domain: [SoftwareSystem, Software, Framework, Model, Dataset]
+    range: [Organization, Person]
+  - id: proposes
+    domain: [Paper]
+    range: [SoftwareSystem, Software, Framework, Model]
+  - id: uses
+    domain: [SoftwareSystem, Software, Framework, Model]
+    range: [SoftwareSystem, Software, Framework, Model, Dataset]
+  - id: evaluated_on
+    domain: [Paper, SoftwareSystem, Software, Framework, Model]
+    range: [Dataset]
+  - id: collaborates_with
+    domain: [Organization]
+    range: [Organization]
+    symmetric: true
+entity_catalog: []
