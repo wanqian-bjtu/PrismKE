@@ -174,9 +174,18 @@ start_all() {
     return
   fi
 
+  if tmux_running "${TMUX_SESSION}" && ! http_healthy; then
+    echo "Restarting unhealthy Web session ${TMUX_SESSION}."
+    stop_tmux_session "${TMUX_SESSION}"
+  fi
   if tmux_running "${LEGACY_TMUX_SESSION}"; then
     echo "Stopping legacy tmux session ${LEGACY_TMUX_SESSION}."
     stop_tmux_session "${LEGACY_TMUX_SESSION}"
+  fi
+
+  if ! tmux_running "${TMUX_SESSION}"; then
+    port="$(api_port)"
+    assert_port_free "${port}" "PrismKE Web"
   fi
 
   if ! neo4j_running; then
@@ -187,9 +196,12 @@ start_all() {
   fi
 
   if ! tmux_running "${TMUX_SESSION}"; then
-    port="$(api_port)"
-    assert_port_free "${port}" "PrismKE Web"
-    start_web
+    if ! start_web; then
+      if (( started_neo4j )); then
+        "${NEO4J_BIN}" stop >/dev/null 2>&1 || true
+      fi
+      die "failed to create tmux session ${TMUX_SESSION}"
+    fi
     started_web=1
   fi
 
