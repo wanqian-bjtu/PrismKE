@@ -2,7 +2,7 @@
 
 PrismKE 是一个面向通用多模态知识图谱构建的研究型项目，目标是实现模式引导、证据感知、可审核和可持续更新的知识抽取流程。
 
-当前稳定版本为 `v0.3.0`，已经接入 Neo4j、版本差异与补偿回滚、FastAPI、Gradio 研究工作台和 Docker Compose。
+当前稳定版本为 `v0.3.1`，已经接入 Neo4j、版本差异与补偿回滚、FastAPI、Gradio 研究工作台、Docker Compose 和 AutoDL 一键服务管理。
 
 ## 当前能力
 
