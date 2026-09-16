@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from datetime import UTC, datetime
 from typing import Any
 
@@ -68,6 +69,7 @@ class Neo4jGraphStore:
                     "Document",
                     "Evidence",
                     "Entity",
+                    "EntityOperation",
                     "Claim",
                     "ConflictSet",
                     "Revision",
@@ -82,6 +84,9 @@ class Neo4jGraphStore:
                     "ON (n.relation_id, n.status)",
                     "CREATE INDEX revision_created IF NOT EXISTS FOR (n:Revision) "
                     "ON (n.created_at)",
+                    "CREATE VECTOR INDEX entity_embedding_bge_m3 IF NOT EXISTS "
+                    "FOR (n:Entity) ON (n.embedding) OPTIONS {indexConfig: {"
+                    "`vector.dimensions`: 1024, `vector.similarity_function`: 'cosine'}}",
                 ]
             )
             async with self.driver.session(database=self.database) as session:
@@ -175,6 +180,17 @@ class Neo4jGraphStore:
                 active=entity.active,
                 payload=_dump(entity),
             )
+        for embedding in transaction.entity_embeddings:
+            await tx.run(
+                "MATCH (n:Entity {id: $entity_id}) "
+                "SET n.embedding=$vector, n.embedding_model=$model, "
+                "n.embedding_text_hash=$text_hash, n.embedding_dimension=$dimension",
+                entity_id=embedding.entity_id,
+                vector=embedding.vector,
+                model=embedding.model_fingerprint,
+                text_hash=embedding.text_hash,
+                dimension=embedding.dimension,
+            )
         for claim in transaction.claims:
             result = await tx.run(
                 "MATCH (s:Entity {id: $subject_id}) "
@@ -236,6 +252,25 @@ class Neo4jGraphStore:
                 id=conflict.id,
                 claim_ids=conflict.claim_ids,
             )
+        for operation in transaction.entity_operations:
+            await tx.run(
+                "MERGE (n:EntityOperation {id: $id}) "
+                "SET n.operation_type=$operation_type, n.status=$status, n.payload=$payload",
+                id=operation.id,
+                operation_type=operation.operation_type,
+                status=operation.status,
+                payload=_dump(operation),
+            )
+            if operation.operation_type == "merge" and operation.target_entity_ids:
+                await tx.run(
+                    "MATCH (target:Entity {id: $target_id}) "
+                    "MATCH (source:Entity) WHERE source.id IN $source_ids "
+                    "AND source.id <> $target_id "
+                    "MERGE (source)-[:MERGED_INTO {operation_id: $operation_id}]->(target)",
+                    target_id=operation.target_entity_ids[0],
+                    source_ids=operation.source_entity_ids,
+                    operation_id=operation.id,
+                )
         revision = transaction.revision
         await tx.run(
             "CREATE (r:Revision {id: $id, run_id: $run_id, parent_id: $parent_id, "
@@ -264,6 +299,7 @@ class Neo4jGraphStore:
                 "entity": "Entity",
                 "claim": "Claim",
                 "conflict": "ConflictSet",
+                "entity_operation": "EntityOperation",
             }[change.resource_type]
             await tx.run(
                 f"MATCH (c:RevisionChange {{id: $change_id}}), "
@@ -294,6 +330,54 @@ class Neo4jGraphStore:
 
     async def list_entities(self) -> list[CanonicalEntity]:
         return [_load(item, CanonicalEntity) for item in await self._list_payloads("Entity")]
+
+    async def get_entity(self, entity_id: str) -> CanonicalEntity | None:
+        return await self._get("Entity", entity_id, CanonicalEntity)
+
+    async def search_entities(
+        self, vector: list[float], entity_type: str, top_k: int
+    ) -> list[tuple[CanonicalEntity, float]]:
+        if not vector or top_k < 1:
+            return []
+        await self._ensure_schema()
+        if len(vector) == 1024:
+            async with self.driver.session(database=self.database) as session:
+                result = await session.run(
+                    "CALL db.index.vector.queryNodes("
+                    "'entity_embedding_bge_m3', $candidate_limit, $vector) "
+                    "YIELD node, score "
+                    "WHERE node.entity_type = $entity_type AND coalesce(node.active, true) "
+                    "RETURN node.payload AS payload, score ORDER BY score DESC LIMIT $top_k",
+                    candidate_limit=max(top_k * 5, top_k),
+                    vector=vector,
+                    entity_type=entity_type,
+                    top_k=top_k,
+                )
+                records = await result.data()
+            return [
+                (_load(record["payload"], CanonicalEntity), float(record["score"]))
+                for record in records
+            ]
+        async with self.driver.session(database=self.database) as session:
+            result = await session.run(
+                "MATCH (n:Entity {entity_type: $entity_type}) "
+                "WHERE coalesce(n.active, true) AND n.embedding IS NOT NULL "
+                "RETURN n.payload AS payload, n.embedding AS embedding",
+                entity_type=entity_type,
+            )
+            records = await result.data()
+        query_norm = math.sqrt(sum(value * value for value in vector)) or 1.0
+        matches: list[tuple[CanonicalEntity, float]] = []
+        for record in records:
+            candidate = [float(value) for value in record["embedding"]]
+            if len(candidate) != len(vector):
+                continue
+            candidate_norm = math.sqrt(sum(value * value for value in candidate)) or 1.0
+            score = sum(
+                left * right for left, right in zip(vector, candidate, strict=True)
+            ) / (query_norm * candidate_norm)
+            matches.append((_load(record["payload"], CanonicalEntity), score))
+        return sorted(matches, key=lambda item: item[1], reverse=True)[:top_k]
 
     async def list_claims(self) -> list[Claim]:
         return [_load(item, Claim) for item in await self._list_payloads("Claim")]

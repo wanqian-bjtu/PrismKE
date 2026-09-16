@@ -32,6 +32,16 @@ class Settings(BaseSettings):
     api_token: str | None = None
     api_host: str = "127.0.0.1"
     api_port: int = 8000
+    embedding_provider: str = "disabled"
+    embedding_model: str = "BAAI/bge-m3"
+    embedding_device: str = "cuda:0"
+    embedding_use_fp16: bool = True
+    embedding_batch_size: int = 32
+    embedding_max_tokens: int = 512
+    entity_top_k: int = 10
+    entity_auto_link_threshold: float = 0.88
+    entity_review_threshold: float = 0.65
+    entity_min_margin: float = 0.08
 
     @property
     def runs_dir(self) -> Path:
@@ -60,3 +70,7 @@ class Settings(BaseSettings):
     @property
     def audit_path(self) -> Path:
         return self.runtime_dir / "audit.jsonl"
+
+    @property
+    def embedding_cache_dir(self) -> Path:
+        return self.runtime_dir / "embeddings"

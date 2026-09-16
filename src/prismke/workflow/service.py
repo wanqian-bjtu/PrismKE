@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlparse
 
 from prismke.core.errors import LegacyCheckpointError, ProviderConfigurationError
@@ -19,8 +20,11 @@ from prismke.persistence import (
 )
 from prismke.persistence.base import GraphStore
 from prismke.providers import (
+    BGEM3EmbeddingProvider,
+    DisabledEmbeddingProvider,
     DisabledOCRProvider,
     DisabledVLMProvider,
+    MockEmbeddingProvider,
     MockLLMProvider,
     MockOCRProvider,
     MockVLMProvider,
@@ -28,12 +32,13 @@ from prismke.providers import (
     OpenAICompatibleVLMProvider,
     PaddleOCRProvider,
 )
-from prismke.providers.base import LLMProvider, OCRProvider, VLMProvider
+from prismke.providers.base import EmbeddingProvider, LLMProvider, OCRProvider, VLMProvider
 from prismke.workflow.graph import PrismKEWorkflow
 
-PIPELINE_VERSION = "0.3.0"
+PIPELINE_VERSION = "0.4.0"
 ASSET_POLICY_VERSION = "assets-v2"
 ALIGNMENT_POLICY_VERSION = "alignment-v1"
+ENTITY_RESOLUTION_POLICY_VERSION = "entity-resolution-v1"
 
 
 class PrismKEService:
@@ -46,6 +51,7 @@ class PrismKEService:
         self.evidence_store = FileEvidenceStore(self.settings.evidence_dir)
         self.audit = AuditLog(self.settings.audit_path)
         self._ocr_providers: dict[str, OCRProvider] = {}
+        self._embedding_provider: EmbeddingProvider | None = None
 
     def _create_graph_store(self) -> GraphStore:
         if self.settings.graph_store == "json":
@@ -132,6 +138,28 @@ class PrismKEService:
             max_image_edge=self.settings.vlm_max_image_edge,
         )
 
+    def embedding_provider(self) -> EmbeddingProvider:
+        if self._embedding_provider is not None:
+            return self._embedding_provider
+        name = self.settings.embedding_provider
+        if name == "disabled":
+            provider: EmbeddingProvider = DisabledEmbeddingProvider()
+        elif name == "mock":
+            provider = MockEmbeddingProvider()
+        elif name == "bge-m3":
+            provider = BGEM3EmbeddingProvider(
+                model_name=self.settings.embedding_model,
+                device=self.settings.embedding_device,
+                use_fp16=self.settings.embedding_use_fp16,
+                batch_size=self.settings.embedding_batch_size,
+                max_tokens=self.settings.embedding_max_tokens,
+                cache_dir=self.settings.embedding_cache_dir,
+            )
+        else:
+            raise ProviderConfigurationError(f"unknown embedding provider: {name}")
+        self._embedding_provider = provider
+        return provider
+
     def _workflow(
         self,
         provider: LLMProvider,
@@ -151,6 +179,11 @@ class PrismKEService:
                 asset_dir=self.settings.assets_dir,
                 allow_remote_assets=allow_remote_assets,
             ),
+            embedding_provider=self.embedding_provider(),
+            entity_top_k=self.settings.entity_top_k,
+            entity_auto_link_threshold=self.settings.entity_auto_link_threshold,
+            entity_review_threshold=self.settings.entity_review_threshold,
+            entity_min_margin=self.settings.entity_min_margin,
         )
 
     async def run(
@@ -189,6 +222,7 @@ class PrismKEService:
         provider = self.provider(provider_name)
         ocr_provider = self.ocr_provider(ocr_provider_name)
         vlm_provider = self.vlm_provider(vlm_provider_name)
+        embedding_provider = self.embedding_provider()
         schema = load_schema(schema_path)
         schema_fingerprint = canonical_hash(schema.model_dump(mode="json"))
         run_id = stable_id(
@@ -199,8 +233,14 @@ class PrismKEService:
             provider.fingerprint(),
             ocr_provider.fingerprint(),
             vlm_provider.fingerprint(),
+            embedding_provider.fingerprint(),
             ASSET_POLICY_VERSION,
             ALIGNMENT_POLICY_VERSION,
+            ENTITY_RESOLUTION_POLICY_VERSION,
+            self.settings.entity_top_k,
+            self.settings.entity_auto_link_threshold,
+            self.settings.entity_review_threshold,
+            self.settings.entity_min_margin,
             allow_remote_assets,
             PIPELINE_VERSION,
         )
@@ -216,6 +256,8 @@ class PrismKEService:
             ocr_provider_fingerprint=ocr_provider.fingerprint(),
             vlm_provider_name=vlm_provider_name,
             vlm_provider_fingerprint=vlm_provider.fingerprint(),
+            embedding_provider_name=self.settings.embedding_provider,
+            embedding_provider_fingerprint=embedding_provider.fingerprint(),
             allow_remote_assets=allow_remote_assets,
             pipeline_version=PIPELINE_VERSION,
         )
@@ -281,6 +323,59 @@ class PrismKEService:
             raise LegacyCheckpointError(
                 "this run uses the v0.1 checkpoint format; rerun the input with v0.1.1"
             )
+        return state
+
+    async def review_entity(
+        self,
+        run_id: str,
+        task_id: str,
+        decision: Literal["link", "create", "reject"],
+        selected_entity_id: str | None = None,
+    ) -> WorkflowState:
+        state = self.runs.load(run_id)
+        task = next((item for item in state.entity_review_tasks if item.id == task_id), None)
+        if task is None or task.mention_id is None:
+            raise KeyError(f"entity review task not found: {task_id}")
+        if decision not in {"link", "create", "reject"}:
+            raise ValueError(f"unsupported entity review decision: {decision}")
+        target_id: str | None = None
+        if decision == "link":
+            allowed = {item.entity_id for item in task.candidates}
+            if selected_entity_id not in allowed:
+                raise ValueError("selected entity is not one of the review candidates")
+            target_id = selected_entity_id
+        elif decision == "create":
+            target_id = task.proposed_entity_id
+            if target_id is None:
+                raise ValueError("review task does not contain a proposed entity")
+        task.status = "resolved"
+        task.decision = decision
+        task.selected_entity_id = target_id
+        task.resolved_at = utc_now()
+        if target_id is not None:
+            state.mention_to_entity[task.mention_id] = target_id
+        state.status = (
+            "awaiting_review"
+            if any(item.status == "pending" for item in state.entity_review_tasks)
+            else "running"
+        )
+        self.audit.record(
+            "entity_review",
+            task.id,
+            {
+                "run_id": run_id,
+                "mention_id": task.mention_id,
+                "decision": decision,
+                "selected_entity_id": target_id,
+            },
+        )
+        if not await self._workflow(
+            self.provider(state.provider_name),
+            self.ocr_provider(state.ocr_provider_name),
+            self.vlm_provider(state.vlm_provider_name),
+            state.allow_remote_assets,
+        ).record_entity_review(state):
+            raise LegacyCheckpointError("entity review checkpoint is unavailable; rerun the input")
         return state
 
     async def resume(self, run_id: str) -> WorkflowState:

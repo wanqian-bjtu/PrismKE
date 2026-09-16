@@ -42,6 +42,9 @@ class CanonicalEntity(BaseModel):
     name: str
     entity_type: str
     aliases: list[str] = Field(default_factory=list)
+    attributes: dict[str, Any] = Field(default_factory=dict)
+    context_summary: str | None = None
+    source_evidence_ids: list[str] = Field(default_factory=list)
     active: bool = True
     created_at: datetime = Field(default_factory=utc_now)
 
@@ -118,6 +121,72 @@ class ReviewTask(BaseModel):
     resolved_at: datetime | None = None
 
 
+class EntityCandidate(BaseModel):
+    entity_id: str
+    retrieval_score: float = Field(ge=-1.0, le=1.0)
+    name_score: float = Field(ge=0.0, le=1.0)
+    context_score: float = Field(ge=-1.0, le=1.0)
+    neighborhood_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    final_score: float = Field(ge=0.0, le=1.0)
+    reasons: list[str] = Field(default_factory=list)
+
+
+class EntityResolutionDecision(BaseModel):
+    mention_id: str
+    candidates: list[EntityCandidate] = Field(default_factory=list)
+    selected_entity_id: str | None = None
+    method: Literal["exact", "vector", "review", "nil"]
+    confidence: float = Field(ge=0.0, le=1.0)
+    margin: float | None = None
+    requires_review: bool = False
+    reasons: list[str] = Field(default_factory=list)
+
+
+class EntityEmbedding(BaseModel):
+    entity_id: str
+    model_fingerprint: str
+    text_hash: str
+    dimension: int = Field(gt=0)
+    vector: list[float] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_dimension(self) -> EntityEmbedding:
+        if len(self.vector) != self.dimension:
+            raise ValueError("embedding dimension does not match vector length")
+        return self
+
+
+class EntityReviewTask(BaseModel):
+    id: str
+    run_id: str
+    mention_id: str | None = None
+    operation_id: str | None = None
+    task_type: Literal["link", "deduplicate", "merge", "split"]
+    candidates: list[EntityCandidate] = Field(default_factory=list)
+    reasons: list[str] = Field(min_length=1)
+    status: Literal["pending", "resolved"] = "pending"
+    decision: Literal["link", "create", "approve", "reject"] | None = None
+    selected_entity_id: str | None = None
+    proposed_entity_id: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+    resolved_at: datetime | None = None
+
+
+class EntityOperation(BaseModel):
+    id: str
+    operation_type: Literal["merge", "split"]
+    source_entity_ids: list[str] = Field(min_length=1)
+    target_entity_ids: list[str] = Field(default_factory=list)
+    affected_claim_ids: list[str] = Field(default_factory=list)
+    before: dict[str, Any] = Field(default_factory=dict)
+    after: dict[str, Any] = Field(default_factory=dict)
+    reasons: list[str] = Field(min_length=1)
+    evidence_ids: list[str] = Field(default_factory=list)
+    status: Literal["pending", "approved", "rejected", "applied", "rolled_back"] = "pending"
+    reviewer: str | None = None
+    reviewed_at: datetime | None = None
+
+
 class GraphDocument(BaseModel):
     """Portable document metadata stored in a graph backend."""
 
@@ -129,7 +198,7 @@ class GraphDocument(BaseModel):
 
 
 class GraphChange(BaseModel):
-    resource_type: Literal["entity", "claim", "conflict"]
+    resource_type: Literal["entity", "claim", "conflict", "entity_operation"]
     resource_id: str
     action: Literal["create", "update", "close", "restore"]
     before: dict[str, Any] | None = None
@@ -153,6 +222,8 @@ class GraphCommit(BaseModel):
     entities: list[CanonicalEntity] = Field(default_factory=list)
     claims: list[Claim] = Field(default_factory=list)
     conflicts: list[ConflictSet] = Field(default_factory=list)
+    entity_operations: list[EntityOperation] = Field(default_factory=list)
+    entity_embeddings: list[EntityEmbedding] = Field(default_factory=list)
     revision: GraphRevision
 
 
