@@ -155,9 +155,10 @@ async def test_live_neo4j_vector_index_search() -> None:
                 revision=revision,
             )
         )
-        matches = await store.search_entities(vector, entity_type, 1)
+        query = [0.8, 0.6, *([0.0] * 1022)]
+        matches = await store.search_entities(query, entity_type, 1)
         assert matches[0][0].id == entity.id
-        assert matches[0][1] > 0.99
+        assert matches[0][1] == pytest.approx(0.8, abs=1e-8)
     finally:
         await store.close()
 

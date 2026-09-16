@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
@@ -147,11 +148,14 @@ class SemanticEntityResolver:
 
     @staticmethod
     def _candidate(
-        mention: EntityMention, entity: CanonicalEntity, retrieval_score: float
+        mention: EntityMention,
+        entity: CanonicalEntity,
+        retrieval_score: float,
+        context_score: float | None = None,
     ) -> EntityCandidate:
         retrieval = max(0.0, min(1.0, (retrieval_score + 1.0) / 2.0))
         name = SemanticEntityResolver._name_score(mention, entity)
-        context = retrieval
+        context = retrieval if context_score is None else context_score
         neighborhood = 0.0
         final = 0.4 * retrieval + 0.3 * name + 0.2 * context + 0.1 * neighborhood
         return EntityCandidate(
@@ -163,6 +167,26 @@ class SemanticEntityResolver:
             final_score=max(0.0, min(1.0, final)),
             reasons=["dense_retrieval", "type_match", "name_rerank", "context_rerank"],
         )
+
+    async def _context_scores(
+        self, mention: EntityMention, entities: list[CanonicalEntity]
+    ) -> dict[str, float]:
+        with_context = [item for item in entities if item.context_summary]
+        if not mention.context.strip() or not with_context:
+            return {}
+        vectors = await self.embedding_provider.encode(
+            [mention.context, *(item.context_summary or "" for item in with_context)]
+        )
+        query = vectors[0]
+        query_norm = math.sqrt(sum(value * value for value in query)) or 1.0
+        scores: dict[str, float] = {}
+        for entity, vector in zip(with_context, vectors[1:], strict=True):
+            norm = math.sqrt(sum(value * value for value in vector)) or 1.0
+            cosine = sum(
+                left * right for left, right in zip(query, vector, strict=True)
+            ) / (query_norm * norm)
+            scores[entity.id] = max(0.0, min(1.0, (cosine + 1.0) / 2.0))
+        return scores
 
     async def _apply_neighborhood_score(
         self, mention: EntityMention, candidate: EntityCandidate
@@ -272,9 +296,15 @@ class SemanticEntityResolver:
                         self.top_k,
                         self.embedding_provider.fingerprint(),
                     )
+                    context_scores = await self._context_scores(
+                        mention, [entity for entity, _ in retrieved]
+                    )
                     candidates = [
                         await self._apply_neighborhood_score(
-                            mention, self._candidate(mention, entity, score)
+                            mention,
+                            self._candidate(
+                                mention, entity, score, context_scores.get(entity.id)
+                            ),
                         )
                         for entity, score in retrieved
                     ]
@@ -310,6 +340,15 @@ class SemanticEntityResolver:
                 ]
 
             nil_entity = self._nil_entity(mention, entity_type)
+            if nil_entity.id in existing or exact_matches:
+                nil_entity = nil_entity.model_copy(
+                    update={
+                        "id": stable_id(
+                            "entity", entity_type, normalized,
+                            normalize_label(mention.context), "disambiguated-nil",
+                        )
+                    }
+                )
             entities.setdefault(nil_entity.id, nil_entity)
             if cross_type:
                 candidates = [

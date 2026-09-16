@@ -115,7 +115,7 @@ async def evaluate_entity_linking_manifest(
         top_10_hits = 0
         top_1_hits = 0
         true_nil = predicted_nil = correct_nil = 0
-        reviews = false_auto_links = 0
+        reviews = false_auto_links = auto_links = 0
         resolution_started = time.perf_counter()
         for payload in manifest["mentions"]:
             expected = payload.get("expected_entity_id")
@@ -152,9 +152,9 @@ async def evaluate_entity_linking_manifest(
             predicted_nil += int(is_predicted_nil)
             correct_nil += int(is_true_nil and is_predicted_nil)
             reviews += int(decision.requires_review)
+            auto_links += int(decision.method in {"exact", "vector"})
             false_auto_links += int(
-                expected is not None
-                and decision.method in {"exact", "vector"}
+                decision.method in {"exact", "vector"}
                 and decision.selected_entity_id != expected
             )
             actual_cluster = str(payload["cluster_id"])
@@ -195,7 +195,7 @@ async def evaluate_entity_linking_manifest(
         b_cubed_recall=bc_recall,
         b_cubed_f1=bc_f1,
         review_rate=reviews / count if count else 0.0,
-        false_auto_link_rate=false_auto_links / link_cases if link_cases else 0.0,
+        false_auto_link_rate=false_auto_links / auto_links if auto_links else 0.0,
         index_build_seconds=index_build_seconds,
         resolution_seconds=resolution_seconds,
         total_seconds=time.perf_counter() - total_started,

@@ -227,6 +227,9 @@ def prepare_model(
             vector = (await service.embedding_provider().encode(["PrismKE entity index"]))[0]
             return {
                 "model": embedding,
+                "revision": settings.embedding_model_revision,
+                "device": settings.embedding_device,
+                "model_cache": str(settings.embedding_model_cache_dir),
                 "fingerprint": service.embedding_provider().fingerprint(),
                 "dimension": len(vector),
                 "status": "ready",

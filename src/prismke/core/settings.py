@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     api_port: int = 8000
     embedding_provider: str = "disabled"
     embedding_model: str = "BAAI/bge-m3"
+    embedding_model_revision: str = "5617a9f61b028005a4858fdac845db406aefb181"
     embedding_device: str = "cuda:0"
     embedding_use_fp16: bool = True
     embedding_batch_size: int = 32

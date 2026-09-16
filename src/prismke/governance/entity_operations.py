@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from uuid import uuid4
 
 from prismke.core.errors import GraphIntegrityError
 from prismke.core.ids import canonical_hash, stable_id
@@ -47,6 +48,8 @@ class EntityGovernanceService:
         selected = {item.id: item for item in entities if item.id in source_ids}
         if set(selected) != set(source_ids):
             raise KeyError("one or more merge entities do not exist")
+        if any(not item.active for item in selected.values()):
+            raise ValueError("merge sources must be active entities")
         if len({item.entity_type for item in selected.values()}) != 1:
             raise ValueError("entities with different types cannot be merged")
         claims = [
@@ -56,7 +59,9 @@ class EntityGovernanceService:
             and ({item.subject_id, item.object_entity_id} & set(source_ids))
         ]
         operation = EntityOperation(
-            id=stable_id("entity-operation", "merge", *sorted(source_ids), target_entity_id),
+            id=stable_id(
+                "entity-operation", "merge", *sorted(source_ids), target_entity_id, uuid4().hex
+            ),
             operation_type="merge",
             source_entity_ids=source_ids,
             target_entity_ids=[target_entity_id],
@@ -93,11 +98,16 @@ class EntityGovernanceService:
         source = await self.graph_store.get_entity(source_entity_id)
         if source is None:
             raise KeyError(f"entity not found: {source_entity_id}")
+        if not source.active:
+            raise ValueError("split source must be active")
         if not target_entities:
             raise ValueError("split requires at least one target entity")
         targets = {item.id: item for item in target_entities}
         if len(targets) != len(target_entities):
             raise ValueError("split target entity ids must be unique")
+        existing_ids = {item.id for item in await self.graph_store.list_entities()}
+        if set(targets) & existing_ids:
+            raise ValueError("split targets must have new entity ids")
         if any(item.entity_type != source.entity_type for item in targets.values()):
             raise ValueError("split target types must match the source entity type")
         if not set(claim_assignments.values()) <= set(targets):
@@ -125,6 +135,7 @@ class EntityGovernanceService:
                 "split",
                 source_entity_id,
                 canonical_hash(dict(sorted(claim_assignments.items()))),
+                uuid4().hex,
             ),
             operation_type="split",
             source_entity_ids=[source_entity_id],
@@ -202,8 +213,21 @@ class EntityGovernanceService:
         )
 
     async def _apply(self, operation: EntityOperation) -> GraphRevision:
+        parent = await self.graph_store.latest_revision()
         entities = {item.id: item for item in await self.graph_store.list_entities()}
         claims = {item.id: item for item in await self.graph_store.list_claims()}
+        if operation.operation_type == "split" and set(operation.target_entity_ids) & set(entities):
+            raise GraphIntegrityError("split target ids were created after the proposal")
+        for resource_type, current in (("entities", entities), ("claims", claims)):
+            for resource_id, expected in operation.before.get(resource_type, {}).items():
+                resource = current.get(resource_id)
+                if resource is None or canonical_hash(resource.model_dump(mode="json")) != (
+                    canonical_hash(expected)
+                ):
+                    raise GraphIntegrityError(
+                        f"entity proposal is stale for {resource_type}:{resource_id}; "
+                        "create a new proposal before approval"
+                    )
         changed_entities: dict[str, CanonicalEntity] = {}
         changed_claims: dict[str, Claim] = {}
         changes: list[GraphChange] = []
@@ -354,7 +378,6 @@ class EntityGovernanceService:
                 after=applied.model_dump(mode="json"),
             )
         )
-        parent = await self.graph_store.latest_revision()
         revision = GraphRevision(
             id=stable_id(
                 "revision", "entity-governance", operation.id, parent.id if parent else "root"

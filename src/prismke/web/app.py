@@ -191,6 +191,12 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             for item in service.list_entity_reviews(None if status == "all" else status)
         ]
 
+    async def entity_history(entity_id: str) -> list[dict[str, Any]]:
+        return [
+            item.model_dump(mode="json")
+            for item in await service.entity_history(entity_id)
+        ]
+
     async def review_entity_task(
         task_id: str,
         run_id: str,
@@ -327,6 +333,26 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 [entity_query, entity_type, entity_limit],
                 [entity_search_output],
             )
+            with gr.Accordion("证据与候选邻域", open=False):
+                with gr.Row():
+                    with gr.Column(min_width=280):
+                        mention_evidence_id = gr.Textbox(label="提及 Evidence ID")
+                        mention_evidence_button = gr.Button("查看提及证据")
+                        mention_evidence_metadata = gr.JSON(label="提及证据")
+                        mention_evidence_preview = gr.Image(label="证据区域", type="filepath")
+                    with gr.Column(min_width=280):
+                        candidate_entity_id = gr.Textbox(label="候选 Entity ID")
+                        candidate_neighborhood_button = gr.Button("查看候选邻域")
+                        candidate_neighborhood_plot = gr.Plot(label="候选邻域")
+                        candidate_neighborhood_output = gr.JSON(label="邻域事实与证据引用")
+                mention_evidence_button.click(
+                    show_evidence, [mention_evidence_id],
+                    [mention_evidence_metadata, mention_evidence_preview],
+                )
+                candidate_neighborhood_button.click(
+                    neighborhood, [candidate_entity_id, gr.State(1)],
+                    [candidate_neighborhood_plot, candidate_neighborhood_output],
+                )
             with gr.Row():
                 entity_review_status = gr.Dropdown(
                     ["pending", "resolved", "all"], value="pending", label="审核状态"
@@ -387,6 +413,11 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 [split_source, split_targets, split_assignments, split_reasons],
                 [split_output],
             )
+            with gr.Accordion("实体治理历史", open=False):
+                history_entity_id = gr.Textbox(label="实体 Entity ID")
+                history_button = gr.Button("查询治理与回滚历史")
+                history_output = gr.JSON(label="实体 Revision 历史")
+                history_button.click(entity_history, [history_entity_id], [history_output])
 
         with gr.Tab("版本"):
             revision_button = gr.Button("刷新版本")

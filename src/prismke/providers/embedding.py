@@ -9,6 +9,7 @@ import math
 import os
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from prismke.core.ids import canonical_hash
 
@@ -56,6 +57,7 @@ class BGEM3EmbeddingProvider:
     def __init__(
         self,
         model_name: str,
+        model_revision: str,
         device: str,
         use_fp16: bool,
         batch_size: int,
@@ -65,6 +67,7 @@ class BGEM3EmbeddingProvider:
         allow_download: bool = False,
     ) -> None:
         self.model_name = model_name
+        self.model_revision = model_revision
         self.device = device
         self.use_fp16 = use_fp16
         self.batch_size = batch_size
@@ -82,6 +85,7 @@ class BGEM3EmbeddingProvider:
             {
                 "provider": "bge-m3",
                 "model": self.model_name,
+                "revision": self.model_revision,
                 "dimension": self.dimension,
                 "max_tokens": self.max_tokens,
                 "implementation": "v1",
@@ -96,6 +100,7 @@ class BGEM3EmbeddingProvider:
         if self._model is None:
             os.environ.setdefault("HF_HOME", str(self.model_cache_dir.resolve()))
             try:
+                import torch
                 from FlagEmbedding import BGEM3FlagModel
                 from huggingface_hub import snapshot_download
                 from huggingface_hub.errors import LocalEntryNotFoundError
@@ -103,6 +108,10 @@ class BGEM3EmbeddingProvider:
                 raise RuntimeError(
                     "BGE-M3 is not installed; run `uv sync --extra embedding`"
                 ) from exc
+            if self.device.startswith("cuda") and not torch.cuda.is_available():
+                raise RuntimeError(
+                    "BGE-M3 requires an available CUDA device; check the Torch/driver versions"
+                )
             model_path = Path(self.model_name)
             try:
                 resolved_model = (
@@ -110,6 +119,7 @@ class BGEM3EmbeddingProvider:
                     if model_path.exists()
                     else snapshot_download(
                         repo_id=self.model_name,
+                        revision=self.model_revision,
                         cache_dir=self.model_cache_dir / "hub",
                         local_files_only=not self.allow_download,
                         allow_patterns=[
@@ -141,15 +151,18 @@ class BGEM3EmbeddingProvider:
         return self._model
 
     def _encode_missing(self, texts: list[str]) -> list[list[float]]:
+        import torch
+
         model = self._load_model()
-        result = model.encode(
-            texts,
-            batch_size=self.batch_size,
-            max_length=self.max_tokens,
-            return_dense=True,
-            return_sparse=False,
-            return_colbert_vecs=False,
-        )
+        with torch.inference_mode():
+            result = model.encode(
+                texts,
+                batch_size=self.batch_size,
+                max_length=self.max_tokens,
+                return_dense=True,
+                return_sparse=False,
+                return_colbert_vecs=False,
+            )
         vectors = result["dense_vecs"]
         return [[float(value) for value in vector] for vector in vectors]
 
@@ -163,11 +176,16 @@ class BGEM3EmbeddingProvider:
             for index, text in enumerate(texts):
                 path = self._cache_path(text)
                 if path.is_file():
-                    payload = json.loads(path.read_text(encoding="utf-8"))
-                    vector = [float(value) for value in payload["vector"]]
-                    if len(vector) == self.dimension:
-                        output[index] = vector
-                        continue
+                    try:
+                        payload = json.loads(path.read_text(encoding="utf-8"))
+                        vector = [float(value) for value in payload["vector"]]
+                        if len(vector) == self.dimension and all(
+                            math.isfinite(value) for value in vector
+                        ):
+                            output[index] = vector
+                            continue
+                    except (OSError, ValueError, KeyError, TypeError):
+                        pass
                 missing_texts.append(text)
                 missing_indexes.append(index)
             if missing_texts:
@@ -179,11 +197,18 @@ class BGEM3EmbeddingProvider:
                         raise ValueError(
                             f"BGE-M3 returned dimension {len(vector)}, expected {self.dimension}"
                         )
+                    if not all(math.isfinite(value) for value in vector):
+                        raise ValueError("BGE-M3 returned non-finite embedding values")
                     path = self._cache_path(text)
                     path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_text(
-                        json.dumps({"vector": vector}, separators=(",", ":")),
-                        encoding="utf-8",
-                    )
+                    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+                    try:
+                        with temporary.open("w", encoding="utf-8") as stream:
+                            json.dump({"vector": vector}, stream, separators=(",", ":"))
+                            stream.flush()
+                            os.fsync(stream.fileno())
+                        os.replace(temporary, path)
+                    finally:
+                        temporary.unlink(missing_ok=True)
                     output[index] = vector
             return [vector for vector in output if vector is not None]

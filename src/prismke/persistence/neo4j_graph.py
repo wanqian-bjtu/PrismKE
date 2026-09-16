@@ -170,6 +170,19 @@ class Neo4jGraphStore:
                 payload=_dump(evidence),
             )
         for entity in transaction.entities:
+            previous_result = await tx.run(
+                "MATCH (n:Entity {id: $id}) RETURN n.payload AS payload", id=entity.id
+            )
+            previous_record = await previous_result.single()
+            if previous_record is not None and (
+                _load(previous_record["payload"], CanonicalEntity).embedding_source()
+                != entity.embedding_source()
+            ):
+                await tx.run(
+                    "MATCH (n:Entity {id: $id}) "
+                    "REMOVE n.embedding, n.embedding_model, n.embedding_text_hash, "
+                    "n.embedding_dimension", id=entity.id,
+                )
             if not entity.active:
                 closing_claim_ids = [claim.id for claim in transaction.claims]
                 result = await tx.run(
@@ -380,24 +393,46 @@ class Neo4jGraphStore:
         await self._ensure_schema()
         if len(vector) == 1024:
             async with self.driver.session(database=self.database) as session:
-                result = await session.run(
-                    "CALL db.index.vector.queryNodes("
-                    "'entity_embedding_bge_m3', $candidate_limit, $vector) "
-                    "YIELD node, score "
-                    "WHERE node.entity_type = $entity_type AND coalesce(node.active, true) "
-                    "AND ($model IS NULL OR node.embedding_model = $model) "
-                    "RETURN node.payload AS payload, score ORDER BY score DESC LIMIT $top_k",
-                    candidate_limit=max(top_k * 5, top_k),
-                    vector=vector,
-                    entity_type=entity_type,
-                    top_k=top_k,
-                    model=model_fingerprint,
+                count_result = await session.run(
+                    "MATCH (n:Entity) WHERE n.embedding_dimension = 1024 "
+                    "AND n.embedding IS NOT NULL RETURN count(n) AS count"
                 )
-                records = await result.data()
-            return [
-                (_load(record["payload"], CanonicalEntity), float(record["score"]))
-                for record in records
-            ]
+                count_record = await count_result.single()
+                total = int(count_record["count"]) if count_record is not None else 0
+                if total == 0:
+                    return []
+                candidate_limit = min(total, max(top_k * 5, top_k))
+                while True:
+                    result = await session.run(
+                        "CALL db.index.vector.queryNodes("
+                        "'entity_embedding_bge_m3', $candidate_limit, $vector) "
+                        "YIELD node, score "
+                        "WHERE node.entity_type = $entity_type AND coalesce(node.active, true) "
+                        "AND ($model IS NULL OR node.embedding_model = $model) "
+                        "RETURN node.payload AS payload, node.embedding AS embedding, score",
+                        candidate_limit=candidate_limit,
+                        vector=vector,
+                        entity_type=entity_type,
+                        model=model_fingerprint,
+                    )
+                    records = await result.data()
+                    if len(records) >= top_k or candidate_limit >= total:
+                        break
+                    candidate_limit = min(total, candidate_limit * 2)
+            matches: list[tuple[CanonicalEntity, float]] = []
+            query_norm = math.sqrt(sum(value * value for value in vector)) or 1.0
+            for record in records:
+                candidate = [float(value) for value in record["embedding"]]
+                candidate_norm = math.sqrt(sum(value * value for value in candidate)) or 1.0
+                score = sum(
+                    left * right for left, right in zip(vector, candidate, strict=True)
+                ) / (query_norm * candidate_norm)
+                matches.append(
+                    (_load(record["payload"], CanonicalEntity), max(-1.0, min(1.0, score)))
+                )
+            return sorted(
+                matches, key=lambda item: (-round(item[1], 12), item[0].id)
+            )[:top_k]
         async with self.driver.session(database=self.database) as session:
             result = await session.run(
                 "MATCH (n:Entity {entity_type: $entity_type}) "
@@ -409,7 +444,7 @@ class Neo4jGraphStore:
             )
             records = await result.data()
         query_norm = math.sqrt(sum(value * value for value in vector)) or 1.0
-        matches: list[tuple[CanonicalEntity, float]] = []
+        matches = []
         for record in records:
             candidate = [float(value) for value in record["embedding"]]
             if len(candidate) != len(vector):
@@ -419,7 +454,9 @@ class Neo4jGraphStore:
                 left * right for left, right in zip(vector, candidate, strict=True)
             ) / (query_norm * candidate_norm)
             matches.append((_load(record["payload"], CanonicalEntity), score))
-        return sorted(matches, key=lambda item: item[1], reverse=True)[:top_k]
+        return sorted(
+            matches, key=lambda item: (-round(item[1], 12), item[0].id)
+        )[:top_k]
 
     async def list_entity_embeddings(self) -> list[EntityEmbedding]:
         async with self.driver.session(database=self.database) as session:
@@ -549,6 +586,7 @@ class Neo4jGraphStore:
         claims: list[Claim] = []
         conflicts: list[ConflictSet] = []
         entity_operations: list[EntityOperation] = []
+        current_claims = {item.id: item for item in await self.list_claims()}
         inverse: list[GraphChange] = []
         now = datetime.now(UTC)
         rollback_order = {
@@ -567,6 +605,14 @@ class Neo4jGraphStore:
             if change.resource_type == "entity":
                 current_entity = await self._get("Entity", change.resource_id, CanonicalEntity)
                 if change.action == "create" and current_entity is not None:
+                    if any(
+                        item.tx_to is None
+                        and change.resource_id in {item.subject_id, item.object_entity_id}
+                        for item in current_claims.values()
+                    ):
+                        raise GraphIntegrityError(
+                            f"entity {change.resource_id} still has active claim references"
+                        )
                     replacement_entity = current_entity.model_copy(update={"active": False})
                     action = "close"
                 elif change.before is not None:
@@ -580,7 +626,7 @@ class Neo4jGraphStore:
                 )
                 replacement_payload = replacement_entity.model_dump(mode="json")
             elif change.resource_type == "claim":
-                current_claim = await self._get("Claim", change.resource_id, Claim)
+                current_claim = current_claims.get(change.resource_id)
                 if change.action == "create" and current_claim is not None:
                     replacement_claim = current_claim.model_copy(update={"tx_to": now})
                     action = "close"
@@ -590,6 +636,7 @@ class Neo4jGraphStore:
                 else:
                     continue
                 claims.append(replacement_claim)
+                current_claims[replacement_claim.id] = replacement_claim
                 current_payload = current_claim.model_dump(mode="json") if current_claim else None
                 replacement_payload = replacement_claim.model_dump(mode="json")
             elif change.resource_type == "conflict":

@@ -165,6 +165,7 @@ class PrismKEService:
         elif name == "bge-m3":
             provider = BGEM3EmbeddingProvider(
                 model_name=self.settings.embedding_model,
+                model_revision=self.settings.embedding_model_revision,
                 device=self.settings.embedding_device,
                 use_fp16=self.settings.embedding_use_fp16,
                 batch_size=self.settings.embedding_batch_size,

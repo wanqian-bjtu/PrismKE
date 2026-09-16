@@ -130,7 +130,9 @@ class JSONGraphStore:
                 left * right for left, right in zip(vector, embedding.vector, strict=True)
             ) / (query_norm * candidate_norm)
             matches.append((entity, max(-1.0, min(1.0, score))))
-        return sorted(matches, key=lambda item: item[1], reverse=True)[:top_k]
+        return sorted(
+            matches, key=lambda item: (-round(item[1], 12), item[0].id)
+        )[:top_k]
 
     async def list_entity_embeddings(self) -> list[EntityEmbedding]:
         with self.lock:
@@ -248,6 +250,12 @@ class JSONGraphStore:
                 )
             data["evidence"][evidence.id] = evidence.model_dump(mode="json")
         for entity in transaction.entities:
+            previous = data["entities"].get(entity.id)
+            if previous is not None and (
+                CanonicalEntity.model_validate(previous).embedding_source()
+                != entity.embedding_source()
+            ):
+                data["entity_embeddings"].pop(entity.id, None)
             data["entities"][entity.id] = entity.model_dump(mode="json")
         for operation in transaction.entity_operations:
             data["entity_operations"][operation.id] = operation.model_dump(mode="json")

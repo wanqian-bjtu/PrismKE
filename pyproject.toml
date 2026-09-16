@@ -96,15 +96,23 @@ plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
 module = [
-  "FlagEmbedding",
-  "FlagEmbedding.*",
   "networkx",
   "networkx.*",
   "plotly",
   "plotly.*",
   "pymupdf",
   "pymupdf.*",
+]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+  "FlagEmbedding",
+  "FlagEmbedding.*",
+  "huggingface_hub",
+  "huggingface_hub.*",
   "torch",
   "torch.*",
 ]
 ignore_missing_imports = true
+follow_imports = "skip"

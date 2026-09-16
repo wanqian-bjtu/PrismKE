@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from prismke.api import create_app
+from prismke.core.errors import GraphIntegrityError
 from prismke.core.ids import canonical_hash
 from prismke.core.settings import Settings
 from prismke.domain import (
@@ -26,7 +27,7 @@ from prismke.governance import (
 )
 from prismke.governance.entity_resolution import entity_embedding_text
 from prismke.persistence import EntityGovernanceRepository, JSONGraphStore
-from prismke.providers import MockEmbeddingProvider
+from prismke.providers import DisabledEmbeddingProvider, MockEmbeddingProvider
 from prismke.workflow import PrismKEService
 
 
@@ -48,6 +49,66 @@ class BrokenEmbeddingProvider:
     async def encode(self, texts: list[str]) -> list[list[float]]:
         del texts
         raise RuntimeError("embedding backend unavailable")
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_exact_name_proposes_distinct_nil(
+    tmp_path: Path, schema_path: Path
+) -> None:
+    store = JSONGraphStore(tmp_path / "graph")
+    entities = [
+        CanonicalEntity(id="entity:first", name="Atlas", entity_type="Software"),
+        CanonicalEntity(id="entity:second", name="Atlas", entity_type="Software"),
+    ]
+    await store.commit(GraphCommit(
+        entities=entities, revision=GraphRevision(id="seed", run_id="seed")
+    ))
+    resolver = SemanticEntityResolver(
+        SchemaIndex(load_schema(schema_path)), store, DisabledEmbeddingProvider(),
+        run_id="ambiguous",
+    )
+    mention = EntityMention(
+        id="mention:atlas", name="Atlas", entity_type="Software",
+        context="a newly developed astronomy application", evidence_ids=["evidence:atlas"],
+    )
+    bundle = await resolver.resolve([mention])
+    assert bundle.review_tasks and len(bundle.review_tasks) == 1
+    assert bundle.review_tasks[0].proposed_entity_id not in {item.id for item in entities}
+    assert mention.id not in bundle.mention_to_entity
+
+
+@pytest.mark.asyncio
+async def test_split_does_not_overwrite_existing_target(tmp_path: Path) -> None:
+    store = JSONGraphStore(tmp_path / "graph")
+    await seed_graph(store)
+    governance = EntityGovernanceService(
+        store, EntityGovernanceRepository(tmp_path / "governance.json"),
+        DisabledEmbeddingProvider(),
+    )
+    existing = await store.get_entity("entity:b")
+    assert existing is not None
+    before = store.path.read_bytes()
+    with pytest.raises(ValueError, match="new entity ids"):
+        await governance.propose_split(
+            "entity:a", [existing], {"claim:1": existing.id}, ["test split"]
+        )
+    assert store.path.read_bytes() == before
+
+
+@pytest.mark.asyncio
+async def test_entity_content_update_invalidates_derived_vector(tmp_path: Path) -> None:
+    store = JSONGraphStore(tmp_path / "graph")
+    await seed_graph(store)
+    provider = MockEmbeddingProvider()
+    await rebuild_entity_index(store, provider, backend="json", batch_size=32, dry_run=False)
+    source = await store.get_entity("entity:a")
+    assert source is not None
+    await store.commit(GraphCommit(
+        entities=[source.model_copy(update={"aliases": ["New alias"]})],
+        revision=GraphRevision(id="update", run_id="update", parent_id="revision:seed"),
+    ))
+    embeddings = await store.list_entity_embeddings()
+    assert "entity:a" not in {item.entity_id for item in embeddings}
 
 
 async def seed_graph(store: JSONGraphStore) -> None:
@@ -273,14 +334,15 @@ async def test_embedding_failure_routes_ambiguous_mention_to_review(
     assert "embedding_retrieval_unavailable" in result.review_tasks[0].reasons
 
 
+@pytest.mark.parametrize("case_index", range(1, 6))
 @pytest.mark.asyncio
-async def test_merge_is_reviewed_atomic_and_reversible(tmp_path: Path) -> None:
+async def test_merge_is_reviewed_atomic_and_reversible(tmp_path: Path, case_index: int) -> None:
     store = JSONGraphStore(tmp_path / "graph")
     await seed_graph(store)
     repository = EntityGovernanceRepository(tmp_path / "entity-governance.json")
     governance = EntityGovernanceService(store, repository, MockEmbeddingProvider())
     task = await governance.propose_merge(
-        ["entity:a", "entity:b"], "entity:a", ["same real-world software"]
+        ["entity:a", "entity:b"], "entity:a", [f"merge:{case_index:02d} duplicate software"]
     )
     assert task.status == "pending"
     revision = await governance.resolve_operation(task.id, True, "reviewer")
@@ -299,7 +361,39 @@ async def test_merge_is_reviewed_atomic_and_reversible(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_split_reassigns_selected_claims_and_rolls_back(tmp_path: Path) -> None:
+async def test_stale_merge_proposal_cannot_be_applied(tmp_path: Path) -> None:
+    store = JSONGraphStore(tmp_path / "graph")
+    await seed_graph(store)
+    repository = EntityGovernanceRepository(tmp_path / "entity-governance.json")
+    governance = EntityGovernanceService(store, repository, MockEmbeddingProvider())
+    task = await governance.propose_merge(
+        ["entity:a", "entity:b"], "entity:a", ["duplicate"]
+    )
+    entity = await store.get_entity("entity:a")
+    assert entity is not None
+    await store.commit(
+        GraphCommit(
+            entities=[entity.model_copy(update={"aliases": ["new reviewed alias"]})],
+            revision=GraphRevision(
+                id="revision:changed-after-proposal",
+                run_id="changed-after-proposal",
+                parent_id="revision:seed",
+                entity_ids=[entity.id],
+            ),
+        )
+    )
+    before = store.path.read_bytes()
+    with pytest.raises(GraphIntegrityError, match="proposal is stale"):
+        await governance.resolve_operation(task.id, True, "reviewer")
+    assert store.path.read_bytes() == before
+    assert repository.get_task(task.id).status == "pending"  # type: ignore[union-attr]
+
+
+@pytest.mark.parametrize("case_index", range(1, 6))
+@pytest.mark.asyncio
+async def test_split_reassigns_selected_claims_and_rolls_back(
+    tmp_path: Path, case_index: int
+) -> None:
     store = JSONGraphStore(tmp_path / "graph")
     await seed_graph(store)
     repository = EntityGovernanceRepository(tmp_path / "entity-governance.json")
@@ -312,7 +406,7 @@ async def test_split_reassigns_selected_claims_and_rolls_back(tmp_path: Path) ->
         "entity:a",
         targets,
         {"claim:1": "entity:split-1", "claim:2": "entity:split-2"},
-        ["claims refer to two products"],
+        [f"split:{case_index:02d} claims refer to two products"],
     )
     revision = await governance.resolve_operation(task.id, True, "reviewer")
     assert revision is not None

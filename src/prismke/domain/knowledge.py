@@ -48,6 +48,11 @@ class CanonicalEntity(BaseModel):
     active: bool = True
     created_at: datetime = Field(default_factory=utc_now)
 
+    def embedding_source(self) -> dict[str, Any]:
+        return self.model_dump(include={
+            "name", "aliases", "entity_type", "attributes", "context_summary", "active",
+        })
+
 
 class CandidateClaim(BaseModel):
     id: str
@@ -169,6 +174,7 @@ class EntityReviewTask(BaseModel):
     selected_entity_id: str | None = None
     proposed_entity_id: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
+
     resolved_at: datetime | None = None
 
 
