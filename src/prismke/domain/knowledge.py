@@ -133,6 +133,8 @@ class ReviewTask(BaseModel):
     decision: ReviewDecision | None = None
     created_at: datetime = Field(default_factory=utc_now)
     resolved_at: datetime | None = None
+    reviewer: str | None = None
+    review_comment: str | None = None
 
 
 class EntityCandidate(BaseModel):
@@ -186,6 +188,8 @@ class EntityReviewTask(BaseModel):
     created_at: datetime = Field(default_factory=utc_now)
 
     resolved_at: datetime | None = None
+    reviewer: str | None = None
+    review_comment: str | None = None
 
 
 class EntityOperation(BaseModel):

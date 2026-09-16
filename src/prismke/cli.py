@@ -92,6 +92,31 @@ def resume(run_id: str) -> None:
     _print_model(state)
 
 
+@app.command("import-review-run")
+def import_review_run_command(
+    source: Annotated[Path, typer.Option("--source", exists=True, file_okay=False)],
+    run_id: Annotated[str, typer.Option("--run-id")],
+    target: Annotated[Path, typer.Option("--target", file_okay=False)],
+) -> None:
+    """Copy a verified paused extraction into a new offline review workspace."""
+    from prismke.workflow.review_workspace import import_review_run
+
+    state = asyncio.run(import_review_run(source, run_id, target))
+    console.print(f"isolated review imported: run_id={state.run_id} target={target.resolve()}")
+
+
+@app.command("confirm-review-commit")
+def confirm_review_commit_command(
+    run_id: str,
+    reviewer: Annotated[str, typer.Option("--reviewer")],
+    confirm: Annotated[bool, typer.Option("--confirm")] = False,
+) -> None:
+    """Explicitly confirm an isolated graph commit after viewing its preview."""
+    if not confirm:
+        raise typer.BadParameter("--confirm is required after inspecting review-progress")
+    _print_model(asyncio.run(PrismKEService().confirm_review_commit(run_id, reviewer)))
+
+
 @app.command("show-evidence")
 def show_evidence(evidence_id: str) -> None:
     """Print immutable evidence metadata."""

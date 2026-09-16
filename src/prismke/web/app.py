@@ -8,6 +8,7 @@ from typing import Any, Literal, cast
 import orjson
 
 from prismke.domain import CanonicalEntity, ReviewDecision
+from prismke.web.review import build_review_tabs
 from prismke.workflow import PrismKEService
 
 
@@ -177,9 +178,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         result = await service.graph_store.healthcheck()
         return result.model_dump(mode="json")
 
-    async def search_entities(
-        query: str, entity_type: str, limit: int
-    ) -> list[dict[str, Any]]:
+    async def search_entities(query: str, entity_type: str, limit: int) -> list[dict[str, Any]]:
         return [
             item.model_dump(mode="json")
             for item in await service.search_entities(query, entity_type, limit)
@@ -192,10 +191,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         ]
 
     async def entity_history(entity_id: str) -> list[dict[str, Any]]:
-        return [
-            item.model_dump(mode="json")
-            for item in await service.entity_history(entity_id)
-        ]
+        return [item.model_dump(mode="json") for item in await service.entity_history(entity_id)]
 
     async def review_entity_task(
         task_id: str,
@@ -219,9 +215,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         )
         return _state_summary(state)
 
-    async def propose_merge(
-        source_ids: str, target_id: str, reasons: str
-    ) -> dict[str, Any]:
+    async def propose_merge(source_ids: str, target_id: str, reasons: str) -> dict[str, Any]:
         task = await service.propose_entity_merge(
             [item.strip() for item in source_ids.split(",") if item.strip()],
             target_id.strip(),
@@ -248,6 +242,9 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
     claim_headers = ["Claim ID", "主语", "关系", "宾语", "置信度", "状态", "证据"]
     with gr.Blocks(title="PrismKE 研究工作台") as demo:
         gr.Markdown("# PrismKE 研究工作台")
+        if service.review_metadata:
+            gr.Markdown("**隔离审核工作区 · 原评测只读 · 抽取调用禁用**")
+        build_review_tabs(service)
         with gr.Tab("构建与运行"):
             with gr.Row():
                 document_input = gr.File(label="文档", type="filepath")
@@ -274,33 +271,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 [run_summary, claim_table, run_id_output],
             )
             reload_button = gr.Button("刷新运行状态")
-            reload_button.click(
-                load_run, [run_id_output], [run_summary, claim_table]
-            )
-
-        with gr.Tab("冲突审核"):
-            review_run = gr.Textbox(label="Run ID")
-            review_load = gr.Button("加载审核队列")
-            with gr.Row():
-                review_tasks = gr.JSON(label="待审核任务")
-                review_conflicts = gr.JSON(label="冲突集合")
-            review_claim_id = gr.Textbox(label="Claim ID")
-            review_decision = gr.Radio(
-                ["approve", "reject"], value="approve", label="审核决定"
-            )
-            review_button = gr.Button("提交审核", variant="primary")
-            review_summary = gr.JSON(label="审核后的运行状态")
-            review_claims = gr.Dataframe(headers=claim_headers, interactive=False)
-            review_load.click(
-                load_review_queue,
-                [review_run],
-                [review_tasks, review_conflicts, review_claims],
-            )
-            review_button.click(
-                review_claim,
-                [review_run, review_claim_id, review_decision],
-                [review_summary, review_claims],
-            )
+            reload_button.click(load_run, [run_id_output], [run_summary, claim_table])
 
         with gr.Tab("证据"):
             evidence_id = gr.Textbox(label="Evidence ID")
@@ -317,9 +288,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             graph_button = gr.Button("查询邻域")
             graph_plot = gr.Plot(label="实体邻域图")
             graph_output = gr.JSON(label="实体邻域")
-            graph_button.click(
-                neighborhood, [entity_id, depth], [graph_plot, graph_output]
-            )
+            graph_button.click(neighborhood, [entity_id, depth], [graph_plot, graph_output])
 
         with gr.Tab("实体治理"):
             with gr.Row():
@@ -346,22 +315,16 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                         candidate_neighborhood_plot = gr.Plot(label="候选邻域")
                         candidate_neighborhood_output = gr.JSON(label="邻域事实与证据引用")
                 mention_evidence_button.click(
-                    show_evidence, [mention_evidence_id],
+                    show_evidence,
+                    [mention_evidence_id],
                     [mention_evidence_metadata, mention_evidence_preview],
                 )
                 candidate_neighborhood_button.click(
-                    neighborhood, [candidate_entity_id, gr.State(1)],
+                    neighborhood,
+                    [candidate_entity_id, gr.State(1)],
                     [candidate_neighborhood_plot, candidate_neighborhood_output],
                 )
-            with gr.Row():
-                entity_review_status = gr.Dropdown(
-                    ["pending", "resolved", "all"], value="pending", label="审核状态"
-                )
-                entity_review_load = gr.Button("刷新实体审核队列")
-            entity_review_queue = gr.JSON(label="实体链接、合并与拆分任务")
-            entity_review_load.click(
-                entity_reviews, [entity_review_status], [entity_review_queue]
-            )
+            gr.Markdown("### 合并与拆分审核（原有高级操作）")
             with gr.Row():
                 entity_task_id = gr.Textbox(label="Task ID")
                 entity_run_id = gr.Textbox(label="Run ID（链接审核时填写）")
@@ -399,9 +362,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             )
             gr.Markdown("### 实体拆分建议")
             split_source = gr.Textbox(label="原 Entity ID")
-            split_targets = gr.Code(
-                label="新实体 JSON 数组", language="json", value="[]"
-            )
+            split_targets = gr.Code(label="新实体 JSON 数组", language="json", value="[]")
             split_assignments = gr.Code(
                 label="Claim 到新 Entity 的映射 JSON", language="json", value="{}"
             )

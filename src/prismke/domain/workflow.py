@@ -126,3 +126,5 @@ class WorkflowState(BaseModel):
     errors: list[str] = Field(default_factory=list)
     retry_count: int = 0
     provider_calls: list[ProviderCallRecord] = Field(default_factory=list)
+    review_workspace: bool = False
+    submission_confirmed: bool = False

@@ -8,6 +8,7 @@ from urllib.parse import quote
 from uuid import uuid4
 
 import orjson
+from filelock import FileLock
 
 from prismke.domain import WorkflowState
 
@@ -41,13 +42,14 @@ class RunRepository:
             temporary.unlink(missing_ok=True)
         return target
 
+    def mutation_lock(self, run_id: str) -> FileLock:
+        return FileLock(str(self._target(run_id).with_suffix(".lock")), timeout=0)
+
     def load(self, run_id: str) -> WorkflowState:
         target = self._target(run_id)
         if not target.is_file() and self._legacy_target(run_id).is_file():
             target = self._legacy_target(run_id)
-        return WorkflowState.model_validate(
-            orjson.loads(target.read_bytes())
-        )
+        return WorkflowState.model_validate(orjson.loads(target.read_bytes()))
 
     def list(self, limit: int = 100) -> list[WorkflowState]:
         paths = sorted(
