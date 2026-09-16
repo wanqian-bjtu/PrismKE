@@ -463,7 +463,15 @@ class ExecutionManager:
                     if task.operation == "execute":
                         state = await self.service._execute_run(task.run_id)
                     elif task.operation == "resume":
-                        state = await self.service._resume(task.run_id)
+                        initial = self.service.show_run(task.run_id)
+                        if (
+                            task.attempt == 0
+                            and not initial.document
+                            and initial.current_node == "ingest"
+                        ):
+                            state = await self.service._execute_run(task.run_id)
+                        else:
+                            state = await self.service._resume(task.run_id)
                     else:
                         state = await self.service._confirm_review_commit(
                             task.run_id, task.reviewer or ""

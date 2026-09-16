@@ -210,6 +210,19 @@ async def test_single_worker_owner_and_queue_cancel(tmp_path: Path, schema_path:
 
 
 @pytest.mark.asyncio
+async def test_queue_cancel_resumes_first_execution_without_checkpoint(
+    tmp_path: Path, schema_path: Path
+) -> None:
+    service, run_id, _ = fixture(tmp_path, schema_path)
+    service.executions.cancel(run_id, "tester", "pause queue", "cancel", 0)
+    state = await service.resume(run_id)
+    assert state.status == "completed"
+    assert service.executions.repository.get(run_id).attempt == 1
+    assert len(await service.graph_store.list_revisions()) == 1
+    await service.close()
+
+
+@pytest.mark.asyncio
 async def test_cancel_settles_result_and_resume_does_not_repeat_extraction(
     tmp_path: Path,
     schema_path: Path,
