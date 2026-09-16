@@ -91,6 +91,11 @@ class ResolutionDecision(BaseModel):
 
 class WorkflowState(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True, populate_by_name=True)
+    original_candidates: list[CandidateClaim] = Field(default_factory=list)
+    superseded_review_tasks: list[ReviewTask] = Field(default_factory=list)
+    review_sync_pending: bool = False
+    pending_correction_id: str | None = None
+    correction_tail_only: bool = False
 
     run_id: str
     input_path: str

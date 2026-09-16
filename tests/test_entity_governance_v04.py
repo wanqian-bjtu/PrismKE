@@ -529,7 +529,7 @@ async def test_entity_review_pauses_and_resumes_workflow(tmp_path: Path, schema_
     state = await service.run(document, schema_path, "mock")
     assert state.status == "awaiting_review"
     task = state.entity_review_tasks[0]
-    reviewed = await service.review_entity(state.run_id, task.id, "create")
+    reviewed = await service.review_entity(state.run_id, task.id, "create", reviewer="tester")
     assert reviewed.status == "running"
     completed = await service.resume(state.run_id)
     assert completed.status == "completed"

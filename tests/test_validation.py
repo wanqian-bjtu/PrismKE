@@ -152,7 +152,8 @@ async def mixed_run(
 ) -> tuple[PrismKEService, object]:
     source = tmp_path / "document.md"
     source.write_text(
-        f"ValidationDemo-{tmp_path.parent.name}-{tmp_path.name} | developed_by | OpenAI"
+        f"ValidationDemo-{tmp_path.parent.name}-{tmp_path.name} | developed_by | "
+        f"TestOrganization-{tmp_path.parent.name}-{tmp_path.name}"
         " | Software | Organization | 0.95",
         encoding="utf-8",
     )

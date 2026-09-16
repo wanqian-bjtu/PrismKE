@@ -13,6 +13,7 @@ from prismke.governance.validation import ValidationService
 from prismke.parsing import ParserRegistry
 from prismke.persistence.base import EvidenceStore, GraphStore
 from prismke.persistence.checkpoints import open_checkpointer
+from prismke.persistence.reviews import ReviewRepository
 from prismke.persistence.runs import RunRepository
 from prismke.providers.base import EmbeddingProvider, LLMProvider, OCRProvider, VLMProvider
 from prismke.workflow.nodes import WorkflowNodes
@@ -48,6 +49,7 @@ class PrismKEWorkflow:
     ) -> None:
         self.checkpoint_path = checkpoint_path
         self.runs = runs
+        self.reviews = ReviewRepository(runs.directory.parent / "reviews.sqlite")
         self.review_only = review_only
         # Direct workflow construction must use the same evidence verifier as the service.
         from prismke.persistence import JSONGraphStore, Neo4jGraphStore
@@ -67,6 +69,7 @@ class PrismKEWorkflow:
             entity_review_threshold=entity_review_threshold,
             entity_min_margin=entity_min_margin,
         )
+        self.nodes.review_repository = self.reviews
 
     @staticmethod
     def _state(graph_state: GraphState) -> WorkflowState:
@@ -160,6 +163,8 @@ class PrismKEWorkflow:
             raise
         state.current_node = "align_modalities"
         state.failed_node = None
+        state.original_candidates = [c.model_copy(deep=True) for c in state.candidates]
+        self.reviews.archive(state.run_id, [c.model_dump(mode="json") for c in state.candidates])
         self.runs.save(state)
         return {"payload": state.model_dump(mode="json")}
 
@@ -278,7 +283,17 @@ class PrismKEWorkflow:
         )
         builder.add_conditional_edges(
             "prepare_graph_commit",
-            lambda value: "commit" if self._state(value).submission_confirmed else "preview",
+            lambda value: (
+                "commit"
+                if (
+                    self._state(value).submission_confirmed
+                    or (
+                        not self._state(value).review_workspace
+                        and not self._state(value).pending_correction_id
+                    )
+                )
+                else "preview"
+            ),
             {"commit": "commit_graph", "preview": END},
         )
         builder.add_edge("commit_graph", END)
@@ -366,6 +381,19 @@ class PrismKEWorkflow:
                 config,
                 {"payload": state.model_dump(mode="json")},
                 as_node="resolve_entities",
+            )
+        self.runs.save(state)
+        return True
+
+    async def record_completed_review(self, state: WorkflowState) -> bool:
+        async with open_checkpointer(self.checkpoint_path) as saver:
+            graph = self._build_graph(saver)
+            config = self._config(state.run_id)
+            snapshot = await graph.aget_state(config)
+            if not snapshot.values:
+                return False
+            await graph.aupdate_state(
+                config, {"payload": state.model_dump(mode="json")}, as_node="commit_graph"
             )
         self.runs.save(state)
         return True

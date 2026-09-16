@@ -38,6 +38,7 @@ def entity_task_base(state: WorkflowState, task_id: str) -> dict[str, Any]:
             *state.text_candidates,
             *state.visual_candidates,
             *state.candidates,
+            *state.original_candidates,
         ]
     }
     related = [

@@ -24,6 +24,7 @@ async def paused_source(
     root: Path,
     schema_path: Path,
     conflict: bool = False,
+    name: str = "PrismKE",
 ) -> tuple[PrismKEService, WorkflowState]:
     root.mkdir()
     document = root / "sample.md"
@@ -37,9 +38,9 @@ async def paused_source(
             encoding="utf-8",
         )
     document.write_text(
-        "PrismKE | developed_by | OpenAI | Software | Organization | 0.70\n"
+        f"{name} | developed_by | OpenAI | Software | Organization | 0.70\n"
         + (
-            "PrismKE | developed_by | Anthropic | Software | Organization | 0.70\n"
+            f"{name} | developed_by | Anthropic | Software | Organization | 0.70\n"
             if conflict
             else ""
         ),
@@ -179,13 +180,17 @@ async def test_import_review_resume_preview_commit_and_rollback(
         state.run_id, "task:entity", "create", reviewer="tester", comment="source checked"
     )
     with pytest.raises(ValueError, match="already been resolved"):
-        await service.review_entity(state.run_id, "task:entity", "reject", reviewer="tester")
+        await service.review_entity(
+            state.run_id, "task:entity", "reject", reviewer="tester", comment="checked"
+        )
     state = await service.resume(state.run_id)
     assert state.status == "awaiting_review"
     task = state.review_tasks[0]
     await service.review(state.run_id, task.claim_id, ReviewDecision.APPROVE, "tester", "checked")
     with pytest.raises(ValueError, match="already been resolved"):
-        await service.review(state.run_id, task.claim_id, ReviewDecision.REJECT)
+        await service.review(
+            state.run_id, task.claim_id, ReviewDecision.REJECT, "tester", "checked"
+        )
     state = await service.resume(state.run_id)
     assert state.current_node == "prepare_graph_commit"
     assert {claim.id for claim in await service.graph_store.list_claims()} == starting_claim_ids
@@ -226,7 +231,9 @@ async def test_conflict_review_keeps_peer_independent(tmp_path: Path, schema_pat
     assert service.show_run(state.run_id).review_tasks[1].status == "pending"
     with pytest.raises(ValueError, match="pending reviews"):
         await service.resume(state.run_id)
-    await service.review(state.run_id, second.claim_id, ReviewDecision.REJECT, "tester")
+    await service.review(
+        state.run_id, second.claim_id, ReviewDecision.REJECT, "tester", "conflict checked"
+    )
     state = await service.resume(state.run_id)
     assert state.graph_commit is not None and len(state.graph_commit.claims) == 1
     assert not await service.graph_store.list_claims()

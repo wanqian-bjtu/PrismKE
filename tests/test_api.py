@@ -32,9 +32,7 @@ def test_health_endpoint_and_bearer_auth(tmp_path: Path) -> None:
     )
     with TestClient(create_app(settings, mount_ui=False)) as client:
         assert client.get("/api/v1/health").status_code == 401
-        response = client.get(
-            "/api/v1/health", headers={"Authorization": "Bearer test-token"}
-        )
+        response = client.get("/api/v1/health", headers={"Authorization": "Bearer test-token"})
     assert response.status_code == 200
     assert response.json()["graph"]["backend"] == "json"
 
@@ -43,9 +41,7 @@ def test_upload_run_uses_shared_service(tmp_path: Path, schema_path: Path) -> No
     settings = Settings(_env_file=None, runtime_dir=tmp_path / "runtime")
     service = PrismKEService(settings)
     app = create_app(settings, service, mount_ui=False)
-    document = (
-        b"PrismKE | developed_by | OpenAI | Software | Organization | 0.92\n"
-    )
+    document = b"PrismKE | developed_by | OpenAI | Software | Organization | 0.92\n"
     with TestClient(app) as client:
         response = client.post(
             "/api/v1/runs",
@@ -71,15 +67,11 @@ def test_unknown_run_returns_not_found(tmp_path: Path) -> None:
     assert response.status_code == 404
 
 
-def test_review_and_resume_commit_an_awaiting_claim(
-    tmp_path: Path, schema_path: Path
-) -> None:
+def test_review_and_resume_commit_an_awaiting_claim(tmp_path: Path, schema_path: Path) -> None:
     settings = Settings(_env_file=None, runtime_dir=tmp_path / "runtime")
     service = PrismKEService(settings)
     app = create_app(settings, service, mount_ui=False)
-    document = (
-        b"PrismKE | developed_by | OpenAI | Software | Organization | 0.70\n"
-    )
+    document = b"PrismKE | developed_by | OpenAI | Software | Organization | 0.70\n"
 
     with TestClient(app) as client:
         response = client.post(
@@ -96,7 +88,7 @@ def test_review_and_resume_commit_an_awaiting_claim(
         task_id = awaiting["review_tasks"][0]["id"]
 
         review = client.post(
-            f"/api/v1/reviews/{task_id}", json={"decision": "approve"}
+            f"/api/v1/reviews/{task_id}", json={"decision": "approve", "reviewer": "tester"}
         )
         assert review.status_code == 200
         assert review.json()["review_tasks"][0]["status"] == "resolved"
@@ -109,9 +101,7 @@ def test_review_and_resume_commit_an_awaiting_claim(
     assert completed["claims"][0]["status"] == "approved"
 
 
-def test_revision_diff_and_rollback_endpoints(
-    tmp_path: Path, schema_path: Path
-) -> None:
+def test_revision_diff_and_rollback_endpoints(tmp_path: Path, schema_path: Path) -> None:
     settings = Settings(_env_file=None, runtime_dir=tmp_path / "runtime")
     service = PrismKEService(settings)
     app = create_app(settings, service, mount_ui=False)
@@ -120,8 +110,7 @@ def test_revision_diff_and_rollback_endpoints(
         revision_ids: list[str] = []
         for index, organization in enumerate(("OpenAI", "Anthropic"), start=1):
             document = (
-                f"PrismKE | developed_by | {organization} | Software | "
-                "Organization | 0.92\n"
+                f"PrismKE | developed_by | {organization} | Software | Organization | 0.92\n"
             ).encode()
             response = client.post(
                 "/api/v1/runs",
@@ -167,8 +156,6 @@ def test_rollback_integrity_error_returns_conflict(tmp_path: Path) -> None:
         side_effect=GraphIntegrityError("legacy revision cannot be rolled back")
     )
     with TestClient(create_app(settings, service, mount_ui=False)) as client:
-        response = client.post(
-            "/api/v1/revisions/rev:legacy/rollback", json={"confirm": True}
-        )
+        response = client.post("/api/v1/revisions/rev:legacy/rollback", json={"confirm": True})
     assert response.status_code == 409
     assert response.json()["detail"] == "legacy revision cannot be rolled back"

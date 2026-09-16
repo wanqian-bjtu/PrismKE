@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 
 from test_review_workspace import paused_source
@@ -12,8 +13,8 @@ from prismke.workflow.review_workspace import import_review_run
 
 
 async def main() -> None:
-    source = Path("runtime/browser-validation-source")
-    target = Path("runtime/browser-validation-review")
+    source = Path(os.getenv("PRISMKE_BROWSER_SOURCE", "runtime/browser-validation-source"))
+    target = Path(os.getenv("PRISMKE_BROWSER_TARGET", "runtime/browser-validation-review"))
     if source.exists() or target.exists():
         raise ValueError("browser fixture already exists; select fresh paths")
     service, state = await paused_source(source, Path("unused"), conflict=True)

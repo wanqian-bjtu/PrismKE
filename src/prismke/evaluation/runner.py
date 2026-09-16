@@ -64,9 +64,7 @@ def _canonical_claim(
         return canonical_subject, _normalize(relation), canonical_object
     relation_id = relation_def.id
     if relation_def.symmetric:
-        canonical_subject, canonical_object = sorted(
-            (canonical_subject, canonical_object)
-        )
+        canonical_subject, canonical_object = sorted((canonical_subject, canonical_object))
     elif relation_def.inverse_relation:
         canonical_relation = min(relation_id, relation_def.inverse_relation)
         if relation_id != canonical_relation:
@@ -92,12 +90,9 @@ def _predicted_claims(
     return predicted
 
 
-def _gold_claims(
-    case: EvaluationCase, schema: SchemaIndex | None
-) -> set[tuple[str, str, str]]:
+def _gold_claims(case: EvaluationCase, schema: SchemaIndex | None) -> set[tuple[str, str, str]]:
     return {
-        _canonical_claim(item.subject, item.relation, item.object, schema)
-        for item in case.claims
+        _canonical_claim(item.subject, item.relation, item.object, schema) for item in case.claims
     }
 
 
@@ -117,15 +112,12 @@ def _case_result(case: EvaluationCase, state: WorkflowState) -> EvaluationCaseRe
     for item in bboxes:
         assert item.bbox is not None
         if item.coordinate_space != CoordinateSpace.NORMALIZED or all(
-            0 <= value <= 1
-            for value in (item.bbox.x0, item.bbox.y0, item.bbox.x1, item.bbox.y1)
+            0 <= value <= 1 for value in (item.bbox.x0, item.bbox.y0, item.bbox.x1, item.bbox.y1)
         ):
             valid_bboxes += 1
     decisions = {item.decision for item in state.alignment_records}
     localization = {
-        item.localization_level.value
-        for item in evidence
-        if item.localization_level is not None
+        item.localization_level.value for item in evidence if item.localization_level is not None
     }
     calls = state.provider_calls
     return EvaluationCaseResult(
@@ -147,9 +139,7 @@ def _case_result(case: EvaluationCase, state: WorkflowState) -> EvaluationCaseRe
         input_tokens=sum(item.input_tokens for item in calls),
         output_tokens=sum(item.output_tokens for item in calls),
         latency_ms=round(sum(item.latency_ms for item in calls), 3),
-        estimated_cost_cny=round(
-            sum(item.estimated_cost_cny or 0.0 for item in calls), 8
-        ),
+        estimated_cost_cny=round(sum(item.estimated_cost_cny or 0.0 for item in calls), 8),
     )
 
 

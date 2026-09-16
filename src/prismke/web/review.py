@@ -112,22 +112,24 @@ class ReviewController:
         candidate_id: str | None,
         reviewer: str,
         comment: str,
+        expected_version: int | None = None,
     ) -> None:
         if not reviewer.strip():
             raise ValueError("请填写审核人")
         if kind == "entity":
-            if action not in {"link", "create", "reject"}:
+            if action not in {"link", "create", "reject", "defer"}:
                 raise ValueError("请选择实体审核动作")
             await self.service.review_entity(
                 run_id,
                 task_id,
-                cast(Literal["link", "create", "reject"], action),
+                cast(Literal["link", "create", "reject", "defer"], action),
                 candidate_id,
                 reviewer.strip(),
                 comment,
+                expected_version,
             )
         else:
-            if action not in {"approve", "reject"}:
+            if action not in {"approve", "reject", "defer"}:
                 raise ValueError("请选择事实审核动作")
             detail = self.service.claim_review_detail(run_id, task_id)
             await self.service.review(
@@ -136,6 +138,7 @@ class ReviewController:
                 ReviewDecision(action),
                 reviewer.strip(),
                 comment,
+                expected_version,
             )
 
 
@@ -146,6 +149,9 @@ def build_review_tabs(service: PrismKEService) -> None:
     for kind, title in (("entity", "实体审核"), ("claim", "事实审核")):
         with gr.Tab(title):
             _build_review_tab(gr, controller, kind)
+    from prismke.web.corrections import build_correction_tab
+
+    build_correction_tab(service)
 
 
 def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
@@ -167,6 +173,7 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
         label="任务列表",
     )
     task_ids = gr.State([])
+    task_version = gr.State(None)
     task = gr.Dropdown(label="选择任务", choices=[], value=None)
     with gr.Row():
         with gr.Column(min_width=280):
@@ -213,9 +220,14 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
             )
             peer_image = gr.Image(label="对方证据区域", type="filepath", visible=kind == "claim")
             action = gr.Radio(
-                [("链接候选", "link"), ("创建新实体", "create"), ("拒绝提及", "reject")]
+                [
+                    ("链接候选", "link"),
+                    ("创建新实体", "create"),
+                    ("排除错误提及", "reject"),
+                    ("暂缓判断", "defer"),
+                ]
                 if kind == "entity"
-                else [("批准事实", "approve"), ("拒绝事实", "reject")],
+                else [("批准事实", "approve"), ("拒绝事实", "reject"), ("暂缓判断", "defer")],
                 value=None,
                 label="审核决定",
             )
@@ -246,7 +258,8 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
             ),
             f"实体待审核 {p.get('entity_pending', 0)} · 事实待审核 {p.get('claim_pending', 0)} · "
             f"校验待处理 {p.get('validation_pending', 0)} · "
-            f"{p.get('status', '未选择运行')} · {p.get('node', '')}",
+            f"{p.get('status', '未选择运行')} · {p.get('node', '')}"
+            + (" · 同步待恢复：继续与写图已禁用" if p.get("review_sync_pending") else ""),
             gr.update(interactive=p.get("can_resume", False)),
             p.get("submission"),
             gr.update(interactive=p.get("can_commit", False)),
@@ -266,6 +279,7 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
                 "",
                 gr.update(interactive=False),
                 gr.update(value=None),
+                None,
             )
         detail = (
             await service.entity_review_detail(rid, tid)
@@ -309,7 +323,7 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
             peer_label, peer_ids = "", []
             effect = (
                 f"关联候选事实 {len(detail['related_candidates'])} 条。"
-                "拒绝提及将排除含该提及的事实；链接或新建只更新当前提及归属。"
+                "排除提及将阻断关联事实但保留原候选；暂缓仍阻断处理。链接或新建更新提及归属。"
             )
         else:
             c = detail["claim"]
@@ -334,12 +348,18 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
             gr.update(interactive=detail["task"]["status"] == "pending"),
             gr.update(
                 value=None,
-                choices=[("链接候选", "link"), ("创建新实体", "create"), ("拒绝提及", "reject")]
+                choices=[
+                    ("链接候选", "link"),
+                    ("创建新实体", "create"),
+                    ("排除错误提及", "reject"),
+                    ("暂缓判断", "defer"),
+                ]
                 if kind == "entity"
                 else [("拒绝事实", "reject")]
                 if detail.get("allowed_actions") == ["reject"]
-                else [("批准事实", "approve"), ("拒绝事实", "reject")],
+                else [("批准事实", "approve"), ("拒绝事实", "reject"), ("暂缓判断", "defer")],
             ),
+            detail["task"]["version"],
         )
 
     async def evidence(rid: str | None, eid: str | None) -> tuple[str, Any]:
@@ -347,10 +367,10 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
         return text, gr.update(value=image, visible=image is not None)
 
     async def submit_task(
-        rid: str, tid: str, decision: str, cid: str | None, person: str, note: str
+        rid: str, tid: str, decision: str, cid: str | None, person: str, note: str, version: int
     ) -> str:
         try:
-            await controller.submit(rid, tid, kind, decision, cid, person, note)
+            await controller.submit(rid, tid, kind, decision, cid, person, note, version)
             return "已记录当前审核，尚未自动提交图谱。"
         except Exception as exc:
             raise gr.Error(str(exc)) from exc
@@ -388,6 +408,7 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
         impact,
         submit,
         action,
+        task_version,
     ]
     for trigger in (run.change, status.change, risk.change):
         trigger(load_queue, queue_inputs, queue_outputs).then(load_task, [run, task], task_outputs)
@@ -401,7 +422,9 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
     evidence_choice.change(evidence, [run, evidence_choice], [evidence_text, evidence_image])
     peer_evidence.change(evidence, [run, peer_evidence], [peer_text, peer_image])
     neighbor_button.click(show_neighbor, [candidate], [neighbor])
-    submit.click(submit_task, [run, task, action, candidate, reviewer, comment], [outcome]).then(
+    submit.click(
+        submit_task, [run, task, action, candidate, reviewer, comment, task_version], [outcome]
+    ).then(
         load_queue,
         queue_inputs,
         queue_outputs,

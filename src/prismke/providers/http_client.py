@@ -141,9 +141,7 @@ async def post_chat_completion(
                     status="failed",
                     error_code="invalid_response",
                 )
-                raise ProviderRequestError(
-                    "模型服务返回了无效 JSON", call_record=record
-                ) from exc
+                raise ProviderRequestError("模型服务返回了无效 JSON", call_record=record) from exc
             return payload, _record(
                 provider=provider,
                 operation_id=operation_id,
