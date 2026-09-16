@@ -47,6 +47,25 @@ async function main() {
     await page.getByRole('button', { name: '继续处理', exact: true }).click();
     await page.waitForFunction(() => [...document.querySelectorAll('textarea')]
       .some(e => e.value.includes('事实待审核 2')));
+    if (process.env.PRISMKE_REVIEW_BROWSER_VALIDATION === '1') {
+      await page.getByRole('tab', { name: '校验问题', exact: true }).click();
+      await dropdown(page, '校验运行');
+      await page.waitForFunction(() => [...document.querySelectorAll('textarea')]
+        .some(e => e.value.includes('阻断问题 1')));
+      await page.getByRole('button', { name: '排除候选', exact: true }).waitFor();
+      await page.waitForFunction(() => [...document.querySelectorAll('button')]
+        .some(e => e.textContent.trim() === '排除候选' && !e.disabled));
+      await page.screenshot({ path: path.join(output, 'validation-desktop.png'), fullPage: true });
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.screenshot({ path: path.join(output, 'validation-mobile.png'), fullPage: true });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2), false);
+      await page.setViewportSize({ width: 1440, height: 1000 });
+      await page.getByRole('textbox', { name: '校验审核人', exact: true }).fill('browser-mock-reviewer');
+      await page.getByRole('checkbox', { name: '确认排除此候选，保留原始问题及审计', exact: true }).check();
+      await page.getByRole('button', { name: '排除候选', exact: true }).click();
+      await page.waitForFunction(() => [...document.querySelectorAll('textarea')]
+        .some(e => e.value.includes('阻断问题 0')));
+    }
     await page.getByRole('tab', { name: '事实审核', exact: true }).click();
     await dropdown(page, '运行');
     await page.waitForFunction(() => [...document.querySelectorAll('textarea')]
