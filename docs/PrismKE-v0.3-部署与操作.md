@@ -55,22 +55,58 @@ PRISMKE_API_HOST=127.0.0.1
 PRISMKE_API_PORT=8000
 ```
 
-首次启动会使用 `.env` 中的密码初始化 Neo4j：
+首次启动会使用 `.env` 中的密码初始化 Neo4j。推荐通过统一脚本同时管理 Neo4j 与 PrismKE Web：
+
+```bash
+bash scripts/prismke_autodl.sh start
+```
+
+查看服务状态与健康接口：
+
+```bash
+bash scripts/prismke_autodl.sh status
+bash scripts/prismke_autodl.sh health
+```
+
+其他生命周期命令：
+
+```bash
+bash scripts/prismke_autodl.sh restart
+bash scripts/prismke_autodl.sh stop
+bash scripts/prismke_autodl.sh logs web --lines 100
+bash scripts/prismke_autodl.sh logs web --follow
+bash scripts/prismke_autodl.sh logs neo4j --lines 100
+```
+
+统一脚本具有以下行为：
+
+- Web 使用稳定的 `prismke-web` tmux 会话，旧的 `prismke-v03` 会话会在启动时平滑替换。
+- `start` 和 `stop` 可以重复执行，不会创建重复进程或因服务已停止而失败。
+- 服务控制使用文件锁，拒绝同时执行两个启动或停止操作。
+- 启动前检查 7474、7687 和 API 端口，端口被非受管进程占用时拒绝启动。
+- Web 健康检查失败会回滚本次新启动的组件，并输出最后 30 行 Web 日志。
+- `status` 仅在 Neo4j、tmux 和 HTTP 健康检查全部通过时返回退出码 `0`。
+
+日志位置：
+
+```text
+runtime/logs/prismke-web.log
+runtime/neo4j/logs/
+```
+
+Web 日志超过 10 MiB 时在下次启动前轮转，最多保留 5 份。脚本不会配置 AutoDL 平台级开机启动，实例开启后仍需手动执行一次 `start`。
+
+故障排查时可以绕过统一脚本手工启动：
 
 ```bash
 bash scripts/start_neo4j_autodl.sh
-```
-
-建议在 tmux 中启动 PrismKE：
-
-```bash
 tmux new -s prismke-web
 conda activate prismke
 cd /root/autodl-tmp/PrismKE
 prismke serve
 ```
 
-按 `Ctrl+B`，再按 `D` 脱离 tmux；使用 `tmux attach -t prismke-web` 返回。
+按 `Ctrl+B`，再按 `D` 脱离手工创建的 tmux 会话。
 
 ## 三、本地访问服务器
 
@@ -165,10 +201,11 @@ Compose 仅将 7474、7687 和 8000 映射到宿主机回环地址。运行数�
 ## 八、验收命令
 
 ```bash
-ruff check .
-mypy src
-pytest
-curl http://127.0.0.1:8000/api/v1/health
+uv run ruff check .
+uv run mypy src
+uv run pytest
+bash scripts/prismke_autodl.sh status
+bash scripts/prismke_autodl.sh health
 ```
 
 验收全过程使用 Mock Provider，不消耗百炼额度。
