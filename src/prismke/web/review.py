@@ -201,7 +201,7 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
             neighbor = gr.JSON(label="候选邻域", visible=kind == "entity")
             evidence_choice = gr.Dropdown(label="当前对象证据", choices=[], value=None)
             evidence_text = gr.Textbox(label="证据原文与位置", lines=8, interactive=False)
-            evidence_image = gr.Image(label="证据区域", type="filepath")
+            evidence_image = gr.Image(label="证据区域", type="filepath", visible=False)
         with gr.Column(min_width=280):
             peers = gr.Textbox(
                 label="冲突对方事实", lines=8, interactive=False, visible=kind == "claim"
@@ -335,8 +335,9 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
             gr.update(value=None),
         )
 
-    async def evidence(rid: str | None, eid: str | None) -> tuple[str, str | None]:
-        return await controller.evidence(rid, eid) if rid and eid else ("", None)
+    async def evidence(rid: str | None, eid: str | None) -> tuple[str, Any]:
+        text, image = await controller.evidence(rid, eid) if rid and eid else ("", None)
+        return text, gr.update(value=image, visible=image is not None)
 
     async def submit_task(
         rid: str, tid: str, decision: str, cid: str | None, person: str, note: str
