@@ -147,6 +147,9 @@ async def import_review_run(source: Path, run_id: str, target: Path) -> Workflow
                 raise ValueError(f"copied evidence failed verification: {ref.id}")
         state.review_workspace = True
         state.submission_confirmed = False
+        state.document.source_filename = original.document.source_filename or Path(
+            original.document.source_path
+        ).name
         state.document.source_path = str(copied_evidence._blob_path(state.document.source_hash))
         state.input_path = state.document.source_path
         for asset in state.document.media_assets:

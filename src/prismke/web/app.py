@@ -212,6 +212,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             task_id,
             cast(Literal["link", "create", "reject"], action),
             selected_entity_id or None,
+            reviewer or None,
         )
         return _state_summary(state)
 

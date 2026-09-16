@@ -97,6 +97,7 @@ async def test_import_review_resume_preview_commit_and_rollback(
     store = None
     if backend == "neo4j":
         settings = Settings()
+        assert settings.neo4j_uri == "bolt://127.0.0.1:17687", "use the isolated test script"
         store = Neo4jGraphStore(
             settings.neo4j_uri,
             settings.neo4j_user,

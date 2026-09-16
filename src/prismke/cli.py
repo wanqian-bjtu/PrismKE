@@ -78,10 +78,46 @@ def review(
     run_id: str,
     claim_id: Annotated[str, typer.Option("--claim-id")],
     decision: Annotated[ReviewDecision, typer.Option("--decision")],
+    reviewer: Annotated[str | None, typer.Option("--reviewer")] = None,
+    comment: Annotated[str | None, typer.Option("--comment")] = None,
 ) -> None:
     """Record a human decision for one claim."""
-    state = asyncio.run(PrismKEService().review(run_id, claim_id, decision))
+    state = asyncio.run(PrismKEService().review(run_id, claim_id, decision, reviewer, comment))
     console.print(f"review recorded: run_id={state.run_id} claim_id={claim_id}")
+
+
+@app.command("review-entity")
+def review_entity_command(
+    run_id: str,
+    task_id: Annotated[str, typer.Option("--task-id")],
+    action: Annotated[str, typer.Option("--action")],
+    reviewer: Annotated[str, typer.Option("--reviewer")],
+    selected_entity_id: Annotated[str | None, typer.Option("--selected-entity-id")] = None,
+    comment: Annotated[str | None, typer.Option("--comment")] = None,
+) -> None:
+    """Record a single entity decision; real tasks have no bulk approval command."""
+    from typing import Literal, cast
+
+    if action not in {"link", "create", "reject"}:
+        raise typer.BadParameter("--action must be link/create/reject")
+    _print_model(
+        asyncio.run(
+            PrismKEService().review_entity(
+                run_id,
+                task_id,
+                cast(Literal["link", "create", "reject"], action),
+                selected_entity_id,
+                reviewer,
+                comment,
+            )
+        )
+    )
+
+
+@app.command("review-progress")
+def review_progress_command(run_id: str) -> None:
+    """Inspect pending tasks and the isolated graph submission summary."""
+    _print_model(PrismKEService().review_progress(run_id))
 
 
 @app.command()

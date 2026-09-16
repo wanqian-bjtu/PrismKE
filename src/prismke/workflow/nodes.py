@@ -318,7 +318,9 @@ class WorkflowNodes:
             documents=[
                 GraphDocument(
                     id=state.document.id,
-                    filename=Path(state.document.source_path).name,
+                    filename=(
+                        state.document.source_filename or Path(state.document.source_path).name
+                    ),
                     content_hash=state.document.source_hash,
                     media_type=state.document.media_type,
                 )

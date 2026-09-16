@@ -445,6 +445,7 @@ class PrismKEService:
         state = self.show_run(run_id)
         entity_pending = sum(item.status == "pending" for item in state.entity_review_tasks)
         claim_pending = sum(item.status == "pending" for item in state.review_tasks)
+        retry_commit = state.status == "failed" and state.failed_node == "commit_graph"
         return {
             "run_id": run_id,
             "status": state.status,
@@ -455,12 +456,13 @@ class PrismKEService:
             "can_resume": not entity_pending
             and not claim_pending
             and state.status != "completed"
-            and state.current_node != "prepare_graph_commit",
+            and state.current_node != "prepare_graph_commit"
+            and not retry_commit,
             "can_commit": state.review_workspace
-            and state.current_node == "prepare_graph_commit"
+            and (state.current_node == "prepare_graph_commit" or retry_commit)
             and not entity_pending
             and not claim_pending
-            and not state.submission_confirmed,
+            and (not state.submission_confirmed or retry_commit),
             "submission": {
                 "entities": len(state.graph_commit.entities),
                 "claims": len(state.graph_commit.claims),

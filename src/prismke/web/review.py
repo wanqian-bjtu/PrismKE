@@ -17,14 +17,13 @@ class ReviewController:
         self.service = service
 
     def runs(self) -> list[tuple[str, str]]:
-        return [
-            (
-                f"{state.document.id if state.document else state.run_id} · "
-                f"{state.status} · {state.run_id}",
-                state.run_id,
-            )
-            for state in self.service.runs.list(limit=1000)
-        ]
+        choices = []
+        for state in self.service.runs.list(limit=1000):
+            label = state.run_id
+            if state.review_workspace and state.document:
+                label = state.document.source_filename or "隔离导入文档"
+            choices.append((f"{label} · {state.status} · {state.run_id}", state.run_id))
+        return choices
 
     async def queue(
         self,
@@ -389,8 +388,8 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
         queue_inputs,
         queue_outputs,
     ).then(load_task, [run, task], task_outputs)
-    table.select(select_row, [task_ids], [task])
-    task.change(load_task, [run, task], task_outputs)
+    table.select(select_row, [task_ids], [task]).then(load_task, [run, task], task_outputs)
+    task.input(load_task, [run, task], task_outputs)
     evidence_choice.change(evidence, [run, evidence_choice], [evidence_text, evidence_image])
     peer_evidence.change(evidence, [run, peer_evidence], [peer_text, peer_image])
     neighbor_button.click(show_neighbor, [candidate], [neighbor])

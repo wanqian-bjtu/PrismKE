@@ -51,6 +51,8 @@ async function main() {
     await dropdown(page, '运行');
     await page.waitForFunction(() => [...document.querySelectorAll('textarea')]
       .some(e => e.value.includes('OpenAI') && e.value.includes('developed_by')));
+    await page.waitForFunction(() => [...document.querySelectorAll('textarea')]
+      .filter(e => e.value.includes('页码：')).length >= 2);
     await page.screenshot({ path: path.join(output, 'conflict-desktop.png'), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
     await page.screenshot({ path: path.join(output, 'conflict-mobile.png'), fullPage: true });
@@ -64,7 +66,7 @@ async function main() {
     await page.getByRole('button', { name: '提交当前审核', exact: true }).click();
     await page.getByRole('button', { name: '继续处理', exact: true }).click();
     await page.getByRole('button', { name: '确认写入隔离图谱', exact: true }).waitFor();
-    await page.getByLabel('确认将预览内容写入隔离图谱', { exact: true }).check();
+    await page.getByRole('checkbox', { name: '确认将预览内容写入隔离图谱', exact: true }).check();
     await page.getByRole('button', { name: '确认写入隔离图谱', exact: true }).click();
     await page.waitForFunction(() => [...document.querySelectorAll('textarea')]
       .some(e => e.value === '已写入隔离图谱。'));
@@ -72,7 +74,7 @@ async function main() {
     const revision = runs[0].submission.revision_id;
     await page.getByRole('tab', { name: '版本', exact: true }).click();
     await page.getByRole('textbox', { name: '要回滚的 Revision', exact: true }).fill(revision);
-    await page.getByLabel('我确认创建补偿 Revision', { exact: true }).check();
+    await page.getByRole('checkbox', { name: '我确认创建补偿 Revision', exact: true }).check();
     await page.getByRole('button', { name: '执行回滚', exact: true }).click();
     await page.waitForFunction(() => document.body.textContent.includes('rollback'));
     const revisions = await (await page.request.get(new URL('/api/v1/revisions', url).href)).json();
