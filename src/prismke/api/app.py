@@ -18,10 +18,11 @@ from fastapi import (
     Header,
     HTTPException,
     Query,
+    Request,
     UploadFile,
     status,
 )
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from filelock import Timeout
 
 from prismke import __version__
@@ -94,6 +95,14 @@ def create_app(
     app = FastAPI(title="PrismKE API", version=__version__, lifespan=lifespan)
     app.state.prismke_service = service
 
+    @app.exception_handler(ExecutionConflict)
+    async def execution_conflict(_: Request, exc: ExecutionConflict) -> JSONResponse:
+        code = str(exc)
+        return JSONResponse(
+            status_code=503 if code == "WORKER_SHUTTING_DOWN" else 409,
+            content={"detail": {"code": code}},
+        )
+
     async def authorize(authorization: str | None = Header(default=None)) -> None:
         if not settings.api_token:
             return
@@ -115,6 +124,7 @@ def create_app(
         vlm_provider: Annotated[str, Form()] = "disabled",
         allow_remote_assets: Annotated[bool, Form()] = False,
     ) -> RunAccepted:
+        service.executions.ensure_accepting()
         if service.review_metadata:
             raise HTTPException(status_code=409, detail="review workspace forbids extraction")
         document_path = await _save_upload(document, settings.uploads_dir / "documents")

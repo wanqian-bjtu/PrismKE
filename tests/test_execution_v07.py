@@ -111,6 +111,22 @@ def test_creation_is_unique(tmp_path: Path, schema_path: Path) -> None:
     assert len(service.executions.repository.events(run_id)) == 1
 
 
+def test_shutdown_rejects_new_execution_without_persisting_it(
+    tmp_path: Path, schema_path: Path
+) -> None:
+    service, run_id, sample = fixture(tmp_path, schema_path)
+    service.executions.persistent = True
+    service.executions.stopping = True
+    version = service.executions.view(run_id)["version"]
+    with pytest.raises(ExecutionConflict, match="WORKER_SHUTTING_DOWN"):
+        service.executions.enqueue(run_id, "execute")
+    sample.write_text("different input")
+    with pytest.raises(ExecutionConflict, match="WORKER_SHUTTING_DOWN"):
+        service.create_run(sample, schema_path, "mock")
+    assert len(service.executions.repository.list_tasks()) == 1
+    assert service.executions.view(run_id)["version"] == version
+
+
 def test_competing_first_creation(tmp_path: Path, schema_path: Path) -> None:
     sample = tmp_path / "first.md"
     sample.write_text("FirstDemo | developed_by | TestOrg | Software | Organization | 0.92\n")

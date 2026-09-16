@@ -493,6 +493,7 @@ class PrismKEService:
         allow_remote_assets: bool = False,
     ) -> tuple[WorkflowState, bool]:
         """Validate a request and persist its initial state without executing it."""
+        self.executions.ensure_accepting()
         if self.review_metadata:
             raise ValueError("isolated review workspace does not allow new extraction runs")
         input_path = input_path.resolve()

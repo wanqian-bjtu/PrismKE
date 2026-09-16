@@ -106,6 +106,10 @@ class ExecutionManager:
             )
         )
 
+    def ensure_accepting(self) -> None:
+        if self.stopping and self.persistent:
+            raise ExecutionConflict("WORKER_SHUTTING_DOWN")
+
     def set_status(self, run_id: str, status: ExecutionStatus) -> None:
         self.repository.change(run_id, lambda t: setattr(t, "status", status))
 
@@ -152,6 +156,7 @@ class ExecutionManager:
         expected_version: int | None = None,
         reviewer: str | None = None,
     ) -> ExecutionTask:
+        self.ensure_accepting()
         state = self.service.show_run(run_id)
         self.compatible(state)
         task = self.register(state)
