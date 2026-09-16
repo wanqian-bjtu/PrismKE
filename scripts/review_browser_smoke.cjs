@@ -106,6 +106,9 @@ async function main() {
       await dropdown(page, '纠正运行');
       await dropdown(page, '历史任务', 1);
       await dropdown(page, '原审核事件');
+      await page.waitForFunction(() => [...document.querySelectorAll('textarea')]
+        .some(e => e.value.includes('页码：') && e.value.includes('PrismKE')));
+      assert((await page.getByRole('textbox', { name: '纠正证据原文', exact: true }).inputValue()).includes('PrismKE'));
       await page.getByRole('radio', { name: '拒绝事实', exact: true }).check();
       await page.getByRole('textbox', { name: '纠正审核人', exact: true }).fill('browser-mock-reviewer');
       await page.getByRole('textbox', { name: '纠正原因', exact: true }).fill('synthetic fact correction');
