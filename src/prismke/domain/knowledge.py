@@ -9,6 +9,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from prismke.domain.documents import EvidenceRef, Modality
+from prismke.domain.reviews import CorrectionGuard
 from prismke.domain.validation import CommitValidationContext
 
 
@@ -27,6 +28,7 @@ class ClaimStatus(StrEnum):
 class ReviewDecision(StrEnum):
     APPROVE = "approve"
     REJECT = "reject"
+    DEFER = "defer"
 
 
 class EntityMention(BaseModel):
@@ -99,6 +101,7 @@ class Claim(BaseModel):
     status: ClaimStatus = ClaimStatus.PENDING
     evidence_ids: list[str] = Field(min_length=1)
     source_candidate_ids: list[str] = Field(default_factory=list)
+    source_run_ids: list[str] = Field(default_factory=list)
     qualifiers: dict[str, Any] = Field(default_factory=dict)
     cross_modal_support: bool = False
     coarse_visual_evidence: bool = False
@@ -136,6 +139,8 @@ class ReviewTask(BaseModel):
     resolved_at: datetime | None = None
     reviewer: str | None = None
     review_comment: str | None = None
+    version: int = 0
+    last_event_id: str | None = None
 
 
 class EntityCandidate(BaseModel):
@@ -183,7 +188,7 @@ class EntityReviewTask(BaseModel):
     candidates: list[EntityCandidate] = Field(default_factory=list)
     reasons: list[str] = Field(min_length=1)
     status: Literal["pending", "resolved"] = "pending"
-    decision: Literal["link", "create", "approve", "reject"] | None = None
+    decision: Literal["link", "create", "approve", "reject", "defer"] | None = None
     selected_entity_id: str | None = None
     proposed_entity_id: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
@@ -191,6 +196,8 @@ class EntityReviewTask(BaseModel):
     resolved_at: datetime | None = None
     reviewer: str | None = None
     review_comment: str | None = None
+    version: int = 0
+    last_event_id: str | None = None
 
 
 class EntityOperation(BaseModel):
@@ -236,6 +243,8 @@ class GraphRevision(BaseModel):
     changes: list[GraphChange] = Field(default_factory=list)
     validation_context: CommitValidationContext | None = None
     commit_fingerprint: str | None = None
+    review_events: list[dict[str, Any]] = Field(default_factory=list)
+    correction_guard: CorrectionGuard | None = None
     created_at: datetime = Field(default_factory=utc_now)
 
 
@@ -249,6 +258,7 @@ class GraphCommit(BaseModel):
     entity_embeddings: list[EntityEmbedding] = Field(default_factory=list)
     revision: GraphRevision
     validation_context: CommitValidationContext | None = None
+    correction_guard: CorrectionGuard | None = None
 
 
 class GraphHealth(BaseModel):

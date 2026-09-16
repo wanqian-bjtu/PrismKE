@@ -50,9 +50,7 @@ class MultimodalAlignmentService:
         records: list[AlignmentRecord] = []
         for signature, members in groups.items():
             modalities = sorted({modality for item in members for modality in item.modalities})
-            cross_modal = (
-                Modality.IMAGE in modalities and Modality.TEXT in modalities
-            )
+            cross_modal = Modality.IMAGE in modalities and Modality.TEXT in modalities
             if len(members) == 1:
                 aligned.append(members[0])
                 records.append(
@@ -127,9 +125,7 @@ class MultimodalAlignmentService:
                     visual_candidate.subject.name
                 ):
                     continue
-                if _relation_key(text_candidate, schema) == _relation_key(
-                    visual_candidate, schema
-                ):
+                if _relation_key(text_candidate, schema) == _relation_key(visual_candidate, schema):
                     continue
                 pair = sorted([text_candidate.id, visual_candidate.id])
                 modalities = sorted(

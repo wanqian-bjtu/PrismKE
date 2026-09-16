@@ -84,6 +84,7 @@ async function main() {
     await page.waitForFunction(() => [...document.querySelectorAll('textarea')]
       .some(e => e.value.includes('事实待审核 1')));
     await page.getByText('拒绝事实', { exact: true }).click();
+    await page.getByRole('textbox', { name: '审核意见', exact: true }).fill('synthetic conflict rejected');
     await page.getByRole('button', { name: '提交当前审核', exact: true }).click();
     await page.waitForFunction(() => [...document.querySelectorAll('textarea')]
       .some(e => e.value.includes('事实待审核 0')));

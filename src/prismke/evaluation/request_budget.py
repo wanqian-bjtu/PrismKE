@@ -49,7 +49,8 @@ class RequestBudget:
                 raise EvaluationBudgetStop(f"unsettled requests require inspection: {pending}")
             if self.resume_ledger:
                 changed = (saved.get("token_limit"), saved.get("stop_at")) != (
-                    self.limit, self.stop_at
+                    self.limit,
+                    self.stop_at,
                 )
                 increasing = self.limit > saved["token_limit"] and self.stop_at > saved["stop_at"]
                 if changed and not (self.extend_budget and increasing):

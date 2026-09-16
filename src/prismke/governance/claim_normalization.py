@@ -76,9 +76,7 @@ def normalize_claims(
             if not (subject_matches and object_matches) and relation.inverse_relation:
                 inverse = schema.relation_by_id(relation.inverse_relation)
                 if inverse:
-                    inverse_subject_matches = (
-                        not inverse.domain or subject_type in inverse.domain
-                    )
+                    inverse_subject_matches = not inverse.domain or subject_type in inverse.domain
                     inverse_object_matches = not inverse.range or object_type in inverse.range
                     if inverse_subject_matches and inverse_object_matches:
                         relation = inverse

@@ -27,6 +27,7 @@ from filelock import Timeout
 
 from prismke import __version__
 from prismke.api.models import (
+    CorrectionRequest,
     EntityReviewRequest,
     MergeProposalRequest,
     ReviewRequest,
@@ -75,6 +76,13 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        for run_id in {e.run_id for e, _ in service.reviews.repository.pending()}:
+            try:
+                with service.runs.mutation_lock(run_id):
+                    await service.reviews.recover(run_id)
+            except Exception:
+                # Keep the pending outbox visible; never resume extraction on startup.
+                continue
         yield
         await service.close()
 
@@ -255,11 +263,46 @@ def create_app(
                 request.decision,
                 request.reviewer,
                 request.comment,
+                request.expected_version,
+                request.request_id,
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except (ValueError, LegacyCheckpointError, ProviderConfigurationError, Timeout) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @api.get("/runs/{run_id}/review-events")
+    async def review_events(run_id: str) -> object:
+        try:
+            service.show_run(run_id)
+            return service.reviews.repository.events(run_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="run not found") from exc
+
+    @api.post("/runs/{run_id}/review-corrections", status_code=202)
+    async def propose_review_correction(run_id: str, request: CorrectionRequest) -> object:
+        try:
+            return await service.corrections.propose(run_id, **request.model_dump())
+        except (ValueError, LegacyCheckpointError, GraphIntegrityError, Timeout) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (KeyError, FileNotFoundError) as exc:
+            raise HTTPException(status_code=404, detail="review event not found") from exc
+
+    @api.get("/review-corrections/{correction_id}")
+    async def get_review_correction(correction_id: str) -> object:
+        try:
+            return service.reviews.repository.correction(correction_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="correction not found") from exc
+
+    @api.post("/review-corrections/{correction_id}/apply")
+    async def apply_review_correction(correction_id: str, request: RollbackRequest) -> object:
+        try:
+            return await service.corrections.apply(correction_id, request.confirm)
+        except (ValueError, LegacyCheckpointError, GraphIntegrityError, Timeout) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (KeyError, FileNotFoundError) as exc:
+            raise HTTPException(status_code=404, detail="correction not found") from exc
 
     @api.get("/entities/search")
     async def search_entities(
@@ -286,7 +329,12 @@ def create_app(
                     approve=request.action == "approve",
                     reviewer=request.reviewer,
                 )
-            if request.run_id is None or request.action not in {"link", "create", "reject"}:
+            if request.run_id is None or request.action not in {
+                "link",
+                "create",
+                "reject",
+                "defer",
+            }:
                 raise HTTPException(
                     status_code=422,
                     detail="run_id and link/create/reject required",
@@ -294,10 +342,12 @@ def create_app(
             return await service.review_entity(
                 request.run_id,
                 task_id,
-                cast(Literal["link", "create", "reject"], request.action),
+                cast(Literal["link", "create", "reject", "defer"], request.action),
                 request.selected_entity_id,
                 request.reviewer,
                 request.comment,
+                request.expected_version,
+                request.request_id,
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc

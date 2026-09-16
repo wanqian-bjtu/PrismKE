@@ -27,6 +27,7 @@ from prismke.domain import (
     GraphRevision,
     RevisionDiff,
 )
+from prismke.governance.review_guards import verify_correction
 from prismke.governance.validation import ValidationService
 from prismke.governance.validation.context import (
     bind_commit_provenance,
@@ -217,6 +218,7 @@ class JSONGraphStore:
             set(previous.source_candidate_ids + incoming.source_candidate_ids)
         )
         merged.confidence = max(previous.confidence, incoming.confidence)
+        merged.source_run_ids = sorted(set(previous.source_run_ids + incoming.source_run_ids))
         return merged
 
     def _apply(self, data: dict[str, Any], transaction: GraphCommit) -> tuple[dict[str, Any], bool]:
@@ -263,7 +265,7 @@ class JSONGraphStore:
             if not claim.evidence_ids:
                 raise EvidenceRequiredError(f"claim {claim.id} has no evidence")
             current = data["claims"].get(claim.id)
-            if current:
+            if current and transaction.correction_guard is None:
                 claim = self._merge_claim(current, claim)
             data["claims"][claim.id] = claim.model_dump(mode="json")
         for conflict in transaction.conflicts:
@@ -308,6 +310,14 @@ class JSONGraphStore:
         transaction = transaction.model_copy(deep=True)
         with self.lock:
             data = self._read()
+            if transaction.revision.id not in {r["id"] for r in data["revisions"]}:
+                verify_correction(
+                    transaction,
+                    {
+                        **{f"entity:{k}": v for k, v in data["entities"].items()},
+                        **{f"claim:{k}": v for k, v in data["claims"].items()},
+                    },
+                )
             updated, is_noop = self._apply(deepcopy(data), transaction)
             if is_noop:
                 return
@@ -364,6 +374,15 @@ class JSONGraphStore:
             latest = GraphRevision.model_validate(data["revisions"][-1])
             if latest.run_id == f"rollback:{revision_id}":
                 return latest
+            buckets = {
+                "entity": "entities",
+                "claim": "claims",
+                "conflict": "conflicts",
+                "entity_operation": "entity_operations",
+            }
+            for change in target.changes:
+                if data[buckets[change.resource_type]].get(change.resource_id) != change.after:
+                    raise GraphIntegrityError("STALE_ROLLBACK_RESOURCE: re-preview required")
             timestamp = datetime.now(UTC)
             inverse: list[GraphChange] = []
             rollback_order = {

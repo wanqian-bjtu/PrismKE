@@ -16,8 +16,5 @@ def select_analysis_assets(document: DocumentIR) -> list[MediaAsset]:
     return [
         asset
         for asset in document.media_assets
-        if not (
-            asset.origin == "pdf_embedded"
-            and asset.page_number in rendered_scan_pages
-        )
+        if not (asset.origin == "pdf_embedded" and asset.page_number in rendered_scan_pages)
     ]

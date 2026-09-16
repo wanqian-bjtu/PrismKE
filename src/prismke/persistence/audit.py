@@ -25,6 +25,15 @@ class AuditLog:
             "details": details or {},
         }
         with self.lock, self.path.open("ab") as stream:
+            event_id = (details or {}).get("event_id")
+            if event_id:
+                with self.path.open("rb") as existing:
+                    if any(
+                        orjson.loads(line).get("details", {}).get("event_id") == event_id
+                        for line in existing
+                        if line.strip()
+                    ):
+                        return
             stream.write(orjson.dumps(payload) + b"\n")
             stream.flush()
             os.fsync(stream.fileno())

@@ -177,11 +177,39 @@ class Neo4jGraphStore:
         current_claims = {
             _load(r["payload"], Claim).id: _load(r["payload"], Claim) async for r in claim_result
         }
+        if transaction.revision.run_id.startswith("rollback:"):
+            labels = {
+                "entity": "Entity",
+                "claim": "Claim",
+                "conflict": "ConflictSet",
+                "entity_operation": "EntityOperation",
+            }
+            for change in transaction.revision.changes:
+                result = await tx.run(
+                    f"MATCH (n:{labels[change.resource_type]} {{id: $id}}) "
+                    "RETURN n.payload AS payload",
+                    id=change.resource_id,
+                )
+                row = await result.single()
+                payload = orjson.loads(row["payload"]) if row else None
+                if payload != change.before:
+                    raise GraphIntegrityError("STALE_ROLLBACK_RESOURCE")
+        from prismke.governance.review_guards import verify_correction
         from prismke.persistence.json_graph import JSONGraphStore
+
+        verify_correction(
+            transaction,
+            {
+                **{f"entity:{k}": e.model_dump(mode="json") for k, e in previous_entities.items()},
+                **{f"claim:{k}": c.model_dump(mode="json") for k, c in current_claims.items()},
+            },
+        )
 
         transaction.claims = [
             JSONGraphStore._merge_claim(current_claims[c.id].model_dump(mode="json"), c)
             if c.id in current_claims
+            and transaction.correction_guard is None
+            and not transaction.revision.run_id.startswith("rollback:")
             else c
             for c in transaction.claims
         ]
@@ -719,6 +747,8 @@ class Neo4jGraphStore:
                     current_operation.model_dump(mode="json") if current_operation else None
                 )
                 replacement_payload = replacement_operation.model_dump(mode="json")
+            if current_payload != change.after:
+                raise GraphIntegrityError("STALE_ROLLBACK_RESOURCE: re-preview required")
             inverse.append(
                 GraphChange(
                     resource_type=change.resource_type,

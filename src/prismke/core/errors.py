@@ -42,9 +42,7 @@ class ProviderRequestError(PrismKEError):
 class ProviderResponseError(PrismKEError):
     """Raised when a provider returns an unusable response payload."""
 
-    def __init__(
-        self, message: str, *, call_records: Sequence[object] | None = None
-    ) -> None:
+    def __init__(self, message: str, *, call_records: Sequence[object] | None = None) -> None:
         super().__init__(message)
         self.call_records = list(call_records or [])
 

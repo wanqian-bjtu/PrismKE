@@ -38,6 +38,7 @@ from prismke.domain.knowledge import (
     RevisionDiff,
     utc_now,
 )
+from prismke.domain.reviews import CorrectionGuard, ReviewCorrection, ReviewEvent
 from prismke.domain.schema import (
     EntityCatalogItem,
     EntityTypeDef,
@@ -65,6 +66,9 @@ from prismke.domain.workflow import (
 )
 
 __all__ = [
+    "ReviewEvent",
+    "ReviewCorrection",
+    "CorrectionGuard",
     "CommitValidationContext",
     "ValidationIssue",
     "ValidationResult",

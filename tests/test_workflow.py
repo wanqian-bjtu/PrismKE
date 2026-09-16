@@ -33,9 +33,7 @@ from prismke.workflow.nodes import WorkflowNodes
 
 def test_run_repository_uses_cross_platform_safe_filename(tmp_path: Path) -> None:
     repository = RunRepository(tmp_path / "runs")
-    state = WorkflowState(
-        run_id="run:portable", input_path="input.txt", schema_path="schema.yaml"
-    )
+    state = WorkflowState(run_id="run:portable", input_path="input.txt", schema_path="schema.yaml")
     target = repository.save(state)
     assert target.name == "run%3Aportable.json"
     assert repository.load(state.run_id).run_id == state.run_id
@@ -70,7 +68,7 @@ async def test_review_then_resume(tmp_path: Path, schema_path: Path) -> None:
     state = await service.run(sample, schema_path, "mock")
     assert state.status == "awaiting_review"
     claim_id = state.claims[0].id
-    await service.review(state.run_id, claim_id, ReviewDecision.APPROVE)
+    await service.review(state.run_id, claim_id, ReviewDecision.APPROVE, "tester")
     completed = await service.resume(state.run_id)
     assert completed.status == "completed"
     assert completed.claims[0].status == ClaimStatus.APPROVED

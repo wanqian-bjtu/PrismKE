@@ -35,11 +35,14 @@ from prismke.governance import (
 from prismke.governance.validation import ValidationService
 from prismke.parsing import ParserRegistry, select_analysis_assets
 from prismke.persistence.base import EvidenceStore, GraphStore
+from prismke.persistence.reviews import ReviewRepository
 from prismke.providers.base import EmbeddingProvider, LLMProvider, OCRProvider, VLMProvider
 from prismke.providers.embedding import DisabledEmbeddingProvider
 
 
 class WorkflowNodes:
+    review_repository: ReviewRepository | None = None
+
     def __init__(
         self,
         provider: LLMProvider,
@@ -251,8 +254,33 @@ class WorkflowNodes:
 
     async def route_by_risk(self, state: WorkflowState) -> WorkflowState:
         state.claims, new_reviews = route_by_risk(state.run_id, state.claims, state.conflicts)
+        if state.pending_correction_id and self.review_repository is not None:
+            proposal = self.review_repository.correction(state.pending_correction_id)
+            if proposal.kind == "entity":
+                affected = set(proposal.preview["candidate_ids"])
+                from prismke.domain import ReviewTask
+
+                for claim in state.claims:
+                    if (
+                        set(claim.source_candidate_ids) & affected
+                        and claim.status != ClaimStatus.REJECTED
+                    ):
+                        claim.status = ClaimStatus.REVIEW_REQUIRED
+                        if claim.id not in {t.claim_id for t in new_reviews}:
+                            new_reviews.append(
+                                ReviewTask(
+                                    id=stable_id("review", state.run_id, claim.id),
+                                    run_id=state.run_id,
+                                    claim_id=claim.id,
+                                    reasons=["identity_correction_requires_review"],
+                                )
+                            )
         resolved = {item.claim_id: item for item in state.review_tasks if item.status == "resolved"}
         state.review_tasks = [resolved.get(item.claim_id, item) for item in new_reviews]
+        repository = getattr(self, "review_repository", None)
+        if repository is not None:
+            for task in state.review_tasks:
+                task.version = repository.version(state.run_id, task.id)
         for task in state.review_tasks:
             if task.status != "resolved":
                 continue
@@ -282,6 +310,8 @@ class WorkflowNodes:
             for claim in state.claims
             if claim.status in {ClaimStatus.AUTO_APPROVED, ClaimStatus.APPROVED}
         ]
+        for claim in accepted:
+            claim.source_run_ids = sorted(set([*claim.source_run_ids, state.run_id]))
         existing_claims = {claim.id: claim for claim in await self.graph_store.list_claims()}
         existing_entities = {entity.id: entity for entity in await self.graph_store.list_entities()}
         existing_claim_ids = set(existing_claims)
@@ -381,6 +411,17 @@ class WorkflowNodes:
             revision=revision,
             validation_context=context,
         )
+        if state.pending_correction_id and self.review_repository is not None:
+            from prismke.workflow.corrections import compensation_commit
+
+            state.graph_commit = compensation_commit(
+                state,
+                state.graph_commit,
+                self.review_repository.correction(state.pending_correction_id),
+                existing_claims,
+                existing_entities,
+            )
+            state.revision = state.graph_commit.revision
         await ValidationService().commit(
             state.graph_commit,
             {**existing_entities, **{e.id: e for e in entities}},

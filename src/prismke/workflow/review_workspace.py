@@ -137,6 +137,31 @@ async def import_review_run(source: Path, run_id: str, target: Path) -> Workflow
         ):
             src.backup(dst)
         shutil.copytree(source / "evidence", target / "evidence")
+        from prismke.persistence.reviews import ReviewRepository
+
+        source_reviews = source / "reviews.sqlite"
+        if not source_reviews.is_file():
+            raise ValueError("v0.6 candidate archive and review ledger are required")
+        destination_reviews = ReviewRepository(target / "reviews.sqlite")
+        with closing(sqlite3.connect(f"{source_reviews.as_uri()}?mode=ro", uri=True)) as src:
+            src.execute("BEGIN")
+            if src.execute(
+                "SELECT 1 FROM events e JOIN outbox o ON o.event_id=e.id "
+                "WHERE e.run_id=? AND o.delivered=0",
+                (run_id,),
+            ).fetchone():
+                raise ValueError("source review projection pending; recover before import")
+            with closing(destination_reviews.connect()) as dst, dst:
+                for table, condition in (
+                    ("archives", "run_id=?"),
+                    ("events", "run_id=?"),
+                    ("versions", "run_id=?"),
+                    ("outbox", "event_id IN (SELECT id FROM events WHERE run_id=?)"),
+                ):
+                    rows = src.execute(f"SELECT * FROM {table} WHERE {condition}", (run_id,))
+                    for row in rows:
+                        placeholders = ",".join("?" for _ in row)
+                        dst.execute(f"INSERT INTO {table} VALUES ({placeholders})", row)
         (target / "graph").mkdir()
         (target / "graph" / "graph.json").write_bytes(graph_bytes)
         state = original.model_copy(deep=True)
@@ -147,9 +172,9 @@ async def import_review_run(source: Path, run_id: str, target: Path) -> Workflow
                 raise ValueError(f"copied evidence failed verification: {ref.id}")
         state.review_workspace = True
         state.submission_confirmed = False
-        state.document.source_filename = original.document.source_filename or Path(
-            original.document.source_path
-        ).name
+        state.document.source_filename = (
+            original.document.source_filename or Path(original.document.source_path).name
+        )
         state.document.source_path = str(copied_evidence._blob_path(state.document.source_hash))
         state.input_path = state.document.source_path
         for asset in state.document.media_assets:
