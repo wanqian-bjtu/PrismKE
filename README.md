@@ -251,14 +251,27 @@ PRISMKE_API_HOST=127.0.0.1
 PRISMKE_API_PORT=8000
 ```
 
-启动服务：
+AutoDL 原生部署使用统一控制脚本启动 Neo4j 与 PrismKE Web：
 
 ```bash
-prismke serve
+bash scripts/prismke_autodl.sh start
+bash scripts/prismke_autodl.sh status
 ```
 
 API 位于 `http://127.0.0.1:8000/api/v1`，研究界面位于
 `http://127.0.0.1:8000/ui`。服务器保持本机监听，通过 SSH 端口转发访问。若改为非本地监听，必须设置 `PRISMKE_API_TOKEN`。
+
+常用运维命令：
+
+```bash
+bash scripts/prismke_autodl.sh stop
+bash scripts/prismke_autodl.sh restart
+bash scripts/prismke_autodl.sh health
+bash scripts/prismke_autodl.sh logs web --lines 100
+bash scripts/prismke_autodl.sh logs neo4j --follow
+```
+
+脚本不会配置平台级开机自启动。AutoDL 实例启动后执行一次 `start` 即可；重复启动和停止均为幂等操作。本地开发仍可直接执行 `prismke serve`。
 
 JSON 图谱迁移预检与执行：
 
