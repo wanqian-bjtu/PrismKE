@@ -208,6 +208,7 @@ def validate_real_documents(
     token_limit: Annotated[int, typer.Option("--token-limit")] = 100_000,
     stop_at: Annotated[int, typer.Option("--stop-at")] = 90_000,
     budget_ledger: Annotated[Path | None, typer.Option("--budget-ledger", exists=True)] = None,
+    extend_budget: Annotated[bool, typer.Option("--extend-budget")] = False,
 ) -> None:
     """Run budgeted real-model document validation on an isolated JSON graph."""
     from prismke.evaluation.document_validation import validate_documents
@@ -222,6 +223,7 @@ def validate_real_documents(
             token_limit=token_limit,
             stop_at=stop_at,
             budget_ledger=budget_ledger,
+            extend_budget=extend_budget,
         )
     )
     finished = sum(case["status"] in {"completed", "awaiting_review"} for case in report["cases"])

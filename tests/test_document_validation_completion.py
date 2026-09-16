@@ -92,10 +92,39 @@ def test_batches_preserve_order_evidence_and_coordinates():
     assert all(sum(len(block.text.encode()) for block in batch) <= 12000 for batch in batches)
     oversized = TextBlock(id="big", text="a" * 13000, evidence_id="big")
     assert text_batches([blocks[0], oversized, blocks[1]]) == [
-        [blocks[0]],
-        [oversized],
-        [blocks[1]],
+        [blocks[0]], [oversized], [blocks[1]],
     ]
+
+
+@pytest.mark.asyncio
+async def test_explicit_budget_extension_is_audited_and_never_resets_usage(tmp_path):
+    ledger = tmp_path / "ledger.json"
+    first = RequestBudget(limit=300000, stop_at=270000, ledger_path=ledger)
+    number = await first.reserve(100)
+    await first.record(100, httpx.Response(200, json={"usage": {"total_tokens": 20}}), number)
+    with pytest.raises(EvaluationBudgetStop, match="parameters must not change"):
+        RequestBudget(limit=500000, stop_at=450000, ledger_path=ledger, resume_ledger=True)
+    extended = RequestBudget(
+        limit=500000, stop_at=450000, ledger_path=ledger,
+        resume_ledger=True, extend_budget=True,
+    )
+    saved = json.loads(ledger.read_text())
+    assert extended.total_tokens == saved["total_tokens"] == 20
+    assert len(saved["calls"]) == 1
+    assert saved["budget_amendments"][0]["previous_limit"] == 300000
+    assert saved["budget_amendments"][0]["tokens_already_used"] == 20
+    with pytest.raises(EvaluationBudgetStop, match="parameters must not change"):
+        RequestBudget(
+            limit=300000, stop_at=270000, ledger_path=ledger,
+            resume_ledger=True, extend_budget=True,
+        )
+    saved["accounting_complete"] = False
+    ledger.write_text(json.dumps(saved))
+    with pytest.raises(EvaluationBudgetStop, match="uncertain ledger"):
+        RequestBudget(
+            limit=600000, stop_at=550000, ledger_path=ledger,
+            resume_ledger=True, extend_budget=True,
+        )
 
 
 @pytest.mark.asyncio

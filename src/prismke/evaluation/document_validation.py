@@ -209,12 +209,14 @@ async def validate_documents(
     token_limit: int = 100_000,
     stop_at: int = 90_000,
     budget_ledger: Path | None = None,
+    extend_budget: bool = False,
 ) -> dict[str, Any]:
     budget = RequestBudget(
         limit=token_limit,
         stop_at=stop_at,
         ledger_path=budget_ledger or output / "request-ledger.json",
         resume_ledger=budget_ledger is not None,
+        extend_budget=extend_budget,
     )
     starting_tokens = budget.total_tokens
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

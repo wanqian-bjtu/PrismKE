@@ -34,6 +34,8 @@ class RequestBudget:
     ledger_path: Path | None = None
     case_id: str | None = None
     resume_ledger: bool = False
+    extend_budget: bool = False
+    budget_amendments: list[dict[str, Any]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not 0 < self.stop_at < self.limit:
@@ -46,7 +48,11 @@ class RequestBudget:
             if pending:
                 raise EvaluationBudgetStop(f"unsettled requests require inspection: {pending}")
             if self.resume_ledger:
-                if (saved.get("token_limit"), saved.get("stop_at")) != (self.limit, self.stop_at):
+                changed = (saved.get("token_limit"), saved.get("stop_at")) != (
+                    self.limit, self.stop_at
+                )
+                increasing = self.limit > saved["token_limit"] and self.stop_at > saved["stop_at"]
+                if changed and not (self.extend_budget and increasing):
                     raise EvaluationBudgetStop("continued ledger budget parameters must not change")
                 settled_stop = saved.get("stop_reason") in {
                     None,
@@ -60,6 +66,20 @@ class RequestBudget:
                 self.total_tokens = saved["total_tokens"]
                 if self.total_tokens != sum(row.get("total_tokens", 0) for row in self.calls):
                     raise EvaluationBudgetStop("ledger token accounting mismatch")
+                self.budget_amendments = saved.get("budget_amendments", [])
+                if changed:
+                    self.budget_amendments.append(
+                        {
+                            "timestamp": time.time(),
+                            "previous_limit": saved["token_limit"],
+                            "previous_stop_at": saved["stop_at"],
+                            "token_limit": self.limit,
+                            "stop_at": self.stop_at,
+                            "tokens_already_used": self.total_tokens,
+                            "authorization": "explicit --extend-budget",
+                        }
+                    )
+                    self._persist()
                 return
             raise EvaluationBudgetStop("existing ledger cannot be reset; choose a fresh ledger")
 
@@ -82,6 +102,7 @@ class RequestBudget:
                         "accounting_complete": self.accounting_complete,
                         "stop_reason": self.stopped_reason,
                         "calls": self.calls,
+                        "budget_amendments": self.budget_amendments,
                     },
                     stream,
                 )
