@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import tempfile
+import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -27,12 +31,61 @@ class RequestBudget:
     request_gate: asyncio.Lock = field(default_factory=asyncio.Lock)
     active_tasks: list[asyncio.Task[httpx.Response]] = field(default_factory=list)
     accounting_complete: bool = True
+    ledger_path: Path | None = None
+    case_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if not 0 < self.stop_at < self.limit:
+            raise ValueError("budget must satisfy 0 < stop_at < token_limit")
+        if self.ledger_path is not None and self.ledger_path.exists():
+            saved = json.loads(self.ledger_path.read_text(encoding="utf-8"))
+            pending = [
+                row["request_number"] for row in saved["calls"] if row.get("status") == "pending"
+            ]
+            if pending:
+                raise EvaluationBudgetStop(f"unsettled requests require inspection: {pending}")
+            raise EvaluationBudgetStop("existing ledger cannot be reset; choose a fresh ledger")
+
+    def _persist(self) -> None:
+        if self.ledger_path is None:
+            return
+        temporary = None
+        try:
+            self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=self.ledger_path.parent, delete=False
+            ) as stream:
+                temporary = Path(stream.name)
+                json.dump(
+                    {
+                        "token_limit": self.limit,
+                        "stop_at": self.stop_at,
+                        "total_tokens": self.total_tokens,
+                        "reserved_tokens": self.reserved_tokens,
+                        "accounting_complete": self.accounting_complete,
+                        "stop_reason": self.stopped_reason,
+                        "calls": self.calls,
+                    },
+                    stream,
+                )
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, self.ledger_path)
+        except OSError as exc:
+            self.stopped_reason = "request ledger write failed; further requests stopped"
+            raise EvaluationBudgetStop(self.stopped_reason) from exc
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
 
     async def settle(self) -> None:
         """Account already dispatched requests before closing a validation run."""
         if self.active_tasks:
             await asyncio.gather(*self.active_tasks, return_exceptions=True)
             self.active_tasks.clear()
+        if any(row.get("status") == "pending" for row in self.calls):
+            self.accounting_complete = False
+            self.stopped_reason = self.stopped_reason or "unsettled requests remain; inspect ledger"
 
     def estimate(self, body: dict[str, Any]) -> int:
         text_bytes = images = 0
@@ -48,7 +101,7 @@ class RequestBudget:
                         text_bytes += len(str(part.get("text", "")).encode("utf-8"))
         return text_bytes + images * 8192 + self.max_output_tokens + 1024
 
-    async def reserve(self, estimate: int) -> None:
+    async def reserve(self, estimate: int, requested_model: str | None = None) -> int:
         async with self.lock:
             if self.stopped_reason or self.total_tokens >= self.stop_at:
                 raise EvaluationBudgetStop(self.stopped_reason or "token stop threshold reached")
@@ -56,11 +109,31 @@ class RequestBudget:
                 self.stopped_reason = "estimated request exceeds remaining token budget"
                 raise EvaluationBudgetStop(self.stopped_reason)
             self.reserved_tokens += estimate
+            number = len(self.calls) + 1
+            self.calls.append(
+                {
+                    "request_number": number,
+                    "case_id": self.case_id,
+                    "reserved_tokens": estimate,
+                    "status": "pending",
+                    "started_at": time.time(),
+                    "requested_model": requested_model,
+                }
+            )
+            self._persist()
+            return number
 
-    async def record(self, estimate: int, response: httpx.Response) -> None:
+    async def record(self, estimate: int, response: httpx.Response, number: int) -> None:
         async with self.lock:
             self.reserved_tokens -= estimate
-            row: dict[str, Any] = {"status_code": response.status_code}
+            row = self.calls[number - 1]
+            row.update(
+                {
+                    "status_code": response.status_code,
+                    "status": "failed",
+                    "seconds": time.time() - row["started_at"],
+                }
+            )
             if response.is_success:
                 try:
                     payload = response.json()
@@ -75,6 +148,10 @@ class RequestBudget:
                             "input_tokens": int(usage.get("prompt_tokens", 0)),
                             "output_tokens": int(usage.get("completion_tokens", 0)),
                             "total_tokens": tokens,
+                            "status": "succeeded",
+                            "finish_reason": (payload.get("choices") or [{}])[0].get(
+                                "finish_reason"
+                            ),
                         }
                     )
                     self.total_tokens += tokens
@@ -90,9 +167,9 @@ class RequestBudget:
                 # Failed requests have no trustworthy billed usage; do not assume zero cost.
                 self.stopped_reason = f"failed HTTP {response.status_code}; token usage uncertain"
                 self.accounting_complete = False
-            self.calls.append(row)
             if self.total_tokens > self.limit:
                 self.stopped_reason = "actual token usage exceeded evaluation target"
+            self._persist()
             if self.stopped_reason:
                 raise EvaluationBudgetStop(self.stopped_reason)
 
@@ -124,7 +201,7 @@ class BudgetedTransport(httpx.AsyncBaseTransport):
 
     async def _send_serial(self, request: httpx.Request, body: dict[str, Any]) -> httpx.Response:
         estimate = self.budget.estimate(body)
-        await self.budget.reserve(estimate)
+        number = await self.budget.reserve(estimate, str(body.get("model", "")))
         forwarded = httpx.Request(
             request.method,
             request.url,
@@ -145,10 +222,13 @@ class BudgetedTransport(httpx.AsyncBaseTransport):
                 self.budget.reserved_tokens -= estimate
                 self.budget.stopped_reason = "request failed; billed token usage uncertain"
                 self.budget.accounting_complete = False
-                self.budget.calls.append({"status": "network_failure", "usage": "unknown"})
+                self.budget.calls[number - 1].update(
+                    {"status": "network_failure", "usage": "unknown"}
+                )
+                self.budget._persist()
             raise EvaluationBudgetStop(self.budget.stopped_reason) from exc
         finally:
             if self.inner is None:
                 await inner.aclose()
-        await self.budget.record(estimate, response)
+        await self.budget.record(estimate, response, number)
         return response

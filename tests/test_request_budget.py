@@ -57,7 +57,7 @@ async def test_unknown_usage_or_access_failure_stops_calls(payload: dict, status
 
 @pytest.mark.asyncio
 async def test_budget_blocks_oversized_request_before_network() -> None:
-    budget = RequestBudget(limit=1000)
+    budget = RequestBudget(limit=1000, stop_at=900)
     with pytest.raises(EvaluationBudgetStop):
         await budget.reserve(budget.estimate({"messages": [{"content": "text"}]}))
     assert budget.calls == []
@@ -65,7 +65,7 @@ async def test_budget_blocks_oversized_request_before_network() -> None:
 
 @pytest.mark.asyncio
 async def test_inflight_reservations_are_counted() -> None:
-    budget = RequestBudget(limit=10000)
+    budget = RequestBudget(limit=10000, stop_at=9000)
     await budget.reserve(6000)
     with pytest.raises(EvaluationBudgetStop):
         await budget.reserve(6000)
@@ -80,7 +80,7 @@ def test_image_estimation_does_not_account_base64_as_text() -> None:
 
 @pytest.mark.asyncio
 async def test_parallel_branches_serialize_paid_requests() -> None:
-    budget = RequestBudget(limit=10_000)
+    budget = RequestBudget(limit=10_000, stop_at=9000)
     active = peak = 0
 
     async def response(request: httpx.Request) -> httpx.Response:

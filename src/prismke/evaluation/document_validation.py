@@ -10,7 +10,14 @@ from typing import Any
 
 from prismke.core.ids import file_sha256, stable_id
 from prismke.core.settings import Settings
-from prismke.domain import CanonicalEntity, GraphCommit, GraphRevision
+from prismke.domain import (
+    CanonicalEntity,
+    ExtractionRequest,
+    ExtractionResult,
+    GraphCommit,
+    GraphRevision,
+    TextBlock,
+)
 from prismke.evaluation.request_budget import BudgetedTransport, RequestBudget
 from prismke.governance.entity_index import rebuild_entity_index
 from prismke.persistence.json_graph import JSONGraphStore
@@ -22,7 +29,39 @@ from prismke.workflow.service import PrismKEService
 
 class _EvaluationLLM(OpenAICompatibleLLMProvider):
     def fingerprint(self) -> str:
-        return stable_id("provider", super().fingerprint(), "evaluation-output-limit-v2", 4096)
+        return stable_id(
+            "provider", super().fingerprint(), "evaluation-output-limit-v3", 4096, 12000
+        )
+
+    async def extract(self, request: ExtractionRequest) -> ExtractionResult:
+        batches = text_batches(request.document.text_blocks)
+        combined = ExtractionResult()
+        for batch in batches:
+            subset = request.document.model_copy(update={"text_blocks": batch})
+            result = await super().extract(request.model_copy(update={"document": subset}))
+            combined.candidates.extend(result.candidates)
+            combined.warnings.extend(result.warnings)
+            combined.call_records.extend(result.call_records)
+        combined.warnings.append(f"evaluation_text_batches_completed:{len(batches)}")
+        if any(len(block.text.encode("utf-8")) > 12000 for block in request.document.text_blocks):
+            combined.warnings.append("evaluation_oversized_text_block_processed_alone")
+        return combined
+
+
+def text_batches(blocks: list[TextBlock], max_bytes: int = 12000) -> list[list[TextBlock]]:
+    batches: list[list[TextBlock]] = []
+    batch: list[TextBlock] = []
+    size = 0
+    for block in blocks:
+        block_size = len(block.text.encode("utf-8"))
+        if batch and size + block_size > max_bytes:
+            batches.append(batch)
+            batch, size = [], 0
+        batch.append(block)
+        size += block_size
+    if batch:
+        batches.append(batch)
+    return batches
 
 
 class _EvaluationVLM(OpenAICompatibleVLMProvider):
@@ -65,7 +104,13 @@ async def validate_documents(
     manifest_path: Path,
     settings: Settings,
     output: Path,
+    *,
+    token_limit: int = 100_000,
+    stop_at: int = 90_000,
 ) -> dict[str, Any]:
+    budget = RequestBudget(
+        limit=token_limit, stop_at=stop_at, ledger_path=output / "request-ledger.json"
+    )
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if output.exists():
         raise ValueError("choose a fresh validation output directory")
@@ -91,7 +136,6 @@ async def validate_documents(
             "embedding_model_cache": settings.embedding_model_cache_dir.resolve(),
         }
     )
-    budget = RequestBudget()
     store = JSONGraphStore(output / "graph")
     service = _EvaluationService(isolated, store, budget)
     report: dict[str, Any] = {
@@ -104,6 +148,7 @@ async def validate_documents(
         "token_stop_threshold": budget.stop_at,
         "max_output_tokens": budget.max_output_tokens,
         "bailian_qwen_enable_thinking": False,
+        "text_batch_max_utf8_bytes": 12000,
     }
     try:
         service.provider("openai-compatible")
@@ -135,6 +180,7 @@ async def validate_documents(
             if budget.stopped_reason or budget.total_tokens >= budget.stop_at:
                 break
             print(f"Validating {case_id}; used tokens={budget.total_tokens}", flush=True)
+            budget.case_id = case_id
             started = time.perf_counter()
             try:
                 state = await service.run(

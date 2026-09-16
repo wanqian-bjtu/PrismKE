@@ -205,11 +205,17 @@ def export_entity_annotations(
 def validate_real_documents(
     manifest: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
     output: Annotated[Path, typer.Option("--output", file_okay=False)],
+    token_limit: Annotated[int, typer.Option("--token-limit")] = 100_000,
+    stop_at: Annotated[int, typer.Option("--stop-at")] = 90_000,
 ) -> None:
     """Run budgeted real-model document validation on an isolated JSON graph."""
     from prismke.evaluation.document_validation import validate_documents
 
-    report = asyncio.run(validate_documents(manifest, Settings(), output))
+    if not 0 < stop_at < token_limit:
+        raise typer.BadParameter("budget must satisfy 0 < stop_at < token_limit")
+    report = asyncio.run(
+        validate_documents(manifest, Settings(), output, token_limit=token_limit, stop_at=stop_at)
+    )
     console.print(f"Validated {len(report['cases'])} documents; tokens={report['total_tokens']}")
     console.print(f"Report: {output / 'document-validation.json'}")
 
