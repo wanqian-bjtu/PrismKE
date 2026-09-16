@@ -6,7 +6,7 @@ import hmac
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal, cast
 from uuid import uuid4
 
 from fastapi import (
@@ -24,8 +24,19 @@ from fastapi import (
 )
 from fastapi.responses import Response
 
-from prismke.api.models import ReviewRequest, RollbackRequest, RunAccepted
-from prismke.core.errors import GraphIntegrityError, LegacyCheckpointError
+from prismke.api.models import (
+    EntityReviewRequest,
+    MergeProposalRequest,
+    ReviewRequest,
+    RollbackRequest,
+    RunAccepted,
+    SplitProposalRequest,
+)
+from prismke.core.errors import (
+    GraphIntegrityError,
+    LegacyCheckpointError,
+    ProviderConfigurationError,
+)
 from prismke.core.settings import Settings
 from prismke.workflow import PrismKEService
 
@@ -64,7 +75,7 @@ def create_app(
         yield
         await service.close()
 
-    app = FastAPI(title="PrismKE API", version="0.3.0", lifespan=lifespan)
+    app = FastAPI(title="PrismKE API", version="0.4.0", lifespan=lifespan)
     app.state.prismke_service = service
 
     async def authorize(authorization: str | None = Header(default=None)) -> None:
@@ -165,8 +176,82 @@ def create_app(
             return await service.review(state.run_id, claim_id, request.decision)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except LegacyCheckpointError as exc:
+        except (LegacyCheckpointError, ProviderConfigurationError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @api.get("/entities/search")
+    async def search_entities(
+        q: str = Query(min_length=1),
+        entity_type: str = Query(min_length=1),
+        limit: int = Query(default=10, ge=1, le=100),
+    ) -> object:
+        return await service.search_entities(q, entity_type, limit)
+
+    @api.get("/entity-reviews")
+    async def list_entity_reviews(
+        review_status: str | None = Query(default=None, alias="status"),
+    ) -> object:
+        if review_status not in {None, "pending", "resolved"}:
+            raise HTTPException(status_code=422, detail="invalid entity review status")
+        return service.list_entity_reviews(review_status)
+
+    @api.post("/entity-reviews/{task_id}")
+    async def submit_entity_review(task_id: str, request: EntityReviewRequest) -> object:
+        try:
+            if request.action in {"approve", "reject"} and request.run_id is None:
+                return await service.review_entity_operation(
+                    task_id,
+                    approve=request.action == "approve",
+                    reviewer=request.reviewer,
+                )
+            if request.run_id is None or request.action not in {"link", "create", "reject"}:
+                raise HTTPException(
+                    status_code=422,
+                    detail="run_id and link/create/reject required",
+                )
+            return await service.review_entity(
+                request.run_id,
+                task_id,
+                cast(Literal["link", "create", "reject"], request.action),
+                request.selected_entity_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (ValueError, GraphIntegrityError, ProviderConfigurationError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @api.post("/entities/merge-proposals", status_code=202)
+    async def propose_entity_merge(request: MergeProposalRequest) -> object:
+        try:
+            return await service.propose_entity_merge(
+                request.source_entity_ids, request.target_entity_id, request.reasons
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @api.post("/entities/{entity_id}/split-proposals", status_code=202)
+    async def propose_entity_split(
+        entity_id: str, request: SplitProposalRequest
+    ) -> object:
+        try:
+            return await service.propose_entity_split(
+                entity_id,
+                request.target_entities,
+                request.claim_assignments,
+                request.reasons,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @api.get("/entities/{entity_id}/history")
+    async def get_entity_history(entity_id: str) -> object:
+        if await service.graph_store.get_entity(entity_id) is None:
+            raise HTTPException(status_code=404, detail="entity not found")
+        return await service.entity_history(entity_id)
 
     @api.get("/entities/{entity_id}/neighborhood")
     async def get_neighborhood(

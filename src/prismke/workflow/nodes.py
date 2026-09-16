@@ -5,9 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from prismke.core.errors import EvidenceIntegrityError
-from prismke.core.ids import stable_id
+from prismke.core.ids import canonical_hash, stable_id
 from prismke.domain import (
     ClaimStatus,
+    EntityEmbedding,
     ExtractionRequest,
     GraphChange,
     GraphCommit,
@@ -26,6 +27,7 @@ from prismke.governance import (
     SemanticEntityResolver,
     collect_mentions,
     detect_conflicts,
+    entity_embedding_text,
     normalize_claims,
     route_by_risk,
 )
@@ -187,7 +189,6 @@ class WorkflowNodes:
             resolved.get(item.mention_id, item) if item.mention_id is not None else item
             for item in (resolution.review_tasks or [])
         ]
-        state.entity_embeddings = resolution.embeddings or []
         state.warnings.extend(
             f"review_required:{mention_id}:{','.join(reasons)}"
             for mention_id, reasons in resolution.review_reasons.items()
@@ -331,9 +332,6 @@ class WorkflowNodes:
             entities=entities,
             claims=accepted,
             conflicts=conflicts,
-            entity_embeddings=[
-                item for item in state.entity_embeddings if item.entity_id in entity_ids
-            ],
             revision=revision,
         )
         return state
@@ -347,5 +345,26 @@ class WorkflowNodes:
                         f"claim {claim.id} references invalid evidence {evidence_id}"
                     )
         await self.graph_store.commit(state.graph_commit)
+        if (
+            self.embedding_provider.fingerprint() != "embedding:disabled"
+            and state.graph_commit.entities
+        ):
+            active_entities = [item for item in state.graph_commit.entities if item.active]
+            texts = [entity_embedding_text(item) for item in active_entities]
+            vectors = await self.embedding_provider.encode(texts)
+            await self.graph_store.upsert_entity_embeddings(
+                [
+                    EntityEmbedding(
+                        entity_id=entity.id,
+                        model_fingerprint=self.embedding_provider.fingerprint(),
+                        text_hash=canonical_hash(text),
+                        dimension=len(vector),
+                        vector=vector,
+                    )
+                    for entity, text, vector in zip(
+                        active_entities, texts, vectors, strict=True
+                    )
+                ]
+            )
         state.status = "completed"
         return state

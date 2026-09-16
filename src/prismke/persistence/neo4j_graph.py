@@ -15,6 +15,8 @@ from prismke.domain import (
     CanonicalEntity,
     Claim,
     ConflictSet,
+    EntityEmbedding,
+    EntityOperation,
     EvidenceRef,
     GraphChange,
     GraphCommit,
@@ -92,6 +94,20 @@ class Neo4jGraphStore:
             async with self.driver.session(database=self.database) as session:
                 for statement in statements:
                     await session.run(statement)
+                for _ in range(60):
+                    result = await session.run(
+                        "SHOW VECTOR INDEXES YIELD name, state "
+                        "WHERE name = 'entity_embedding_bge_m3' "
+                        "RETURN state"
+                    )
+                    record = await result.single()
+                    if record is not None and record["state"] == "ONLINE":
+                        break
+                    await asyncio.sleep(0.5)
+                else:
+                    raise GraphIntegrityError(
+                        "Neo4j entity vector index did not become ONLINE within 30 seconds"
+                    )
             self._schema_ready = True
 
     async def healthcheck(self) -> GraphHealth:
@@ -155,9 +171,7 @@ class Neo4jGraphStore:
             )
         for entity in transaction.entities:
             if not entity.active:
-                closing_claim_ids = [
-                    claim.id for claim in transaction.claims if claim.tx_to is not None
-                ]
+                closing_claim_ids = [claim.id for claim in transaction.claims]
                 result = await tx.run(
                     "MATCH (e:Entity {id: $id})<-[:SUBJECT|OBJECT]-(c:Claim) "
                     "WHERE c.tx_to IS NULL AND NOT c.id IN $closing_claim_ids "
@@ -253,6 +267,18 @@ class Neo4jGraphStore:
                 claim_ids=conflict.claim_ids,
             )
         for operation in transaction.entity_operations:
+            referenced_entities = set(
+                operation.source_entity_ids + operation.target_entity_ids
+            )
+            result = await tx.run(
+                "MATCH (n:Entity) WHERE n.id IN $ids RETURN collect(n.id) AS ids",
+                ids=sorted(referenced_entities),
+            )
+            found = set((await result.single())["ids"])
+            if found != referenced_entities:
+                raise GraphIntegrityError(
+                    f"entity operation {operation.id} references missing entities"
+                )
             await tx.run(
                 "MERGE (n:EntityOperation {id: $id}) "
                 "SET n.operation_type=$operation_type, n.status=$status, n.payload=$payload",
@@ -262,15 +288,23 @@ class Neo4jGraphStore:
                 payload=_dump(operation),
             )
             if operation.operation_type == "merge" and operation.target_entity_ids:
-                await tx.run(
-                    "MATCH (target:Entity {id: $target_id}) "
-                    "MATCH (source:Entity) WHERE source.id IN $source_ids "
-                    "AND source.id <> $target_id "
-                    "MERGE (source)-[:MERGED_INTO {operation_id: $operation_id}]->(target)",
-                    target_id=operation.target_entity_ids[0],
-                    source_ids=operation.source_entity_ids,
-                    operation_id=operation.id,
-                )
+                if operation.status == "applied":
+                    await tx.run(
+                        "MATCH (target:Entity {id: $target_id}) "
+                        "MATCH (source:Entity) WHERE source.id IN $source_ids "
+                        "AND source.id <> $target_id "
+                        "MERGE (source)-[:MERGED_INTO "
+                        "{operation_id: $operation_id}]->(target)",
+                        target_id=operation.target_entity_ids[0],
+                        source_ids=operation.source_entity_ids,
+                        operation_id=operation.id,
+                    )
+                else:
+                    await tx.run(
+                        "MATCH ()-[r:MERGED_INTO {operation_id: $operation_id}]->() "
+                        "DELETE r",
+                        operation_id=operation.id,
+                    )
         revision = transaction.revision
         await tx.run(
             "CREATE (r:Revision {id: $id, run_id: $run_id, parent_id: $parent_id, "
@@ -379,6 +413,49 @@ class Neo4jGraphStore:
             matches.append((_load(record["payload"], CanonicalEntity), score))
         return sorted(matches, key=lambda item: item[1], reverse=True)[:top_k]
 
+    async def list_entity_embeddings(self) -> list[EntityEmbedding]:
+        async with self.driver.session(database=self.database) as session:
+            result = await session.run(
+                "MATCH (n:Entity) WHERE n.embedding IS NOT NULL "
+                "RETURN n.id AS entity_id, n.embedding_model AS model, "
+                "n.embedding_text_hash AS text_hash, n.embedding_dimension AS dimension, "
+                "n.embedding AS vector"
+            )
+            records = await result.data()
+        return [
+            EntityEmbedding(
+                entity_id=record["entity_id"],
+                model_fingerprint=record["model"],
+                text_hash=record["text_hash"],
+                dimension=int(record["dimension"]),
+                vector=[float(value) for value in record["vector"]],
+            )
+            for record in records
+        ]
+
+    async def upsert_entity_embeddings(self, embeddings: list[EntityEmbedding]) -> None:
+        await self._ensure_schema()
+        async with self.driver.session(database=self.database) as session:
+            async def write(tx: Any) -> None:
+                for embedding in embeddings:
+                    result = await tx.run(
+                        "MATCH (n:Entity {id: $entity_id}) "
+                        "SET n.embedding=$vector, n.embedding_model=$model, "
+                        "n.embedding_text_hash=$text_hash, "
+                        "n.embedding_dimension=$dimension RETURN n.id AS id",
+                        entity_id=embedding.entity_id,
+                        vector=embedding.vector,
+                        model=embedding.model_fingerprint,
+                        text_hash=embedding.text_hash,
+                        dimension=embedding.dimension,
+                    )
+                    if await result.single() is None:
+                        raise GraphIntegrityError(
+                            f"embedding references missing entity: {embedding.entity_id}"
+                        )
+
+            await session.execute_write(write)
+
     async def list_claims(self) -> list[Claim]:
         return [_load(item, Claim) for item in await self._list_payloads("Claim")]
 
@@ -463,9 +540,20 @@ class Neo4jGraphStore:
         entities: list[CanonicalEntity] = []
         claims: list[Claim] = []
         conflicts: list[ConflictSet] = []
+        entity_operations: list[EntityOperation] = []
         inverse: list[GraphChange] = []
         now = datetime.now(UTC)
-        for change in reversed(target.changes):
+        rollback_order = {
+            "entity_operation": 0,
+            "claim": 1,
+            "conflict": 2,
+            "entity": 3,
+        }
+        ordered_changes = sorted(
+            reversed(target.changes),
+            key=lambda item: rollback_order[item.resource_type],
+        )
+        for change in ordered_changes:
             current_payload: dict[str, Any] | None
             replacement_payload: dict[str, Any]
             if change.resource_type == "entity":
@@ -496,7 +584,7 @@ class Neo4jGraphStore:
                 claims.append(replacement_claim)
                 current_payload = current_claim.model_dump(mode="json") if current_claim else None
                 replacement_payload = replacement_claim.model_dump(mode="json")
-            else:
+            elif change.resource_type == "conflict":
                 current_conflict = await self._get(
                     "ConflictSet", change.resource_id, ConflictSet
                 )
@@ -515,6 +603,27 @@ class Neo4jGraphStore:
                     current_conflict.model_dump(mode="json") if current_conflict else None
                 )
                 replacement_payload = replacement_conflict.model_dump(mode="json")
+            else:
+                current_operation = await self._get(
+                    "EntityOperation", change.resource_id, EntityOperation
+                )
+                if change.action == "create" and current_operation is not None:
+                    replacement_operation = current_operation.model_copy(
+                        update={"status": "rolled_back"}
+                    )
+                    action = "close"
+                elif change.before is not None:
+                    replacement_operation = EntityOperation.model_validate(change.before)
+                    action = "restore"
+                else:
+                    continue
+                entity_operations.append(replacement_operation)
+                current_payload = (
+                    current_operation.model_dump(mode="json")
+                    if current_operation
+                    else None
+                )
+                replacement_payload = replacement_operation.model_dump(mode="json")
             inverse.append(
                 GraphChange(
                     resource_type=change.resource_type,
@@ -539,6 +648,7 @@ class Neo4jGraphStore:
                 entities=entities,
                 claims=claims,
                 conflicts=conflicts,
+                entity_operations=entity_operations,
                 revision=revision,
             )
         )

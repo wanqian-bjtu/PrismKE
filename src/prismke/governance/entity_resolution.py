@@ -6,11 +6,10 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 
 from prismke.core.errors import SchemaValidationError
-from prismke.core.ids import canonical_hash, stable_id
+from prismke.core.ids import stable_id
 from prismke.domain import (
     CanonicalEntity,
     EntityCandidate,
-    EntityEmbedding,
     EntityMention,
     EntityResolutionDecision,
     EntityReviewTask,
@@ -28,7 +27,6 @@ class ResolutionBundle:
     review_reasons: dict[str, list[str]]
     decisions: list[EntityResolutionDecision] | None = None
     review_tasks: list[EntityReviewTask] | None = None
-    embeddings: list[EntityEmbedding] | None = None
 
 
 class EntityResolver:
@@ -166,17 +164,46 @@ class SemanticEntityResolver:
             reasons=["dense_retrieval", "type_match", "name_rerank", "context_rerank"],
         )
 
+    async def _apply_neighborhood_score(
+        self, mention: EntityMention, candidate: EntityCandidate
+    ) -> EntityCandidate:
+        try:
+            neighborhood = await self.graph_store.get_neighborhood(candidate.entity_id)
+        except (KeyError, ValueError):
+            return candidate
+        context = normalize_label(mention.context)
+        if not context:
+            return candidate
+        matched = any(
+            normalize_label(name) in context
+            for entity in neighborhood.entities
+            if entity.id != candidate.entity_id
+            for name in [entity.name, *entity.aliases]
+            if len(normalize_label(name)) >= 3
+        )
+        if not matched:
+            return candidate
+        return candidate.model_copy(
+            update={
+                "neighborhood_score": 1.0,
+                "final_score": min(1.0, candidate.final_score + 0.1),
+                "reasons": [*candidate.reasons, "neighborhood_context_match"],
+            }
+        )
+
     async def resolve(self, mentions: list[EntityMention]) -> ResolutionBundle:
         existing = {item.id: item for item in await self.graph_store.list_entities()}
         entities = dict(existing)
-        exact: dict[tuple[str, str], CanonicalEntity] = {}
+        exact: dict[tuple[str, str], list[CanonicalEntity]] = {}
         names_any_type: dict[str, list[CanonicalEntity]] = {}
         for entity in existing.values():
             if not entity.active:
                 continue
             for name in [entity.name, *entity.aliases]:
                 normalized = normalize_label(name)
-                exact[(normalized, entity.entity_type)] = entity
+                values = exact.setdefault((normalized, entity.entity_type), [])
+                if all(existing.id != entity.id for existing in values):
+                    values.append(entity)
                 names_any_type.setdefault(normalized, []).append(entity)
         for item in self.schema.schema.entity_catalog:
             entity = CanonicalEntity(
@@ -188,14 +215,15 @@ class SemanticEntityResolver:
             entities.setdefault(entity.id, entity)
             for name in [entity.name, *entity.aliases]:
                 normalized = normalize_label(name)
-                exact.setdefault((normalized, entity.entity_type), entity)
+                values = exact.setdefault((normalized, entity.entity_type), [])
+                if all(existing.id != entity.id for existing in values):
+                    values.append(entity)
                 names_any_type.setdefault(normalized, []).append(entity)
 
         mapping: dict[str, str] = {}
         review_reasons: dict[str, list[str]] = {}
         decisions: list[EntityResolutionDecision] = []
         review_tasks: list[EntityReviewTask] = []
-        embeddings: list[EntityEmbedding] = []
         provider_enabled = self.embedding_provider.fingerprint() != "embedding:disabled"
 
         for mention in mentions:
@@ -207,13 +235,13 @@ class SemanticEntityResolver:
                 entity_type = mention.entity_type
                 reasons.append("ontology_addition")
             normalized = normalize_label(mention.name)
-            matched = exact.get((normalized, entity_type))
-            if matched is not None and not reasons:
-                mapping[mention.id] = matched.id
+            exact_matches = exact.get((normalized, entity_type), [])
+            if len(exact_matches) == 1 and not reasons:
+                mapping[mention.id] = exact_matches[0].id
                 decisions.append(
                     EntityResolutionDecision(
                         mention_id=mention.id,
-                        selected_entity_id=matched.id,
+                        selected_entity_id=exact_matches[0].id,
                         method="exact",
                         confidence=1.0,
                         margin=1.0,
@@ -222,25 +250,61 @@ class SemanticEntityResolver:
                 )
                 continue
 
-            cross_type = [
-                item
-                for item in names_any_type.get(normalized, [])
-                if item.entity_type != entity_type
-            ]
+            cross_type = (
+                [
+                    item
+                    for item in names_any_type.get(normalized, [])
+                    if item.entity_type != entity_type
+                ]
+                if not exact_matches
+                else []
+            )
             vector: list[float] | None = None
             candidates: list[EntityCandidate] = []
             if provider_enabled and not cross_type:
-                vector = (await self.embedding_provider.encode(
-                    [mention_embedding_text(mention, entity_type)]
-                ))[0]
-                retrieved = await self.graph_store.search_entities(
-                    vector, entity_type, self.top_k
-                )
-                candidates = sorted(
-                    [self._candidate(mention, entity, score) for entity, score in retrieved],
-                    key=lambda item: item.final_score,
-                    reverse=True,
-                )
+                try:
+                    vector = (await self.embedding_provider.encode(
+                        [mention_embedding_text(mention, entity_type)]
+                    ))[0]
+                    retrieved = await self.graph_store.search_entities(
+                        vector, entity_type, self.top_k
+                    )
+                    candidates = [
+                        await self._apply_neighborhood_score(
+                            mention, self._candidate(mention, entity, score)
+                        )
+                        for entity, score in retrieved
+                    ]
+                    candidates = sorted(
+                        candidates,
+                        key=lambda item: item.final_score,
+                        reverse=True,
+                    )
+                except Exception:  # Provider and backend failures must route to review.
+                    reasons.append("embedding_retrieval_unavailable")
+                    candidates = [
+                        EntityCandidate(
+                            entity_id=item.id,
+                            retrieval_score=0.0,
+                            name_score=1.0,
+                            context_score=0.0,
+                            final_score=max(0.7, self.review_threshold),
+                            reasons=["ambiguous_exact_name_and_type"],
+                        )
+                        for item in exact_matches
+                    ]
+            elif len(exact_matches) > 1:
+                candidates = [
+                    EntityCandidate(
+                        entity_id=item.id,
+                        retrieval_score=1.0,
+                        name_score=1.0,
+                        context_score=0.0,
+                        final_score=0.7,
+                        reasons=["ambiguous_exact_name_and_type"],
+                    )
+                    for item in exact_matches
+                ]
 
             nil_entity = self._nil_entity(mention, entity_type)
             entities.setdefault(nil_entity.id, nil_entity)
@@ -337,17 +401,9 @@ class SemanticEntityResolver:
                         proposed_entity_id=nil_entity.id,
                     )
                 )
-            if nil_entity.id not in existing and vector is not None:
-                embeddings.append(
-                    EntityEmbedding(
-                        entity_id=nil_entity.id,
-                        model_fingerprint=self.embedding_provider.fingerprint(),
-                        text_hash=canonical_hash(mention_embedding_text(mention, entity_type)),
-                        dimension=len(vector),
-                        vector=vector,
-                    )
-                )
-            exact[(normalized, entity_type)] = nil_entity
+            values = exact.setdefault((normalized, entity_type), [])
+            if all(item.id != nil_entity.id for item in values):
+                values.append(nil_entity)
 
         return ResolutionBundle(
             entities=list(entities.values()),
@@ -355,5 +411,4 @@ class SemanticEntityResolver:
             review_reasons=review_reasons,
             decisions=decisions,
             review_tasks=review_tasks,
-            embeddings=embeddings,
         )

@@ -9,10 +9,23 @@ from urllib.parse import urlparse
 from prismke.core.errors import LegacyCheckpointError, ProviderConfigurationError
 from prismke.core.ids import canonical_hash, file_sha256, stable_id
 from prismke.core.settings import Settings
-from prismke.domain import ClaimStatus, ReviewDecision, WorkflowState, load_schema, utc_now
+from prismke.domain import (
+    CanonicalEntity,
+    ClaimStatus,
+    EntityCandidate,
+    EntityMention,
+    EntityReviewTask,
+    GraphRevision,
+    ReviewDecision,
+    WorkflowState,
+    load_schema,
+    utc_now,
+)
+from prismke.governance import EntityGovernanceService
 from prismke.parsing import ParserRegistry
 from prismke.persistence import (
     AuditLog,
+    EntityGovernanceRepository,
     FileEvidenceStore,
     JSONGraphStore,
     Neo4jGraphStore,
@@ -50,6 +63,9 @@ class PrismKEService:
         self.graph_store = graph_store or self._create_graph_store()
         self.evidence_store = FileEvidenceStore(self.settings.evidence_dir)
         self.audit = AuditLog(self.settings.audit_path)
+        self.entity_governance_repository = EntityGovernanceRepository(
+            self.settings.entity_governance_path
+        )
         self._ocr_providers: dict[str, OCRProvider] = {}
         self._embedding_provider: EmbeddingProvider | None = None
 
@@ -154,11 +170,113 @@ class PrismKEService:
                 batch_size=self.settings.embedding_batch_size,
                 max_tokens=self.settings.embedding_max_tokens,
                 cache_dir=self.settings.embedding_cache_dir,
+                model_cache_dir=self.settings.embedding_model_cache_dir,
+                allow_download=self.settings.embedding_allow_download,
             )
         else:
             raise ProviderConfigurationError(f"unknown embedding provider: {name}")
         self._embedding_provider = provider
         return provider
+
+    def entity_governance(self) -> EntityGovernanceService:
+        return EntityGovernanceService(
+            self.graph_store,
+            self.entity_governance_repository,
+            self.embedding_provider(),
+        )
+
+    async def search_entities(
+        self, query: str, entity_type: str, limit: int = 10
+    ) -> list[EntityCandidate]:
+        provider = self.embedding_provider()
+        if provider.fingerprint() == "embedding:disabled":
+            normalized = query.casefold().strip()
+            return [
+                EntityCandidate(
+                    entity_id=item.id,
+                    retrieval_score=1.0,
+                    name_score=1.0,
+                    context_score=0.0,
+                    final_score=1.0,
+                    reasons=["exact_name_match"],
+                )
+                for item in await self.graph_store.list_entities()
+                if item.active
+                and item.entity_type == entity_type
+                and normalized in {item.name.casefold(), *(a.casefold() for a in item.aliases)}
+            ][:limit]
+        vector = (await provider.encode([f"name: {query}\ntype: {entity_type}"]))[0]
+        matches = await self.graph_store.search_entities(vector, entity_type, limit)
+        return [
+            EntityCandidate(
+                entity_id=entity.id,
+                retrieval_score=score,
+                name_score=0.0,
+                context_score=max(0.0, min(1.0, (score + 1.0) / 2.0)),
+                final_score=max(0.0, min(1.0, (score + 1.0) / 2.0)),
+                reasons=["dense_retrieval"],
+            )
+            for entity, score in matches
+        ]
+
+    def list_entity_reviews(self, status: str | None = None) -> list[EntityReviewTask]:
+        workflow_tasks = [
+            task
+            for state in self.runs.list(limit=1000)
+            for task in state.entity_review_tasks
+            if status is None or task.status == status
+        ]
+        governance_tasks = self.entity_governance_repository.list_tasks(status)
+        return sorted(
+            [*workflow_tasks, *governance_tasks],
+            key=lambda item: item.created_at,
+            reverse=True,
+        )
+
+    async def propose_entity_merge(
+        self, source_entity_ids: list[str], target_entity_id: str, reasons: list[str]
+    ) -> EntityReviewTask:
+        return await self.entity_governance().propose_merge(
+            source_entity_ids, target_entity_id, reasons
+        )
+
+    async def propose_entity_split(
+        self,
+        source_entity_id: str,
+        target_entities: list[CanonicalEntity],
+        claim_assignments: dict[str, str],
+        reasons: list[str],
+    ) -> EntityReviewTask:
+        return await self.entity_governance().propose_split(
+            source_entity_id, target_entities, claim_assignments, reasons
+        )
+
+    async def review_entity_operation(
+        self, task_id: str, approve: bool, reviewer: str | None = None
+    ) -> GraphRevision | None:
+        result = await self.entity_governance().resolve_operation(task_id, approve, reviewer)
+        self.audit.record(
+            "entity_operation_review",
+            task_id,
+            {
+                "approved": approve,
+                "reviewer": reviewer,
+                "revision_id": result.id if result else None,
+            },
+        )
+        return result
+
+    async def entity_history(self, entity_id: str) -> list[GraphRevision]:
+        revisions = await self.graph_store.list_revisions(limit=10_000)
+        return [
+            item
+            for item in revisions
+            if entity_id in item.entity_ids
+            or any(
+                change.resource_type == "entity" and change.resource_id == entity_id
+                for change in item.changes
+            )
+        ]
 
     def _workflow(
         self,
@@ -276,12 +394,40 @@ class PrismKEService:
     def show_run(self, run_id: str) -> WorkflowState:
         return self.runs.load(run_id)
 
+    def _validated_run_providers(
+        self, state: WorkflowState
+    ) -> tuple[LLMProvider, OCRProvider, VLMProvider]:
+        provider = self.provider(state.provider_name)
+        ocr_provider = self.ocr_provider(state.ocr_provider_name)
+        vlm_provider = self.vlm_provider(state.vlm_provider_name)
+        embedding_provider = self.embedding_provider()
+        if state.provider_fingerprint == "legacy":
+            raise LegacyCheckpointError(
+                "this run uses an unsupported checkpoint format; rerun the input with v0.4"
+            )
+        if state.provider_fingerprint != provider.fingerprint():
+            raise ProviderConfigurationError("provider configuration changed since run creation")
+        if state.ocr_provider_fingerprint != ocr_provider.fingerprint():
+            raise ProviderConfigurationError(
+                "OCR provider configuration changed since run creation"
+            )
+        if state.vlm_provider_fingerprint != vlm_provider.fingerprint():
+            raise ProviderConfigurationError(
+                "VLM provider configuration changed since run creation"
+            )
+        if state.embedding_provider_fingerprint != embedding_provider.fingerprint():
+            raise ProviderConfigurationError(
+                "embedding provider configuration changed since run creation"
+            )
+        return provider, ocr_provider, vlm_provider
+
     async def review(self, run_id: str, claim_id: str, decision: ReviewDecision) -> WorkflowState:
         state = self.runs.load(run_id)
         if state.pipeline_version != PIPELINE_VERSION:
             raise LegacyCheckpointError(
-                "this run was created by an older pipeline and cannot be resumed with v0.3"
+                "this run was created by an older pipeline and cannot be resumed with v0.4"
             )
+        provider, ocr_provider, vlm_provider = self._validated_run_providers(state)
         claim = next((item for item in state.claims if item.id == claim_id), None)
         if claim is None:
             raise KeyError(f"claim not found: {claim_id}")
@@ -304,19 +450,6 @@ class PrismKEService:
             if any(item.status == "pending" for item in state.review_tasks)
             else "running"
         )
-        provider = self.provider(state.provider_name)
-        ocr_provider = self.ocr_provider(state.ocr_provider_name)
-        vlm_provider = self.vlm_provider(state.vlm_provider_name)
-        if state.provider_fingerprint not in ("legacy", provider.fingerprint()):
-            raise ProviderConfigurationError("provider configuration changed since run creation")
-        if state.ocr_provider_fingerprint != ocr_provider.fingerprint():
-            raise ProviderConfigurationError(
-                "OCR provider configuration changed since run creation"
-            )
-        if state.vlm_provider_fingerprint != vlm_provider.fingerprint():
-            raise ProviderConfigurationError(
-                "VLM provider configuration changed since run creation"
-            )
         if not await self._workflow(
             provider, ocr_provider, vlm_provider, state.allow_remote_assets
         ).record_review(state):
@@ -333,6 +466,11 @@ class PrismKEService:
         selected_entity_id: str | None = None,
     ) -> WorkflowState:
         state = self.runs.load(run_id)
+        if state.pipeline_version != PIPELINE_VERSION:
+            raise LegacyCheckpointError(
+                "this run was created by an older pipeline and cannot be resumed with v0.4"
+            )
+        provider, ocr_provider, vlm_provider = self._validated_run_providers(state)
         task = next((item for item in state.entity_review_tasks if item.id == task_id), None)
         if task is None or task.mention_id is None:
             raise KeyError(f"entity review task not found: {task_id}")
@@ -348,6 +486,16 @@ class PrismKEService:
             target_id = task.proposed_entity_id
             if target_id is None:
                 raise ValueError("review task does not contain a proposed entity")
+        else:
+            state.candidates = [
+                candidate
+                for candidate in state.candidates
+                if candidate.subject.id != task.mention_id
+                and not (
+                    isinstance(candidate.object, EntityMention)
+                    and candidate.object.id == task.mention_id
+                )
+            ]
         task.status = "resolved"
         task.decision = decision
         task.selected_entity_id = target_id
@@ -370,9 +518,9 @@ class PrismKEService:
             },
         )
         if not await self._workflow(
-            self.provider(state.provider_name),
-            self.ocr_provider(state.ocr_provider_name),
-            self.vlm_provider(state.vlm_provider_name),
+            provider,
+            ocr_provider,
+            vlm_provider,
             state.allow_remote_assets,
         ).record_entity_review(state):
             raise LegacyCheckpointError("entity review checkpoint is unavailable; rerun the input")
@@ -382,25 +530,9 @@ class PrismKEService:
         state = self.runs.load(run_id)
         if state.pipeline_version != PIPELINE_VERSION:
             raise LegacyCheckpointError(
-                "this run was created by an older pipeline and cannot be resumed with v0.3"
+                "this run was created by an older pipeline and cannot be resumed with v0.4"
             )
-        provider = self.provider(state.provider_name)
-        ocr_provider = self.ocr_provider(state.ocr_provider_name)
-        vlm_provider = self.vlm_provider(state.vlm_provider_name)
-        if state.provider_fingerprint == "legacy":
-            raise LegacyCheckpointError(
-                "this run uses the v0.1 checkpoint format; rerun the input with v0.1.1"
-            )
-        if state.provider_fingerprint != provider.fingerprint():
-            raise ProviderConfigurationError("provider configuration changed since run creation")
-        if state.ocr_provider_fingerprint != ocr_provider.fingerprint():
-            raise ProviderConfigurationError(
-                "OCR provider configuration changed since run creation"
-            )
-        if state.vlm_provider_fingerprint != vlm_provider.fingerprint():
-            raise ProviderConfigurationError(
-                "VLM provider configuration changed since run creation"
-            )
+        provider, ocr_provider, vlm_provider = self._validated_run_providers(state)
         state.status = "running"
         result = await self._workflow(
             provider, ocr_provider, vlm_provider, state.allow_remote_assets

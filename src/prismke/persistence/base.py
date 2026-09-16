@@ -8,6 +8,7 @@ from prismke.domain import (
     CanonicalEntity,
     Claim,
     DocumentIR,
+    EntityEmbedding,
     EvidenceRef,
     GraphCommit,
     GraphHealth,
@@ -30,6 +31,10 @@ class GraphStore(Protocol):
         entity_type: str,
         top_k: int,
     ) -> list[tuple[CanonicalEntity, float]]: ...
+
+    async def list_entity_embeddings(self) -> list[EntityEmbedding]: ...
+
+    async def upsert_entity_embeddings(self, embeddings: list[EntityEmbedding]) -> None: ...
 
     async def list_claims(self) -> list[Claim]: ...
 

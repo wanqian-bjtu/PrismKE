@@ -19,7 +19,6 @@ from prismke.domain.knowledge import (
     CanonicalEntity,
     Claim,
     ConflictSet,
-    EntityEmbedding,
     EntityResolutionDecision,
     EntityReviewTask,
     GraphCommit,
@@ -117,7 +116,6 @@ class WorkflowState(BaseModel):
     mention_to_entity: dict[str, str] = Field(default_factory=dict)
     entity_resolution_decisions: list[EntityResolutionDecision] = Field(default_factory=list)
     entity_review_tasks: list[EntityReviewTask] = Field(default_factory=list)
-    entity_embeddings: list[EntityEmbedding] = Field(default_factory=list)
     claims: list[Claim] = Field(default_factory=list)
     conflicts: list[ConflictSet] = Field(default_factory=list)
     review_tasks: list[ReviewTask] = Field(default_factory=list)

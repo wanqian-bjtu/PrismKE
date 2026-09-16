@@ -1,0 +1,1081 @@
+{
+  "version": "0.4.0",
+  "description": "Synthetic public benchmark for semantic entity resolution and governance",
+  "group_count": 60,
+  "entities": [
+    {
+      "id": "entity:alias:01",
+      "name": "OpenAI",
+      "entity_type": "Organization",
+      "aliases": [
+        "开放人工智能研究中心"
+      ]
+    },
+    {
+      "id": "entity:alias:02",
+      "name": "Microsoft",
+      "entity_type": "Organization",
+      "aliases": [
+        "微软"
+      ]
+    },
+    {
+      "id": "entity:alias:03",
+      "name": "Google",
+      "entity_type": "Organization",
+      "aliases": [
+        "谷歌"
+      ]
+    },
+    {
+      "id": "entity:alias:04",
+      "name": "Amazon",
+      "entity_type": "Organization",
+      "aliases": [
+        "亚马逊"
+      ]
+    },
+    {
+      "id": "entity:alias:05",
+      "name": "Apple",
+      "entity_type": "Organization",
+      "aliases": [
+        "苹果公司"
+      ]
+    },
+    {
+      "id": "entity:alias:06",
+      "name": "NVIDIA",
+      "entity_type": "Organization",
+      "aliases": [
+        "英伟达"
+      ]
+    },
+    {
+      "id": "entity:alias:07",
+      "name": "Alibaba Cloud",
+      "entity_type": "Organization",
+      "aliases": [
+        "阿里云"
+      ]
+    },
+    {
+      "id": "entity:alias:08",
+      "name": "Tencent",
+      "entity_type": "Organization",
+      "aliases": [
+        "腾讯"
+      ]
+    },
+    {
+      "id": "entity:alias:09",
+      "name": "Baidu",
+      "entity_type": "Organization",
+      "aliases": [
+        "百度"
+      ]
+    },
+    {
+      "id": "entity:alias:10",
+      "name": "ByteDance",
+      "entity_type": "Organization",
+      "aliases": [
+        "字节跳动"
+      ]
+    },
+    {
+      "id": "entity:alias:11",
+      "name": "Neo4j",
+      "entity_type": "Software",
+      "aliases": [
+        "Neo4j 图数据库"
+      ]
+    },
+    {
+      "id": "entity:alias:12",
+      "name": "PrismKE",
+      "entity_type": "Software",
+      "aliases": [
+        "棱镜知识抽取"
+      ]
+    },
+    {
+      "id": "entity:alias:13",
+      "name": "LangGraph",
+      "entity_type": "Software",
+      "aliases": [
+        "LangGraph 工作流"
+      ]
+    },
+    {
+      "id": "entity:alias:14",
+      "name": "PaddleOCR",
+      "entity_type": "Software",
+      "aliases": [
+        "飞桨文字识别"
+      ]
+    },
+    {
+      "id": "entity:alias:15",
+      "name": "BGE-M3",
+      "entity_type": "Software",
+      "aliases": [
+        "BGE 多语言嵌入模型"
+      ]
+    },
+    {
+      "id": "entity:alias:16",
+      "name": "Qwen",
+      "entity_type": "Software",
+      "aliases": [
+        "通义千问"
+      ]
+    },
+    {
+      "id": "entity:alias:17",
+      "name": "PyTorch",
+      "entity_type": "Software",
+      "aliases": [
+        "PyTorch 深度学习框架"
+      ]
+    },
+    {
+      "id": "entity:alias:18",
+      "name": "FastAPI",
+      "entity_type": "Software",
+      "aliases": [
+        "FastAPI 接口框架"
+      ]
+    },
+    {
+      "id": "entity:alias:19",
+      "name": "Gradio",
+      "entity_type": "Software",
+      "aliases": [
+        "Gradio 交互界面"
+      ]
+    },
+    {
+      "id": "entity:alias:20",
+      "name": "Docker",
+      "entity_type": "Software",
+      "aliases": [
+        "Docker 容器"
+      ]
+    },
+    {
+      "id": "entity:homonym:01:cloud",
+      "name": "Aurora 1",
+      "entity_type": "Organization",
+      "context_summary": "cloud computing and distributed databases"
+    },
+    {
+      "id": "entity:homonym:01:health",
+      "name": "Aurora 1",
+      "entity_type": "Organization",
+      "context_summary": "clinical medicine and public health research"
+    },
+    {
+      "id": "entity:homonym:02:cloud",
+      "name": "Aurora 2",
+      "entity_type": "Organization",
+      "context_summary": "cloud computing and distributed databases"
+    },
+    {
+      "id": "entity:homonym:02:health",
+      "name": "Aurora 2",
+      "entity_type": "Organization",
+      "context_summary": "clinical medicine and public health research"
+    },
+    {
+      "id": "entity:homonym:03:cloud",
+      "name": "Aurora 3",
+      "entity_type": "Organization",
+      "context_summary": "cloud computing and distributed databases"
+    },
+    {
+      "id": "entity:homonym:03:health",
+      "name": "Aurora 3",
+      "entity_type": "Organization",
+      "context_summary": "clinical medicine and public health research"
+    },
+    {
+      "id": "entity:homonym:04:cloud",
+      "name": "Aurora 4",
+      "entity_type": "Organization",
+      "context_summary": "cloud computing and distributed databases"
+    },
+    {
+      "id": "entity:homonym:04:health",
+      "name": "Aurora 4",
+      "entity_type": "Organization",
+      "context_summary": "clinical medicine and public health research"
+    },
+    {
+      "id": "entity:homonym:05:cloud",
+      "name": "Aurora 5",
+      "entity_type": "Organization",
+      "context_summary": "cloud computing and distributed databases"
+    },
+    {
+      "id": "entity:homonym:05:health",
+      "name": "Aurora 5",
+      "entity_type": "Organization",
+      "context_summary": "clinical medicine and public health research"
+    },
+    {
+      "id": "entity:homonym:06:cloud",
+      "name": "Aurora 6",
+      "entity_type": "Organization",
+      "context_summary": "cloud computing and distributed databases"
+    },
+    {
+      "id": "entity:homonym:06:health",
+      "name": "Aurora 6",
+      "entity_type": "Organization",
+      "context_summary": "clinical medicine and public health research"
+    },
+    {
+      "id": "entity:homonym:07:cloud",
+      "name": "Aurora 7",
+      "entity_type": "Organization",
+      "context_summary": "cloud computing and distributed databases"
+    },
+    {
+      "id": "entity:homonym:07:health",
+      "name": "Aurora 7",
+      "entity_type": "Organization",
+      "context_summary": "clinical medicine and public health research"
+    },
+    {
+      "id": "entity:homonym:08:cloud",
+      "name": "Aurora 8",
+      "entity_type": "Organization",
+      "context_summary": "cloud computing and distributed databases"
+    },
+    {
+      "id": "entity:homonym:08:health",
+      "name": "Aurora 8",
+      "entity_type": "Organization",
+      "context_summary": "clinical medicine and public health research"
+    },
+    {
+      "id": "entity:homonym:09:cloud",
+      "name": "Aurora 9",
+      "entity_type": "Organization",
+      "context_summary": "cloud computing and distributed databases"
+    },
+    {
+      "id": "entity:homonym:09:health",
+      "name": "Aurora 9",
+      "entity_type": "Organization",
+      "context_summary": "clinical medicine and public health research"
+    },
+    {
+      "id": "entity:homonym:10:cloud",
+      "name": "Aurora 10",
+      "entity_type": "Organization",
+      "context_summary": "cloud computing and distributed databases"
+    },
+    {
+      "id": "entity:homonym:10:health",
+      "name": "Aurora 10",
+      "entity_type": "Organization",
+      "context_summary": "clinical medicine and public health research"
+    },
+    {
+      "id": "entity:homonym:11:cloud",
+      "name": "Aurora 11",
+      "entity_type": "Organization",
+      "context_summary": "cloud computing and distributed databases"
+    },
+    {
+      "id": "entity:homonym:11:health",
+      "name": "Aurora 11",
+      "entity_type": "Organization",
+      "context_summary": "clinical medicine and public health research"
+    },
+    {
+      "id": "entity:homonym:12:cloud",
+      "name": "Aurora 12",
+      "entity_type": "Organization",
+      "context_summary": "cloud computing and distributed databases"
+    },
+    {
+      "id": "entity:homonym:12:health",
+      "name": "Aurora 12",
+      "entity_type": "Organization",
+      "context_summary": "clinical medicine and public health research"
+    },
+    {
+      "id": "entity:homonym:13:cloud",
+      "name": "Aurora 13",
+      "entity_type": "Organization",
+      "context_summary": "cloud computing and distributed databases"
+    },
+    {
+      "id": "entity:homonym:13:health",
+      "name": "Aurora 13",
+      "entity_type": "Organization",
+      "context_summary": "clinical medicine and public health research"
+    },
+    {
+      "id": "entity:homonym:14:cloud",
+      "name": "Aurora 14",
+      "entity_type": "Organization",
+      "context_summary": "cloud computing and distributed databases"
+    },
+    {
+      "id": "entity:homonym:14:health",
+      "name": "Aurora 14",
+      "entity_type": "Organization",
+      "context_summary": "clinical medicine and public health research"
+    },
+    {
+      "id": "entity:homonym:15:cloud",
+      "name": "Aurora 15",
+      "entity_type": "Organization",
+      "context_summary": "cloud computing and distributed databases"
+    },
+    {
+      "id": "entity:homonym:15:health",
+      "name": "Aurora 15",
+      "entity_type": "Organization",
+      "context_summary": "clinical medicine and public health research"
+    },
+    {
+      "id": "entity:dedup:01",
+      "name": "Northstar Labs 1",
+      "entity_type": "Organization",
+      "aliases": [
+        "Northstar 1",
+        "北星实验室1"
+      ]
+    },
+    {
+      "id": "entity:dedup:02",
+      "name": "Northstar Labs 2",
+      "entity_type": "Organization",
+      "aliases": [
+        "Northstar 2",
+        "北星实验室2"
+      ]
+    },
+    {
+      "id": "entity:dedup:03",
+      "name": "Northstar Labs 3",
+      "entity_type": "Organization",
+      "aliases": [
+        "Northstar 3",
+        "北星实验室3"
+      ]
+    },
+    {
+      "id": "entity:dedup:04",
+      "name": "Northstar Labs 4",
+      "entity_type": "Organization",
+      "aliases": [
+        "Northstar 4",
+        "北星实验室4"
+      ]
+    },
+    {
+      "id": "entity:dedup:05",
+      "name": "Northstar Labs 5",
+      "entity_type": "Organization",
+      "aliases": [
+        "Northstar 5",
+        "北星实验室5"
+      ]
+    },
+    {
+      "id": "entity:dedup:06",
+      "name": "Northstar Labs 6",
+      "entity_type": "Organization",
+      "aliases": [
+        "Northstar 6",
+        "北星实验室6"
+      ]
+    },
+    {
+      "id": "entity:dedup:07",
+      "name": "Northstar Labs 7",
+      "entity_type": "Organization",
+      "aliases": [
+        "Northstar 7",
+        "北星实验室7"
+      ]
+    },
+    {
+      "id": "entity:dedup:08",
+      "name": "Northstar Labs 8",
+      "entity_type": "Organization",
+      "aliases": [
+        "Northstar 8",
+        "北星实验室8"
+      ]
+    },
+    {
+      "id": "entity:dedup:09",
+      "name": "Northstar Labs 9",
+      "entity_type": "Organization",
+      "aliases": [
+        "Northstar 9",
+        "北星实验室9"
+      ]
+    },
+    {
+      "id": "entity:dedup:10",
+      "name": "Northstar Labs 10",
+      "entity_type": "Organization",
+      "aliases": [
+        "Northstar 10",
+        "北星实验室10"
+      ]
+    }
+  ],
+  "mentions": [
+    {
+      "id": "mention:alias:01",
+      "name": "开放人工智能研究中心",
+      "entity_type": "Organization",
+      "context": "开放人工智能研究中心 在文档中指向 OpenAI",
+      "expected_entity_id": "entity:alias:01",
+      "cluster_id": "entity:alias:01",
+      "category": "bilingual_alias"
+    },
+    {
+      "id": "mention:alias:02",
+      "name": "微软",
+      "entity_type": "Organization",
+      "context": "微软 在文档中指向 Microsoft",
+      "expected_entity_id": "entity:alias:02",
+      "cluster_id": "entity:alias:02",
+      "category": "bilingual_alias"
+    },
+    {
+      "id": "mention:alias:03",
+      "name": "谷歌",
+      "entity_type": "Organization",
+      "context": "谷歌 在文档中指向 Google",
+      "expected_entity_id": "entity:alias:03",
+      "cluster_id": "entity:alias:03",
+      "category": "bilingual_alias"
+    },
+    {
+      "id": "mention:alias:04",
+      "name": "亚马逊",
+      "entity_type": "Organization",
+      "context": "亚马逊 在文档中指向 Amazon",
+      "expected_entity_id": "entity:alias:04",
+      "cluster_id": "entity:alias:04",
+      "category": "bilingual_alias"
+    },
+    {
+      "id": "mention:alias:05",
+      "name": "苹果公司",
+      "entity_type": "Organization",
+      "context": "苹果公司 在文档中指向 Apple",
+      "expected_entity_id": "entity:alias:05",
+      "cluster_id": "entity:alias:05",
+      "category": "bilingual_alias"
+    },
+    {
+      "id": "mention:alias:06",
+      "name": "英伟达",
+      "entity_type": "Organization",
+      "context": "英伟达 在文档中指向 NVIDIA",
+      "expected_entity_id": "entity:alias:06",
+      "cluster_id": "entity:alias:06",
+      "category": "bilingual_alias"
+    },
+    {
+      "id": "mention:alias:07",
+      "name": "阿里云",
+      "entity_type": "Organization",
+      "context": "阿里云 在文档中指向 Alibaba Cloud",
+      "expected_entity_id": "entity:alias:07",
+      "cluster_id": "entity:alias:07",
+      "category": "bilingual_alias"
+    },
+    {
+      "id": "mention:alias:08",
+      "name": "腾讯",
+      "entity_type": "Organization",
+      "context": "腾讯 在文档中指向 Tencent",
+      "expected_entity_id": "entity:alias:08",
+      "cluster_id": "entity:alias:08",
+      "category": "bilingual_alias"
+    },
+    {
+      "id": "mention:alias:09",
+      "name": "百度",
+      "entity_type": "Organization",
+      "context": "百度 在文档中指向 Baidu",
+      "expected_entity_id": "entity:alias:09",
+      "cluster_id": "entity:alias:09",
+      "category": "bilingual_alias"
+    },
+    {
+      "id": "mention:alias:10",
+      "name": "字节跳动",
+      "entity_type": "Organization",
+      "context": "字节跳动 在文档中指向 ByteDance",
+      "expected_entity_id": "entity:alias:10",
+      "cluster_id": "entity:alias:10",
+      "category": "bilingual_alias"
+    },
+    {
+      "id": "mention:alias:11",
+      "name": "Neo4j 图数据库",
+      "entity_type": "Software",
+      "context": "Neo4j 图数据库 在文档中指向 Neo4j",
+      "expected_entity_id": "entity:alias:11",
+      "cluster_id": "entity:alias:11",
+      "category": "bilingual_alias"
+    },
+    {
+      "id": "mention:alias:12",
+      "name": "棱镜知识抽取",
+      "entity_type": "Software",
+      "context": "棱镜知识抽取 在文档中指向 PrismKE",
+      "expected_entity_id": "entity:alias:12",
+      "cluster_id": "entity:alias:12",
+      "category": "bilingual_alias"
+    },
+    {
+      "id": "mention:alias:13",
+      "name": "LangGraph 工作流",
+      "entity_type": "Software",
+      "context": "LangGraph 工作流 在文档中指向 LangGraph",
+      "expected_entity_id": "entity:alias:13",
+      "cluster_id": "entity:alias:13",
+      "category": "bilingual_alias"
+    },
+    {
+      "id": "mention:alias:14",
+      "name": "飞桨文字识别",
+      "entity_type": "Software",
+      "context": "飞桨文字识别 在文档中指向 PaddleOCR",
+      "expected_entity_id": "entity:alias:14",
+      "cluster_id": "entity:alias:14",
+      "category": "bilingual_alias"
+    },
+    {
+      "id": "mention:alias:15",
+      "name": "BGE 多语言嵌入模型",
+      "entity_type": "Software",
+      "context": "BGE 多语言嵌入模型 在文档中指向 BGE-M3",
+      "expected_entity_id": "entity:alias:15",
+      "cluster_id": "entity:alias:15",
+      "category": "bilingual_alias"
+    },
+    {
+      "id": "mention:alias:16",
+      "name": "通义千问",
+      "entity_type": "Software",
+      "context": "通义千问 在文档中指向 Qwen",
+      "expected_entity_id": "entity:alias:16",
+      "cluster_id": "entity:alias:16",
+      "category": "bilingual_alias"
+    },
+    {
+      "id": "mention:alias:17",
+      "name": "PyTorch 深度学习框架",
+      "entity_type": "Software",
+      "context": "PyTorch 深度学习框架 在文档中指向 PyTorch",
+      "expected_entity_id": "entity:alias:17",
+      "cluster_id": "entity:alias:17",
+      "category": "bilingual_alias"
+    },
+    {
+      "id": "mention:alias:18",
+      "name": "FastAPI 接口框架",
+      "entity_type": "Software",
+      "context": "FastAPI 接口框架 在文档中指向 FastAPI",
+      "expected_entity_id": "entity:alias:18",
+      "cluster_id": "entity:alias:18",
+      "category": "bilingual_alias"
+    },
+    {
+      "id": "mention:alias:19",
+      "name": "Gradio 交互界面",
+      "entity_type": "Software",
+      "context": "Gradio 交互界面 在文档中指向 Gradio",
+      "expected_entity_id": "entity:alias:19",
+      "cluster_id": "entity:alias:19",
+      "category": "bilingual_alias"
+    },
+    {
+      "id": "mention:alias:20",
+      "name": "Docker 容器",
+      "entity_type": "Software",
+      "context": "Docker 容器 在文档中指向 Docker",
+      "expected_entity_id": "entity:alias:20",
+      "cluster_id": "entity:alias:20",
+      "category": "bilingual_alias"
+    },
+    {
+      "id": "mention:homonym:01",
+      "name": "Aurora 1",
+      "entity_type": "Organization",
+      "context": "The company provides cloud database infrastructure.",
+      "expected_entity_id": "entity:homonym:01:cloud",
+      "cluster_id": "entity:homonym:01:cloud",
+      "category": "same_name_context"
+    },
+    {
+      "id": "mention:homonym:02",
+      "name": "Aurora 2",
+      "entity_type": "Organization",
+      "context": "The company provides cloud database infrastructure.",
+      "expected_entity_id": "entity:homonym:02:cloud",
+      "cluster_id": "entity:homonym:02:cloud",
+      "category": "same_name_context"
+    },
+    {
+      "id": "mention:homonym:03",
+      "name": "Aurora 3",
+      "entity_type": "Organization",
+      "context": "The company provides cloud database infrastructure.",
+      "expected_entity_id": "entity:homonym:03:cloud",
+      "cluster_id": "entity:homonym:03:cloud",
+      "category": "same_name_context"
+    },
+    {
+      "id": "mention:homonym:04",
+      "name": "Aurora 4",
+      "entity_type": "Organization",
+      "context": "The company provides cloud database infrastructure.",
+      "expected_entity_id": "entity:homonym:04:cloud",
+      "cluster_id": "entity:homonym:04:cloud",
+      "category": "same_name_context"
+    },
+    {
+      "id": "mention:homonym:05",
+      "name": "Aurora 5",
+      "entity_type": "Organization",
+      "context": "The company provides cloud database infrastructure.",
+      "expected_entity_id": "entity:homonym:05:cloud",
+      "cluster_id": "entity:homonym:05:cloud",
+      "category": "same_name_context"
+    },
+    {
+      "id": "mention:homonym:06",
+      "name": "Aurora 6",
+      "entity_type": "Organization",
+      "context": "The company provides cloud database infrastructure.",
+      "expected_entity_id": "entity:homonym:06:cloud",
+      "cluster_id": "entity:homonym:06:cloud",
+      "category": "same_name_context"
+    },
+    {
+      "id": "mention:homonym:07",
+      "name": "Aurora 7",
+      "entity_type": "Organization",
+      "context": "The company provides cloud database infrastructure.",
+      "expected_entity_id": "entity:homonym:07:cloud",
+      "cluster_id": "entity:homonym:07:cloud",
+      "category": "same_name_context"
+    },
+    {
+      "id": "mention:homonym:08",
+      "name": "Aurora 8",
+      "entity_type": "Organization",
+      "context": "The company provides cloud database infrastructure.",
+      "expected_entity_id": "entity:homonym:08:cloud",
+      "cluster_id": "entity:homonym:08:cloud",
+      "category": "same_name_context"
+    },
+    {
+      "id": "mention:homonym:09",
+      "name": "Aurora 9",
+      "entity_type": "Organization",
+      "context": "The company provides cloud database infrastructure.",
+      "expected_entity_id": "entity:homonym:09:cloud",
+      "cluster_id": "entity:homonym:09:cloud",
+      "category": "same_name_context"
+    },
+    {
+      "id": "mention:homonym:10",
+      "name": "Aurora 10",
+      "entity_type": "Organization",
+      "context": "The company provides cloud database infrastructure.",
+      "expected_entity_id": "entity:homonym:10:cloud",
+      "cluster_id": "entity:homonym:10:cloud",
+      "category": "same_name_context"
+    },
+    {
+      "id": "mention:homonym:11",
+      "name": "Aurora 11",
+      "entity_type": "Organization",
+      "context": "The company provides cloud database infrastructure.",
+      "expected_entity_id": "entity:homonym:11:cloud",
+      "cluster_id": "entity:homonym:11:cloud",
+      "category": "same_name_context"
+    },
+    {
+      "id": "mention:homonym:12",
+      "name": "Aurora 12",
+      "entity_type": "Organization",
+      "context": "The company provides cloud database infrastructure.",
+      "expected_entity_id": "entity:homonym:12:cloud",
+      "cluster_id": "entity:homonym:12:cloud",
+      "category": "same_name_context"
+    },
+    {
+      "id": "mention:homonym:13",
+      "name": "Aurora 13",
+      "entity_type": "Organization",
+      "context": "The company provides cloud database infrastructure.",
+      "expected_entity_id": "entity:homonym:13:cloud",
+      "cluster_id": "entity:homonym:13:cloud",
+      "category": "same_name_context"
+    },
+    {
+      "id": "mention:homonym:14",
+      "name": "Aurora 14",
+      "entity_type": "Organization",
+      "context": "The company provides cloud database infrastructure.",
+      "expected_entity_id": "entity:homonym:14:cloud",
+      "cluster_id": "entity:homonym:14:cloud",
+      "category": "same_name_context"
+    },
+    {
+      "id": "mention:homonym:15",
+      "name": "Aurora 15",
+      "entity_type": "Organization",
+      "context": "The company provides cloud database infrastructure.",
+      "expected_entity_id": "entity:homonym:15:cloud",
+      "cluster_id": "entity:homonym:15:cloud",
+      "category": "same_name_context"
+    },
+    {
+      "id": "mention:dedup:01",
+      "name": "北星实验室1",
+      "entity_type": "Organization",
+      "context": "跨文档别名实体",
+      "expected_entity_id": "entity:dedup:01",
+      "cluster_id": "entity:dedup:01",
+      "category": "cross_document_duplicate"
+    },
+    {
+      "id": "mention:dedup:01:second-document",
+      "name": "Northstar 1",
+      "entity_type": "Organization",
+      "context": "The same organization appears in a second document.",
+      "expected_entity_id": "entity:dedup:01",
+      "cluster_id": "entity:dedup:01",
+      "category": "cross_document_duplicate"
+    },
+    {
+      "id": "mention:dedup:02",
+      "name": "北星实验室2",
+      "entity_type": "Organization",
+      "context": "跨文档别名实体",
+      "expected_entity_id": "entity:dedup:02",
+      "cluster_id": "entity:dedup:02",
+      "category": "cross_document_duplicate"
+    },
+    {
+      "id": "mention:dedup:02:second-document",
+      "name": "Northstar 2",
+      "entity_type": "Organization",
+      "context": "The same organization appears in a second document.",
+      "expected_entity_id": "entity:dedup:02",
+      "cluster_id": "entity:dedup:02",
+      "category": "cross_document_duplicate"
+    },
+    {
+      "id": "mention:dedup:03",
+      "name": "北星实验室3",
+      "entity_type": "Organization",
+      "context": "跨文档别名实体",
+      "expected_entity_id": "entity:dedup:03",
+      "cluster_id": "entity:dedup:03",
+      "category": "cross_document_duplicate"
+    },
+    {
+      "id": "mention:dedup:03:second-document",
+      "name": "Northstar 3",
+      "entity_type": "Organization",
+      "context": "The same organization appears in a second document.",
+      "expected_entity_id": "entity:dedup:03",
+      "cluster_id": "entity:dedup:03",
+      "category": "cross_document_duplicate"
+    },
+    {
+      "id": "mention:dedup:04",
+      "name": "北星实验室4",
+      "entity_type": "Organization",
+      "context": "跨文档别名实体",
+      "expected_entity_id": "entity:dedup:04",
+      "cluster_id": "entity:dedup:04",
+      "category": "cross_document_duplicate"
+    },
+    {
+      "id": "mention:dedup:04:second-document",
+      "name": "Northstar 4",
+      "entity_type": "Organization",
+      "context": "The same organization appears in a second document.",
+      "expected_entity_id": "entity:dedup:04",
+      "cluster_id": "entity:dedup:04",
+      "category": "cross_document_duplicate"
+    },
+    {
+      "id": "mention:dedup:05",
+      "name": "北星实验室5",
+      "entity_type": "Organization",
+      "context": "跨文档别名实体",
+      "expected_entity_id": "entity:dedup:05",
+      "cluster_id": "entity:dedup:05",
+      "category": "cross_document_duplicate"
+    },
+    {
+      "id": "mention:dedup:05:second-document",
+      "name": "Northstar 5",
+      "entity_type": "Organization",
+      "context": "The same organization appears in a second document.",
+      "expected_entity_id": "entity:dedup:05",
+      "cluster_id": "entity:dedup:05",
+      "category": "cross_document_duplicate"
+    },
+    {
+      "id": "mention:dedup:06",
+      "name": "北星实验室6",
+      "entity_type": "Organization",
+      "context": "跨文档别名实体",
+      "expected_entity_id": "entity:dedup:06",
+      "cluster_id": "entity:dedup:06",
+      "category": "cross_document_duplicate"
+    },
+    {
+      "id": "mention:dedup:06:second-document",
+      "name": "Northstar 6",
+      "entity_type": "Organization",
+      "context": "The same organization appears in a second document.",
+      "expected_entity_id": "entity:dedup:06",
+      "cluster_id": "entity:dedup:06",
+      "category": "cross_document_duplicate"
+    },
+    {
+      "id": "mention:dedup:07",
+      "name": "北星实验室7",
+      "entity_type": "Organization",
+      "context": "跨文档别名实体",
+      "expected_entity_id": "entity:dedup:07",
+      "cluster_id": "entity:dedup:07",
+      "category": "cross_document_duplicate"
+    },
+    {
+      "id": "mention:dedup:07:second-document",
+      "name": "Northstar 7",
+      "entity_type": "Organization",
+      "context": "The same organization appears in a second document.",
+      "expected_entity_id": "entity:dedup:07",
+      "cluster_id": "entity:dedup:07",
+      "category": "cross_document_duplicate"
+    },
+    {
+      "id": "mention:dedup:08",
+      "name": "北星实验室8",
+      "entity_type": "Organization",
+      "context": "跨文档别名实体",
+      "expected_entity_id": "entity:dedup:08",
+      "cluster_id": "entity:dedup:08",
+      "category": "cross_document_duplicate"
+    },
+    {
+      "id": "mention:dedup:08:second-document",
+      "name": "Northstar 8",
+      "entity_type": "Organization",
+      "context": "The same organization appears in a second document.",
+      "expected_entity_id": "entity:dedup:08",
+      "cluster_id": "entity:dedup:08",
+      "category": "cross_document_duplicate"
+    },
+    {
+      "id": "mention:dedup:09",
+      "name": "北星实验室9",
+      "entity_type": "Organization",
+      "context": "跨文档别名实体",
+      "expected_entity_id": "entity:dedup:09",
+      "cluster_id": "entity:dedup:09",
+      "category": "cross_document_duplicate"
+    },
+    {
+      "id": "mention:dedup:09:second-document",
+      "name": "Northstar 9",
+      "entity_type": "Organization",
+      "context": "The same organization appears in a second document.",
+      "expected_entity_id": "entity:dedup:09",
+      "cluster_id": "entity:dedup:09",
+      "category": "cross_document_duplicate"
+    },
+    {
+      "id": "mention:dedup:10",
+      "name": "北星实验室10",
+      "entity_type": "Organization",
+      "context": "跨文档别名实体",
+      "expected_entity_id": "entity:dedup:10",
+      "cluster_id": "entity:dedup:10",
+      "category": "cross_document_duplicate"
+    },
+    {
+      "id": "mention:dedup:10:second-document",
+      "name": "Northstar 10",
+      "entity_type": "Organization",
+      "context": "The same organization appears in a second document.",
+      "expected_entity_id": "entity:dedup:10",
+      "cluster_id": "entity:dedup:10",
+      "category": "cross_document_duplicate"
+    },
+    {
+      "id": "mention:nil:01",
+      "name": "Unseen Entity 1",
+      "entity_type": "Organization",
+      "context": "A newly introduced organization without a graph record.",
+      "expected_entity_id": null,
+      "cluster_id": "nil:01",
+      "category": "nil"
+    },
+    {
+      "id": "mention:nil:02",
+      "name": "Unseen Entity 2",
+      "entity_type": "Organization",
+      "context": "A newly introduced organization without a graph record.",
+      "expected_entity_id": null,
+      "cluster_id": "nil:02",
+      "category": "nil"
+    },
+    {
+      "id": "mention:nil:03",
+      "name": "Unseen Entity 3",
+      "entity_type": "Organization",
+      "context": "A newly introduced organization without a graph record.",
+      "expected_entity_id": null,
+      "cluster_id": "nil:03",
+      "category": "nil"
+    },
+    {
+      "id": "mention:nil:04",
+      "name": "Unseen Entity 4",
+      "entity_type": "Organization",
+      "context": "A newly introduced organization without a graph record.",
+      "expected_entity_id": null,
+      "cluster_id": "nil:04",
+      "category": "nil"
+    },
+    {
+      "id": "mention:nil:05",
+      "name": "Unseen Entity 5",
+      "entity_type": "Organization",
+      "context": "A newly introduced organization without a graph record.",
+      "expected_entity_id": null,
+      "cluster_id": "nil:05",
+      "category": "nil"
+    }
+  ],
+  "governance": [
+    {
+      "id": "merge:01",
+      "category": "merge",
+      "source_entity_ids": [
+        "entity:merge:01:a",
+        "entity:merge:01:b"
+      ],
+      "target_entity_id": "entity:merge:01:a",
+      "expected_review": true
+    },
+    {
+      "id": "split:01",
+      "category": "split",
+      "source_entity_id": "entity:split:01:source",
+      "target_entity_ids": [
+        "entity:split:01:a",
+        "entity:split:01:b"
+      ],
+      "expected_review": true
+    },
+    {
+      "id": "merge:02",
+      "category": "merge",
+      "source_entity_ids": [
+        "entity:merge:02:a",
+        "entity:merge:02:b"
+      ],
+      "target_entity_id": "entity:merge:02:a",
+      "expected_review": true
+    },
+    {
+      "id": "split:02",
+      "category": "split",
+      "source_entity_id": "entity:split:02:source",
+      "target_entity_ids": [
+        "entity:split:02:a",
+        "entity:split:02:b"
+      ],
+      "expected_review": true
+    },
+    {
+      "id": "merge:03",
+      "category": "merge",
+      "source_entity_ids": [
+        "entity:merge:03:a",
+        "entity:merge:03:b"
+      ],
+      "target_entity_id": "entity:merge:03:a",
+      "expected_review": true
+    },
+    {
+      "id": "split:03",
+      "category": "split",
+      "source_entity_id": "entity:split:03:source",
+      "target_entity_ids": [
+        "entity:split:03:a",
+        "entity:split:03:b"
+      ],
+      "expected_review": true
+    },
+    {
+      "id": "merge:04",
+      "category": "merge",
+      "source_entity_ids": [
+        "entity:merge:04:a",
+        "entity:merge:04:b"
+      ],
+      "target_entity_id": "entity:merge:04:a",
+      "expected_review": true
+    },
+    {
+      "id": "split:04",
+      "category": "split",
+      "source_entity_id": "entity:split:04:source",
+      "target_entity_ids": [
+        "entity:split:04:a",
+        "entity:split:04:b"
+      ],
+      "expected_review": true
+    },
+    {
+      "id": "merge:05",
+      "category": "merge",
+      "source_entity_ids": [
+        "entity:merge:05:a",
+        "entity:merge:05:b"
+      ],
+      "target_entity_id": "entity:merge:05:a",
+      "expected_review": true
+    },
+    {
+      "id": "split:05",
+      "category": "split",
+      "source_entity_id": "entity:split:05:source",
+      "target_entity_ids": [
+        "entity:split:05:a",
+        "entity:split:05:b"
+      ],
+      "expected_review": true
+    }
+  ]
+}

@@ -124,6 +124,23 @@ class JSONGraphStore:
             matches.append((entity, max(-1.0, min(1.0, score))))
         return sorted(matches, key=lambda item: item[1], reverse=True)[:top_k]
 
+    async def list_entity_embeddings(self) -> list[EntityEmbedding]:
+        with self.lock:
+            payloads = self._read()["entity_embeddings"].values()
+            return [EntityEmbedding.model_validate(item) for item in payloads]
+
+    async def upsert_entity_embeddings(self, embeddings: list[EntityEmbedding]) -> None:
+        with self.lock:
+            data = self._read()
+            unknown = {item.entity_id for item in embeddings} - set(data["entities"])
+            if unknown:
+                raise GraphIntegrityError(f"embeddings reference missing entities: {unknown}")
+            for embedding in embeddings:
+                data["entity_embeddings"][embedding.entity_id] = embedding.model_dump(
+                    mode="json"
+                )
+            self._write_atomic(data)
+
     async def list_claims(self) -> list[Claim]:
         with self.lock:
             data = self._read()
@@ -185,12 +202,13 @@ class JSONGraphStore:
 
     @staticmethod
     def _merge_claim(current: dict[str, Any], incoming: Claim) -> Claim:
-        merged = Claim.model_validate(current)
-        merged.evidence_ids = sorted(set(merged.evidence_ids + incoming.evidence_ids))
+        previous = Claim.model_validate(current)
+        merged = incoming.model_copy(deep=True)
+        merged.evidence_ids = sorted(set(previous.evidence_ids + incoming.evidence_ids))
         merged.source_candidate_ids = sorted(
-            set(merged.source_candidate_ids + incoming.source_candidate_ids)
+            set(previous.source_candidate_ids + incoming.source_candidate_ids)
         )
-        merged.confidence = max(merged.confidence, incoming.confidence)
+        merged.confidence = max(previous.confidence, incoming.confidence)
         return merged
 
     def _apply(self, data: dict[str, Any], transaction: GraphCommit) -> tuple[dict[str, Any], bool]:
@@ -314,7 +332,17 @@ class JSONGraphStore:
                 return latest
             timestamp = datetime.now(UTC)
             inverse: list[GraphChange] = []
-            for change in reversed(target.changes):
+            rollback_order = {
+                "entity_operation": 0,
+                "claim": 1,
+                "conflict": 2,
+                "entity": 3,
+            }
+            ordered_changes = sorted(
+                reversed(target.changes),
+                key=lambda item: rollback_order[item.resource_type],
+            )
+            for change in ordered_changes:
                 bucket_name = {
                     "entity": "entities",
                     "claim": "claims",
@@ -341,6 +369,8 @@ class JSONGraphStore:
                         current["active"] = False
                     elif change.resource_type == "conflict" and current is not None:
                         current["status"] = "resolved"
+                    elif change.resource_type == "entity_operation" and current is not None:
+                        current["status"] = "rolled_back"
                     inverse.append(
                         GraphChange(
                             resource_type=change.resource_type,

@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     embedding_use_fp16: bool = True
     embedding_batch_size: int = 32
     embedding_max_tokens: int = 512
+    embedding_model_cache: Path | None = None
+    embedding_allow_download: bool = False
     entity_top_k: int = 10
     entity_auto_link_threshold: float = 0.88
     entity_review_threshold: float = 0.65
@@ -74,3 +76,11 @@ class Settings(BaseSettings):
     @property
     def embedding_cache_dir(self) -> Path:
         return self.runtime_dir / "embeddings"
+
+    @property
+    def embedding_model_cache_dir(self) -> Path:
+        return self.embedding_model_cache or self.runtime_dir / "models" / "huggingface"
+
+    @property
+    def entity_governance_path(self) -> Path:
+        return self.runtime_dir / "entity-governance.json"

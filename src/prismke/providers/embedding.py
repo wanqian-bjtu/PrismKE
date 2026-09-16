@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +61,8 @@ class BGEM3EmbeddingProvider:
         batch_size: int,
         max_tokens: int,
         cache_dir: Path,
+        model_cache_dir: Path,
+        allow_download: bool = False,
     ) -> None:
         self.model_name = model_name
         self.device = device
@@ -67,7 +70,10 @@ class BGEM3EmbeddingProvider:
         self.batch_size = batch_size
         self.max_tokens = max_tokens
         self.cache_dir = cache_dir
+        self.model_cache_dir = model_cache_dir
+        self.allow_download = allow_download
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.model_cache_dir.mkdir(parents=True, exist_ok=True)
         self._model: Any | None = None
         self._lock = asyncio.Lock()
 
@@ -88,14 +94,33 @@ class BGEM3EmbeddingProvider:
 
     def _load_model(self) -> Any:
         if self._model is None:
+            os.environ.setdefault("HF_HOME", str(self.model_cache_dir.resolve()))
             try:
                 from FlagEmbedding import BGEM3FlagModel
+                from huggingface_hub import snapshot_download
+                from huggingface_hub.errors import LocalEntryNotFoundError
             except ImportError as exc:
                 raise RuntimeError(
                     "BGE-M3 is not installed; run `uv sync --extra embedding`"
                 ) from exc
+            model_path = Path(self.model_name)
+            try:
+                resolved_model = (
+                    str(model_path)
+                    if model_path.exists()
+                    else snapshot_download(
+                        repo_id=self.model_name,
+                        cache_dir=self.model_cache_dir / "hub",
+                        local_files_only=not self.allow_download,
+                    )
+                )
+            except LocalEntryNotFoundError as exc:
+                raise RuntimeError(
+                    "BGE-M3 model is not prepared; run "
+                    "`prismke prepare-model --embedding BAAI/bge-m3`"
+                ) from exc
             self._model = BGEM3FlagModel(
-                self.model_name,
+                resolved_model,
                 use_fp16=self.use_fp16,
                 devices=[self.device],
             )

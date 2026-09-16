@@ -2,7 +2,7 @@
 
 PrismKE 是一个面向通用多模态知识图谱构建的研究型项目，目标是实现模式引导、证据感知、可审核和可持续更新的知识抽取流程。
 
-当前稳定版本为 `v0.3.1`，已经接入 Neo4j、版本差异与补偿回滚、FastAPI、Gradio 研究工作台、Docker Compose 和 AutoDL 一键服务管理。
+当前稳定版本为 `v0.3.1`，`dev/v0.4` 正在开发语义实体链接与跨文档实体治理。v0.3.1 已经接入 Neo4j、版本差异与补偿回滚、FastAPI、Gradio 研究工作台、Docker Compose 和 AutoDL 一键服务管理。
 
 ## 当前能力
 
@@ -26,7 +26,11 @@ PrismKE 是一个面向通用多模态知识图谱构建的研究型项目，目
 ### 实体与事实治理
 
 - 实体名称规范化和别名精确匹配。
-- 基于规范名称、实体类型和别名的基础跨文档去重。
+- v0.4 可选使用本地 BGE-M3 Dense Embedding 与 Neo4j Vector Index 召回实体。
+- 候选实体结合名称、类型、上下文和图邻域信号进行可审计重排。
+- 高置信实体自动链接，模糊实体、同名异型实体进入独立人工审核。
+- 跨文档重复实体可生成合并建议，已有不同稳定 ID 不会被自动合并。
+- 实体合并与拆分以原子 Revision 提交，保留历史并支持补偿回滚。
 - 无法链接到已知实体时生成稳定的 NIL 实体 ID。
 - 将关系别名映射为 Schema 中的规范关系 ID。
 - 执行关系 domain/range 类型约束检查。
@@ -63,6 +67,7 @@ ingest
        |-> extract_text_claims ---|
        |-> extract_visual_claims -|-> align_modalities
   -> resolve_entities
+       |-> route_entity_reviews -> 人工链接或创建 NIL -> resume
   -> normalize_claims
   -> detect_conflicts
   -> route_by_risk
@@ -93,6 +98,12 @@ uv sync --extra dev --extra ocr
 
 ```bash
 uv sync --extra dev --extra neo4j --extra web
+```
+
+开发 v0.4 本地语义实体链接时安装：
+
+```bash
+uv sync --extra dev --extra neo4j --extra web --extra embedding
 ```
 
 在当前 AutoDL 服务器上，环境路径为：
@@ -250,6 +261,59 @@ PRISMKE_NEO4J_DATABASE=neo4j
 PRISMKE_API_HOST=127.0.0.1
 PRISMKE_API_PORT=8000
 ```
+
+## BGE-M3 与实体向量索引
+
+在服务器 `.env` 中启用本地 Embedding：
+
+```text
+PRISMKE_EMBEDDING_PROVIDER=bge-m3
+PRISMKE_EMBEDDING_MODEL=BAAI/bge-m3
+PRISMKE_EMBEDDING_DEVICE=cuda:0
+PRISMKE_EMBEDDING_USE_FP16=true
+PRISMKE_EMBEDDING_BATCH_SIZE=32
+PRISMKE_EMBEDDING_MODEL_CACHE=runtime/models/huggingface
+PRISMKE_ENTITY_TOP_K=10
+PRISMKE_ENTITY_AUTO_LINK_THRESHOLD=0.88
+PRISMKE_ENTITY_REVIEW_THRESHOLD=0.65
+PRISMKE_ENTITY_MIN_MARGIN=0.08
+```
+
+首次使用先显式下载并验证模型，Web 请求不会临时下载模型：
+
+```bash
+prismke prepare-model --embedding BAAI/bge-m3
+```
+
+检查并重建已有实体索引：
+
+```bash
+prismke rebuild-entity-index --backend neo4j --batch-size 32 --dry-run
+prismke rebuild-entity-index --backend neo4j --batch-size 32
+```
+
+运行仓库内 60 组可重复生成的实体链接与治理评测：
+
+```bash
+prismke evaluate-entities examples/entity_resolution_v0_4/manifest.json \
+  --embedding-provider bge-m3 \
+  --output runtime/evaluation/entity-resolution-v0.4.json
+```
+
+Embedding 是可重建的派生数据，不写入 Revision 快照、运行结果或检查点。模型指纹或实体文本变化后，重建命令只更新缺失或过期向量，不修改实体、Claim 和历史版本。
+
+v0.4 新增 API：
+
+```text
+GET  /api/v1/entities/search
+GET  /api/v1/entity-reviews
+POST /api/v1/entity-reviews/{task_id}
+POST /api/v1/entities/merge-proposals
+POST /api/v1/entities/{entity_id}/split-proposals
+GET  /api/v1/entities/{entity_id}/history
+```
+
+Gradio `/ui` 中的“实体治理”页面可以检查 Top-K 候选和评分、处理实体链接审核、创建合并/拆分建议并查看治理结果。合并和拆分始终需要人工批准。
 
 AutoDL 原生部署使用统一控制脚本启动 Neo4j 与 PrismKE Web：
 
