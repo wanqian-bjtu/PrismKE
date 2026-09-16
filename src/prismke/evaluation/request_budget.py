@@ -24,6 +24,15 @@ class RequestBudget:
     stopped_reason: str | None = None
     calls: list[dict[str, Any]] = field(default_factory=list)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    request_gate: asyncio.Lock = field(default_factory=asyncio.Lock)
+    active_tasks: list[asyncio.Task[httpx.Response]] = field(default_factory=list)
+    accounting_complete: bool = True
+
+    async def settle(self) -> None:
+        """Account already dispatched requests before closing a validation run."""
+        if self.active_tasks:
+            await asyncio.gather(*self.active_tasks, return_exceptions=True)
+            self.active_tasks.clear()
 
     def estimate(self, body: dict[str, Any]) -> int:
         text_bytes = images = 0
@@ -70,14 +79,17 @@ class RequestBudget:
                     )
                     self.total_tokens += tokens
                 except (ValueError, KeyError, TypeError):
+                    self.accounting_complete = False
                     self.stopped_reason = "model response usage unavailable; evaluation stopped"
             elif response.status_code in {401, 403, 404}:
+                self.accounting_complete = False
                 self.stopped_reason = (
                     f"model service access/configuration error HTTP {response.status_code}"
                 )
             else:
                 # Failed requests have no trustworthy billed usage; do not assume zero cost.
                 self.stopped_reason = f"failed HTTP {response.status_code}; token usage uncertain"
+                self.accounting_complete = False
             self.calls.append(row)
             if self.total_tokens > self.limit:
                 self.stopped_reason = "actual token usage exceeded evaluation target"
@@ -95,6 +107,22 @@ class BudgetedTransport(httpx.AsyncBaseTransport):
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         body = json.loads(await request.aread())
         body["max_tokens"] = self.budget.max_output_tokens
+        # Bound evaluation output without hidden reasoning on Bailian hybrid models.
+        if "aliyuncs.com" in request.url.host and str(body.get("model", "")).startswith("qwen"):
+            body["enable_thinking"] = False
+        task = asyncio.create_task(self._send(request, body))
+        self.budget.active_tasks.append(task)
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            self.budget.stopped_reason = "workflow interrupted; settling dispatched requests"
+            raise
+
+    async def _send(self, request: httpx.Request, body: dict[str, Any]) -> httpx.Response:
+        async with self.budget.request_gate:
+            return await self._send_serial(request, body)
+
+    async def _send_serial(self, request: httpx.Request, body: dict[str, Any]) -> httpx.Response:
         estimate = self.budget.estimate(body)
         await self.budget.reserve(estimate)
         forwarded = httpx.Request(
@@ -106,6 +134,7 @@ class BudgetedTransport(httpx.AsyncBaseTransport):
                 if key.lower() != "content-length"
             },
             json=body,
+            extensions=request.extensions,
         )
         inner = self.inner or httpx.AsyncHTTPTransport()
         try:
@@ -115,6 +144,8 @@ class BudgetedTransport(httpx.AsyncBaseTransport):
             async with self.budget.lock:
                 self.budget.reserved_tokens -= estimate
                 self.budget.stopped_reason = "request failed; billed token usage uncertain"
+                self.budget.accounting_complete = False
+                self.budget.calls.append({"status": "network_failure", "usage": "unknown"})
             raise EvaluationBudgetStop(self.budget.stopped_reason) from exc
         finally:
             if self.inner is None:

@@ -22,12 +22,12 @@ from prismke.workflow.service import PrismKEService
 
 class _EvaluationLLM(OpenAICompatibleLLMProvider):
     def fingerprint(self) -> str:
-        return stable_id("provider", super().fingerprint(), "evaluation-output-limit-v1", 4096)
+        return stable_id("provider", super().fingerprint(), "evaluation-output-limit-v2", 4096)
 
 
 class _EvaluationVLM(OpenAICompatibleVLMProvider):
     def fingerprint(self) -> str:
-        return stable_id("provider", super().fingerprint(), "evaluation-output-limit-v1", 4096)
+        return stable_id("provider", super().fingerprint(), "evaluation-output-limit-v2", 4096)
 
 
 class _EvaluationService(PrismKEService):
@@ -103,6 +103,7 @@ async def validate_documents(
         "token_target": budget.limit,
         "token_stop_threshold": budget.stop_at,
         "max_output_tokens": budget.max_output_tokens,
+        "bailian_qwen_enable_thinking": False,
     }
     try:
         service.provider("openai-compatible")
@@ -135,9 +136,23 @@ async def validate_documents(
                 break
             print(f"Validating {case_id}; used tokens={budget.total_tokens}", flush=True)
             started = time.perf_counter()
-            state = await service.run(
-                path, schema, "openai-compatible", "paddle", "openai-compatible"
-            )
+            try:
+                state = await service.run(
+                    path, schema, "openai-compatible", "paddle", "openai-compatible"
+                )
+            except Exception as exc:
+                await budget.settle()
+                report["cases"].append(
+                    {
+                        "id": case_id,
+                        "status": "budget_stopped" if budget.stopped_reason else "failed",
+                        "error_type": type(exc).__name__,
+                        "seconds": time.perf_counter() - started,
+                    }
+                )
+                if not budget.stopped_reason:
+                    budget.stopped_reason = "document workflow failed; inspect saved run"
+                break
             evidence_ids = {eid for candidate in state.candidates for eid in candidate.evidence_ids}
             verified = sum([await service.evidence_store.verify(eid) for eid in evidence_ids])
             row = {
@@ -170,6 +185,7 @@ async def validate_documents(
             if budget.stopped_reason or index < 2 and state.status == "failed":
                 break
     finally:
+        await budget.settle()
         await service.close()
         after = file_sha256(original_graph) if original_graph.exists() else None
         report.update(
@@ -178,6 +194,7 @@ async def validate_documents(
                 "production_json_before": before,
                 "production_json_after": after,
                 "total_tokens": budget.total_tokens,
+                "token_accounting_complete": budget.accounting_complete,
                 "request_ledger": budget.calls,
                 "stop_reason": budget.stopped_reason,
                 "unprocessed_case_ids": [item[0] for item in inputs[len(report["cases"]) :]],

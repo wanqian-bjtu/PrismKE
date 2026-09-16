@@ -184,7 +184,7 @@ async def evaluate_entity_linking_manifest(
                 if ranked
                 else (decision.selected_entity_id if decision.method == "exact" else None)
             )
-            top_10_correct = bool(targets & set(ranked)) or (
+            top_10_correct = bool(targets & set(ranked[:10])) or (
                 decision.method == "exact" and decision.selected_entity_id in targets
             )
             top_1_correct = bool(targets) and top_1 in targets
