@@ -47,6 +47,12 @@ from prismke.domain.schema import (
     load_schema,
     normalize_label,
 )
+from prismke.domain.validation import (
+    CommitValidationContext,
+    ValidationIssue,
+    ValidationResult,
+    ValidationReviewDecision,
+)
 from prismke.domain.workflow import (
     ExtractionRequest,
     ExtractionResult,
@@ -59,6 +65,10 @@ from prismke.domain.workflow import (
 )
 
 __all__ = [
+    "CommitValidationContext",
+    "ValidationIssue",
+    "ValidationResult",
+    "ValidationReviewDecision",
     "BBox",
     "CoordinateSpace",
     "DocumentPage",

@@ -26,6 +26,7 @@ from prismke.domain.knowledge import (
     ReviewTask,
 )
 from prismke.domain.schema import OutputSchema
+from prismke.domain.validation import ValidationResult, ValidationReviewDecision
 
 
 class ExtractionRequest(BaseModel):
@@ -67,6 +68,7 @@ class ExtractionResult(BaseModel):
     evidence: list[EvidenceRef] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     call_records: list[ProviderCallRecord] = Field(default_factory=list)
+    validation: ValidationResult = Field(default_factory=ValidationResult)
 
 
 class OCRRequest(BaseModel):
@@ -121,6 +123,8 @@ class WorkflowState(BaseModel):
     conflicts: list[ConflictSet] = Field(default_factory=list)
     review_tasks: list[ReviewTask] = Field(default_factory=list)
     normalization_issues: dict[str, str] = Field(default_factory=dict)
+    validation: ValidationResult = Field(default_factory=ValidationResult)
+    validation_decisions: list[ValidationReviewDecision] = Field(default_factory=list)
     graph_commit: GraphCommit | None = None
     revision: GraphRevision | None = None
     warnings: list[str] = Field(default_factory=list)
