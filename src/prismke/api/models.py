@@ -25,6 +25,11 @@ class RollbackRequest(BaseModel):
     confirm: Literal[True]
 
 
+class ValidationExcludeRequest(BaseModel):
+    reviewer: str = Field(min_length=1)
+    comment: str = ""
+
+
 class EntityReviewRequest(BaseModel):
     action: Literal["link", "create", "approve", "reject"]
     run_id: str | None = None

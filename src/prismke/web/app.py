@@ -10,6 +10,7 @@ import orjson
 from prismke import __version__
 from prismke.domain import CanonicalEntity, ReviewDecision
 from prismke.web.review import build_review_tabs
+from prismke.web.validation import build_validation_tab
 from prismke.workflow import PrismKEService
 
 
@@ -381,6 +382,8 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 history_button = gr.Button("查询治理与回滚历史")
                 history_output = gr.JSON(label="实体 Revision 历史")
                 history_button.click(entity_history, [history_entity_id], [history_output])
+
+        build_validation_tab(gr, service)
 
         with gr.Tab("版本"):
             revision_button = gr.Button("刷新版本")
