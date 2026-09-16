@@ -201,6 +201,19 @@ def export_entity_annotations(
         raise typer.BadParameter(str(exc)) from exc
 
 
+@app.command("validate-documents")
+def validate_real_documents(
+    manifest: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    output: Annotated[Path, typer.Option("--output", file_okay=False)],
+) -> None:
+    """Run budgeted real-model document validation on an isolated JSON graph."""
+    from prismke.evaluation.document_validation import validate_documents
+
+    report = asyncio.run(validate_documents(manifest, Settings(), output))
+    console.print(f"Validated {len(report['cases'])} documents; tokens={report['total_tokens']}")
+    console.print(f"Report: {output / 'document-validation.json'}")
+
+
 @app.command("migrate-graph")
 def migrate_graph(
     source: Annotated[Path, typer.Option("--from-json", exists=True, dir_okay=False)],
