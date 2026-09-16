@@ -2,10 +2,43 @@ import csv
 import json
 
 from prismke.evaluation.document_review import (
+    document_coverage,
     evidence_match,
     export_document_review,
     review_document_state,
 )
+
+
+def test_normalized_bbox_coverage_uses_unit_canvas_not_pixel_dimensions():
+    state = {
+        "status": "awaiting_review",
+        "document": {
+            "id": "doc",
+            "source_path": "source",
+            "source_hash": "a" * 64,
+            "media_type": "image/png",
+            "evidence": [
+                {
+                    "id": "ev",
+                    "kind": "visual_region",
+                    "document_id": "doc",
+                    "source_hash": "a" * 64,
+                    "modality": "image",
+                    "bbox": {"x0": 0, "y0": 0, "x1": 1.2, "y1": 0.9},
+                    "coordinate_space": "normalized",
+                    "canvas_width": 800,
+                    "canvas_height": 600,
+                }
+            ],
+        },
+    }
+    assert document_coverage(state)["invalid_bbox_ids"] == ["ev"]
+    state["document"]["evidence"][0]["bbox"]["x1"] = 1
+    assert document_coverage(state)["invalid_bbox_ids"] == []
+
+
+def test_failed_document_is_never_reported_as_fully_processed():
+    assert document_coverage({"status": "failed"})["processing_complete"] is False
 
 
 def test_pdf_surface_on_another_page_does_not_validate_gold_position():

@@ -15,17 +15,20 @@ from prismke.core.settings import Settings
 from prismke.domain import (
     CandidateClaim,
     CanonicalEntity,
+    DocumentIR,
     ExtractionRequest,
     ExtractionResult,
     GraphCommit,
     GraphRevision,
+    OCRRequest,
+    OCRResult,
     ProviderCallRecord,
     TextBlock,
 )
 from prismke.evaluation.request_budget import BudgetedTransport, EvaluationBudgetStop, RequestBudget
 from prismke.governance.entity_index import rebuild_entity_index
 from prismke.persistence.json_graph import JSONGraphStore
-from prismke.providers.base import LLMProvider, VLMProvider
+from prismke.providers.base import LLMProvider, OCRProvider, VLMProvider
 from prismke.providers.openai_compatible import OpenAICompatibleLLMProvider
 from prismke.providers.vlm import OpenAICompatibleVLMProvider
 from prismke.workflow.service import PrismKEService
@@ -148,6 +151,62 @@ def text_batches(blocks: list[TextBlock], max_bytes: int = 12000) -> list[list[T
     return batches
 
 
+class _ReusedOCR:
+    def __init__(self, original: OCRProvider, state: dict[str, Any]) -> None:
+        self.original, self.state = original, state
+
+    def fingerprint(self) -> str:
+        return stable_id(
+            "provider",
+            self.original.fingerprint(),
+            "evaluation-reused-ocr-v1",
+            self.state["run_id"],
+        )
+
+    async def recognize(self, request: OCRRequest) -> OCRResult:
+        if self.state.get("ocr_provider_fingerprint") != self.original.fingerprint():
+            raise ValueError("cached OCR provider fingerprint mismatch")
+        downstream = {
+            "load_schema",
+            "extract_text_claims",
+            "extract_visual_claims",
+            "align_modalities",
+            "resolve_entities",
+            "normalize_claims",
+        }
+        if self.state.get("status") not in {"completed", "awaiting_review"} and (
+            self.state.get("failed_node") not in downstream
+        ):
+            raise ValueError("cached OCR stage did not complete")
+        cached = DocumentIR.model_validate(self.state["document"])
+        if cached.source_hash != request.document.source_hash:
+            raise ValueError("cached OCR source hash mismatch")
+
+        def signature(document: DocumentIR) -> list[tuple[Any, ...]]:
+            return [
+                (a.id, a.blob_hash, a.width, a.height, a.page_number, a.origin)
+                for a in document.media_assets
+            ]
+
+        if signature(cached) != signature(request.document):
+            raise ValueError("cached OCR visual assets changed")
+        for asset in request.document.media_assets:
+            if not asset.blob_hash or file_sha256(Path(asset.path)) != asset.blob_hash:
+                raise ValueError("cached OCR visual asset hash mismatch")
+        warnings = [
+            w
+            for w in self.state.get("warnings", [])
+            if w.startswith(("low_confidence_ocr:", "ocr_failed:"))
+        ]
+        if any(w.startswith("ocr_failed:") for w in warnings):
+            raise ValueError("cached OCR contains failed assets")
+        return OCRResult(
+            text_blocks=[b for b in cached.text_blocks if b.modality == "ocr"],
+            evidence=[e for e in cached.evidence if e.modality == "ocr"],
+            warnings=[*warnings, f"evaluation_reused_ocr_run:{self.state['run_id']}"],
+        )
+
+
 class _EvaluationVLM(OpenAICompatibleVLMProvider):
     def fingerprint(self) -> str:
         return stable_id(
@@ -162,10 +221,15 @@ class _EvaluationVLM(OpenAICompatibleVLMProvider):
 
 class _EvaluationService(PrismKEService):
     cached_text_state: dict[str, Any] | None = None
+    cached_ocr_state: dict[str, Any] | None = None
 
     def __init__(self, settings: Settings, store: JSONGraphStore, budget: RequestBudget) -> None:
         super().__init__(settings, graph_store=store)
         self.budget = budget
+
+    def ocr_provider(self, name: str) -> OCRProvider:
+        original = super().ocr_provider(name)
+        return _ReusedOCR(original, self.cached_ocr_state) if self.cached_ocr_state else original
 
     def provider(self, name: str) -> LLMProvider:
         original = super().provider(name)
@@ -294,6 +358,12 @@ async def validate_documents(
             service.cached_text_state = (
                 json.loads((manifest_path.parent / cache).resolve().read_text(encoding="utf-8"))
                 if cache
+                else None
+            )
+            ocr_cache = cases[index].get("reuse_ocr_run")
+            service.cached_ocr_state = (
+                json.loads((manifest_path.parent / ocr_cache).resolve().read_text(encoding="utf-8"))
+                if ocr_cache
                 else None
             )
             started = time.perf_counter()

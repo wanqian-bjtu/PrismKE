@@ -4,10 +4,45 @@ from pathlib import Path
 import httpx
 import pytest
 
-from prismke.domain import DocumentIR, ExtractionRequest, ExtractionResult, OutputSchema, TextBlock
-from prismke.evaluation.document_validation import _EvaluationLLM, text_batches, validate_documents
+from prismke.domain import (
+    DocumentIR,
+    ExtractionRequest,
+    ExtractionResult,
+    OCRRequest,
+    OutputSchema,
+    TextBlock,
+)
+from prismke.evaluation.document_validation import (
+    _EvaluationLLM,
+    _ReusedOCR,
+    text_batches,
+    validate_documents,
+)
 from prismke.evaluation.request_budget import BudgetedTransport, EvaluationBudgetStop, RequestBudget
+from prismke.providers.ocr import DisabledOCRProvider
 from prismke.providers.openai_compatible import OpenAICompatibleLLMProvider
+
+
+@pytest.mark.asyncio
+async def test_reused_ocr_rejects_changed_source_or_incomplete_stage():
+    original = DisabledOCRProvider()
+    doc = DocumentIR(id="doc", source_path="source", source_hash="a" * 64, media_type="text/plain")
+    state = {
+        "run_id": "old",
+        "status": "failed",
+        "failed_node": "extract_visual_claims",
+        "ocr_provider_fingerprint": original.fingerprint(),
+        "document": doc.model_dump(mode="json"),
+    }
+    request = OCRRequest(document=doc)
+    reused = _ReusedOCR(original, state)
+    assert "evaluation_reused_ocr_run:old" in (await reused.recognize(request)).warnings
+    state["document"]["source_hash"] = "b" * 64
+    with pytest.raises(ValueError, match="source hash mismatch"):
+        await reused.recognize(request)
+    state["failed_node"] = "run_ocr"
+    with pytest.raises(ValueError, match="stage did not complete"):
+        await reused.recognize(request)
 
 
 @pytest.mark.parametrize("limit,stop", [(0, 0), (100, 100), (100, -1)])
@@ -92,7 +127,9 @@ def test_batches_preserve_order_evidence_and_coordinates():
     assert all(sum(len(block.text.encode()) for block in batch) <= 12000 for batch in batches)
     oversized = TextBlock(id="big", text="a" * 13000, evidence_id="big")
     assert text_batches([blocks[0], oversized, blocks[1]]) == [
-        [blocks[0]], [oversized], [blocks[1]],
+        [blocks[0]],
+        [oversized],
+        [blocks[1]],
     ]
 
 
@@ -105,8 +142,11 @@ async def test_explicit_budget_extension_is_audited_and_never_resets_usage(tmp_p
     with pytest.raises(EvaluationBudgetStop, match="parameters must not change"):
         RequestBudget(limit=500000, stop_at=450000, ledger_path=ledger, resume_ledger=True)
     extended = RequestBudget(
-        limit=500000, stop_at=450000, ledger_path=ledger,
-        resume_ledger=True, extend_budget=True,
+        limit=500000,
+        stop_at=450000,
+        ledger_path=ledger,
+        resume_ledger=True,
+        extend_budget=True,
     )
     saved = json.loads(ledger.read_text())
     assert extended.total_tokens == saved["total_tokens"] == 20
@@ -115,15 +155,21 @@ async def test_explicit_budget_extension_is_audited_and_never_resets_usage(tmp_p
     assert saved["budget_amendments"][0]["tokens_already_used"] == 20
     with pytest.raises(EvaluationBudgetStop, match="parameters must not change"):
         RequestBudget(
-            limit=300000, stop_at=270000, ledger_path=ledger,
-            resume_ledger=True, extend_budget=True,
+            limit=300000,
+            stop_at=270000,
+            ledger_path=ledger,
+            resume_ledger=True,
+            extend_budget=True,
         )
     saved["accounting_complete"] = False
     ledger.write_text(json.dumps(saved))
     with pytest.raises(EvaluationBudgetStop, match="uncertain ledger"):
         RequestBudget(
-            limit=600000, stop_at=550000, ledger_path=ledger,
-            resume_ledger=True, extend_budget=True,
+            limit=600000,
+            stop_at=550000,
+            ledger_path=ledger,
+            resume_ledger=True,
+            extend_budget=True,
         )
 
 

@@ -4,9 +4,66 @@ from __future__ import annotations
 
 import csv
 import json
+import math
+from collections import Counter
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
+
+from prismke.domain import DocumentIR
+from prismke.parsing.visual_assets import select_analysis_assets
+
+
+def document_coverage(state: dict[str, Any]) -> dict[str, Any]:
+    """Report structural coverage, not extraction accuracy or evidence truth."""
+    raw = state.get("document")
+    if not raw:
+        return {"document_available": False, "processing_complete": False}
+    document = DocumentIR.model_validate(raw)
+    selected = {asset.id for asset in select_analysis_assets(document)}
+    called = {
+        call["operation_id"]
+        for call in state.get("provider_calls", [])
+        if call.get("provider") == "vlm" and call.get("status") == "succeeded"
+    }
+    missing = selected - called
+    invalid: list[str] = []
+    boxes = 0
+    for ref in document.evidence:
+        if ref.bbox is None:
+            continue
+        boxes += 1
+        width = 1.0 if ref.coordinate_space == "normalized" else ref.canvas_width
+        height = 1.0 if ref.coordinate_space == "normalized" else ref.canvas_height
+        b = ref.bbox
+        valid = width is not None and height is not None
+        valid &= all(math.isfinite(v) for v in (b.x0, b.y0, b.x1, b.y1))
+        if not valid or not (
+            0 <= b.x0 <= b.x1 <= (width or 0) and 0 <= b.y0 <= b.y1 <= (height or 0)
+        ):
+            invalid.append(ref.id)
+    warnings = state.get("warnings", [])
+    failures = [w for w in warnings if w.startswith(("ocr_failed:", "vlm_failed:"))]
+    return {
+        "document_available": True,
+        "source_hash": document.source_hash,
+        "pages": len(document.pages),
+        "text_blocks_by_modality": dict(Counter(b.modality.value for b in document.text_blocks)),
+        "media_assets": len(document.media_assets),
+        "selected_visual_assets": len(selected),
+        "called_visual_assets": len(selected & called),
+        "missing_visual_asset_ids": sorted(missing),
+        "analysis_failures": failures,
+        "bbox_count": boxes,
+        "invalid_bbox_ids": invalid,
+        "alignment_decisions": dict(
+            Counter(a["decision"] for a in state.get("alignment_records", []))
+        ),
+        "batch_provenance": [w for w in warnings if w.startswith("evaluation_")],
+        "processing_complete": state.get("status") in {"completed", "awaiting_review"}
+        and not missing
+        and not failures,
+    }
 
 
 def _normalized(text: str) -> str:

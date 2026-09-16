@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 from io import BytesIO
 from typing import Any, cast
 
@@ -30,7 +31,7 @@ from prismke.domain import (
 from prismke.providers.common import candidate_from_payload, parse_json_object
 from prismke.providers.http_client import post_chat_completion
 
-PROMPT_VERSION = "visual-schema-claims-v3"
+PROMPT_VERSION = "visual-schema-claims-v4"
 PROTOCOL_VERSION = "chat-completions-vision-v1"
 PROVIDER_VERSION = "0.2.1"
 
@@ -50,6 +51,7 @@ def _visual_prompt(request: VisualExtractionRequest) -> str:
         "only the visible details needed to support claims. "
         "If the image and auxiliary context disagree, output the fact visible in the image. "
         "Omit any visual claim that cannot be confirmed from image pixels or image-derived OCR.\n"
+        "Confidence must be a JSON number between 0 and 1, never labels like high or low. "
         "Observation fields: label, description, confidence, optional "
         "bbox=[x0,y0,x1,y1] normalized to 0..1, attributes. Claim fields: subject, relation, "
         "object, subject_type, optional object_type, confidence, observation_index. A claim "
@@ -209,22 +211,28 @@ class OpenAICompatibleVLMProvider:
         observations: list[VisualObservation] = []
         evidence: list[EvidenceRef] = []
         warnings: list[str] = []
+        uncalibrated_observations: set[int] = set()
         for index, item in enumerate(payload.get("observations", [])):
             raw_bbox = item.get("bbox")
             bbox = None
-            if (
-                raw_bbox is not None
-                and len(raw_bbox) == 4
-                and all(0 <= float(v) <= 1 for v in raw_bbox)
-            ):
-                bbox = BBox(
-                    x0=float(raw_bbox[0]),
-                    y0=float(raw_bbox[1]),
-                    x1=float(raw_bbox[2]),
-                    y1=float(raw_bbox[3]),
-                )
-            elif raw_bbox is not None:
-                warnings.append(f"invalid_visual_bbox:asset={asset.id}:index={index}")
+            if raw_bbox is not None:
+                try:
+                    if not isinstance(raw_bbox, list) or len(raw_bbox) != 4:
+                        raise ValueError("invalid bbox shape")
+                    values = [float(v) for v in raw_bbox]
+                    if not all(math.isfinite(v) and 0 <= v <= 1 for v in values):
+                        raise ValueError("invalid bbox values")
+                    bbox = BBox(x0=values[0], y0=values[1], x1=values[2], y1=values[3])
+                except (TypeError, ValueError):
+                    warnings.append(f"invalid_visual_bbox:asset={asset.id}:index={index}")
+            try:
+                confidence = float(item.get("confidence", 0.5))
+                if not math.isfinite(confidence) or not 0 <= confidence <= 1:
+                    raise ValueError("invalid confidence")
+            except (TypeError, ValueError):
+                confidence = 0.0
+                uncalibrated_observations.add(index)
+                warnings.append(f"invalid_visual_confidence:asset={asset.id}:index={index}")
             evidence_id = (
                 asset.evidence_id
                 if bbox is None
@@ -264,7 +272,7 @@ class OpenAICompatibleVLMProvider:
                     label=str(item.get("label", "object")),
                     description=str(item.get("description", "")),
                     bbox=bbox,
-                    confidence=float(item.get("confidence", 0.5)),
+                    confidence=confidence,
                     evidence_id=evidence_id,
                     attributes=dict(item.get("attributes", {})),
                 )
@@ -295,6 +303,13 @@ class OpenAICompatibleVLMProvider:
                         f"context_only_visual_claim:asset={asset.id}:candidate={candidate.id}"
                     )
                 candidates.append(candidate)
+                if (
+                    isinstance(oi, int)
+                    and oi in uncalibrated_observations
+                    or observation is None
+                    and uncalibrated_observations
+                ):
+                    candidate.uncalibrated_visual_confidence = True
             except (KeyError, TypeError, ValueError) as exc:
                 warnings.append(f"visual_claim_invalid:asset={asset.id}:{exc}")
         return ExtractionResult(

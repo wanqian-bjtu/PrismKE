@@ -75,6 +75,7 @@ class CandidateClaim(BaseModel):
     cross_modal_support: bool = False
     coarse_visual_evidence: bool = False
     context_only_visual_claim: bool = False
+    uncalibrated_visual_confidence: bool = False
 
 
 class AlignmentRecord(BaseModel):
@@ -101,6 +102,7 @@ class Claim(BaseModel):
     cross_modal_support: bool = False
     coarse_visual_evidence: bool = False
     context_only_visual_claim: bool = False
+    uncalibrated_visual_confidence: bool = False
     valid_from: datetime | None = None
     valid_to: datetime | None = None
     tx_from: datetime = Field(default_factory=utc_now)
