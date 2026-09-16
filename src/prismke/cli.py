@@ -14,7 +14,12 @@ from rich.console import Console
 from prismke.core.errors import ProviderConfigurationError
 from prismke.core.settings import Settings
 from prismke.domain import ReviewDecision, load_schema
-from prismke.evaluation import evaluate_manifest
+from prismke.evaluation import (
+    EntityLinkingEvaluationReport,
+    evaluate_entity_linking_manifest,
+    evaluate_manifest,
+)
+from prismke.governance import rebuild_entity_index
 from prismke.persistence import FileEvidenceStore, Neo4jGraphStore, migrate_json_graph
 from prismke.workflow import PrismKEService
 
@@ -132,6 +137,41 @@ def evaluate(
     )
 
 
+@app.command("evaluate-entities")
+def evaluate_entities(
+    manifest: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    output: Annotated[Path, typer.Option("--output", dir_okay=False)],
+    embedding_provider: Annotated[
+        str | None, typer.Option("--embedding-provider")
+    ] = None,
+) -> None:
+    """Evaluate semantic linking, NIL decisions and cross-document clustering."""
+    settings = Settings()
+    if embedding_provider is not None:
+        settings.embedding_provider = embedding_provider
+    service = PrismKEService(settings)
+
+    async def execute() -> EntityLinkingEvaluationReport:
+        try:
+            return await evaluate_entity_linking_manifest(
+                manifest,
+                service.embedding_provider(),
+                top_k=settings.entity_top_k,
+                auto_link_threshold=settings.entity_auto_link_threshold,
+                review_threshold=settings.entity_review_threshold,
+                min_margin=settings.entity_min_margin,
+            )
+        finally:
+            await service.close()
+
+    report = asyncio.run(execute())
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(
+        orjson.dumps(report.model_dump(mode="json"), option=orjson.OPT_INDENT_2)
+    )
+    _print_model(report)
+
+
 @app.command("migrate-graph")
 def migrate_graph(
     source: Annotated[
@@ -166,6 +206,63 @@ def migrate_graph(
         finally:
             if target is not None:
                 await target.close()
+
+    _print_model(asyncio.run(execute()))
+
+
+@app.command("prepare-model")
+def prepare_model(
+    embedding: Annotated[str, typer.Option("--embedding")] = "BAAI/bge-m3",
+) -> None:
+    """Download and validate the configured local embedding model."""
+    settings = Settings(
+        embedding_provider="bge-m3",
+        embedding_model=embedding,
+        embedding_allow_download=True,
+    )
+
+    async def execute() -> dict[str, object]:
+        service = PrismKEService(settings)
+        try:
+            vector = (await service.embedding_provider().encode(["PrismKE entity index"]))[0]
+            return {
+                "model": embedding,
+                "revision": settings.embedding_model_revision,
+                "device": settings.embedding_device,
+                "model_cache": str(settings.embedding_model_cache_dir),
+                "fingerprint": service.embedding_provider().fingerprint(),
+                "dimension": len(vector),
+                "status": "ready",
+            }
+        finally:
+            await service.close()
+
+    _print_model(asyncio.run(execute()))
+
+
+@app.command("rebuild-entity-index")
+def rebuild_entity_index_command(
+    backend: Annotated[str, typer.Option("--backend")] = "neo4j",
+    batch_size: Annotated[int, typer.Option("--batch-size", min=1)] = 32,
+    dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
+) -> None:
+    """Build missing or outdated entity vectors without changing graph revisions."""
+    if backend not in {"json", "neo4j"}:
+        raise typer.BadParameter("backend must be json or neo4j")
+    settings = Settings(graph_store=backend)
+
+    async def execute() -> object:
+        service = PrismKEService(settings)
+        try:
+            return await rebuild_entity_index(
+                service.graph_store,
+                service.embedding_provider(),
+                backend=backend,
+                batch_size=batch_size,
+                dry_run=dry_run,
+            )
+        finally:
+            await service.close()
 
     _print_model(asyncio.run(execute()))
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from copy import deepcopy
 from datetime import UTC, datetime
@@ -17,6 +18,7 @@ from prismke.core.ids import stable_id
 from prismke.domain import (
     CanonicalEntity,
     Claim,
+    EntityEmbedding,
     EvidenceRef,
     GraphChange,
     GraphCommit,
@@ -42,6 +44,8 @@ class JSONGraphStore:
             "documents": {},
             "evidence": {},
             "entities": {},
+            "entity_embeddings": {},
+            "entity_operations": {},
             "claims": {},
             "conflicts": {},
             "revisions": [],
@@ -84,6 +88,68 @@ class JSONGraphStore:
         with self.lock:
             data = self._read()
         return [CanonicalEntity.model_validate(item) for item in data["entities"].values()]
+
+    async def get_entity(self, entity_id: str) -> CanonicalEntity | None:
+        with self.lock:
+            payload = self._read()["entities"].get(entity_id)
+        return CanonicalEntity.model_validate(payload) if payload is not None else None
+
+    async def search_entities(
+        self,
+        vector: list[float],
+        entity_type: str,
+        top_k: int,
+        model_fingerprint: str | None = None,
+    ) -> list[tuple[CanonicalEntity, float]]:
+        if not vector or top_k < 1:
+            return []
+        with self.lock:
+            data = self._read()
+        query_norm = math.sqrt(sum(value * value for value in vector)) or 1.0
+        matches: list[tuple[CanonicalEntity, float]] = []
+        for entity_id, payload in data["entities"].items():
+            entity = CanonicalEntity.model_validate(payload)
+            embedding_payload = data["entity_embeddings"].get(entity_id)
+            if (
+                not entity.active
+                or entity.entity_type != entity_type
+                or embedding_payload is None
+            ):
+                continue
+            embedding = EntityEmbedding.model_validate(embedding_payload)
+            if (
+                len(embedding.vector) != len(vector)
+                or model_fingerprint is not None
+                and embedding.model_fingerprint != model_fingerprint
+            ):
+                continue
+            candidate_norm = math.sqrt(
+                sum(value * value for value in embedding.vector)
+            ) or 1.0
+            score = sum(
+                left * right for left, right in zip(vector, embedding.vector, strict=True)
+            ) / (query_norm * candidate_norm)
+            matches.append((entity, max(-1.0, min(1.0, score))))
+        return sorted(
+            matches, key=lambda item: (-round(item[1], 12), item[0].id)
+        )[:top_k]
+
+    async def list_entity_embeddings(self) -> list[EntityEmbedding]:
+        with self.lock:
+            payloads = self._read()["entity_embeddings"].values()
+            return [EntityEmbedding.model_validate(item) for item in payloads]
+
+    async def upsert_entity_embeddings(self, embeddings: list[EntityEmbedding]) -> None:
+        with self.lock:
+            data = self._read()
+            unknown = {item.entity_id for item in embeddings} - set(data["entities"])
+            if unknown:
+                raise GraphIntegrityError(f"embeddings reference missing entities: {unknown}")
+            for embedding in embeddings:
+                data["entity_embeddings"][embedding.entity_id] = embedding.model_dump(
+                    mode="json"
+                )
+            self._write_atomic(data)
 
     async def list_claims(self) -> list[Claim]:
         with self.lock:
@@ -146,12 +212,13 @@ class JSONGraphStore:
 
     @staticmethod
     def _merge_claim(current: dict[str, Any], incoming: Claim) -> Claim:
-        merged = Claim.model_validate(current)
-        merged.evidence_ids = sorted(set(merged.evidence_ids + incoming.evidence_ids))
+        previous = Claim.model_validate(current)
+        merged = incoming.model_copy(deep=True)
+        merged.evidence_ids = sorted(set(previous.evidence_ids + incoming.evidence_ids))
         merged.source_candidate_ids = sorted(
-            set(merged.source_candidate_ids + incoming.source_candidate_ids)
+            set(previous.source_candidate_ids + incoming.source_candidate_ids)
         )
-        merged.confidence = max(merged.confidence, incoming.confidence)
+        merged.confidence = max(previous.confidence, incoming.confidence)
         return merged
 
     def _apply(self, data: dict[str, Any], transaction: GraphCommit) -> tuple[dict[str, Any], bool]:
@@ -183,7 +250,17 @@ class JSONGraphStore:
                 )
             data["evidence"][evidence.id] = evidence.model_dump(mode="json")
         for entity in transaction.entities:
+            previous = data["entities"].get(entity.id)
+            if previous is not None and (
+                CanonicalEntity.model_validate(previous).embedding_source()
+                != entity.embedding_source()
+            ):
+                data["entity_embeddings"].pop(entity.id, None)
             data["entities"][entity.id] = entity.model_dump(mode="json")
+        for operation in transaction.entity_operations:
+            data["entity_operations"][operation.id] = operation.model_dump(mode="json")
+        for embedding in transaction.entity_embeddings:
+            data["entity_embeddings"][embedding.entity_id] = embedding.model_dump(mode="json")
         for claim in transaction.claims:
             if not claim.evidence_ids:
                 raise EvidenceRequiredError(f"claim {claim.id} has no evidence")
@@ -198,6 +275,13 @@ class JSONGraphStore:
         known_claims = set(data["claims"])
         known_conflicts = set(data["conflicts"])
         known_evidence = set(data["evidence"])
+        if not {item.entity_id for item in transaction.entity_embeddings} <= known_entities:
+            raise GraphIntegrityError("embedding references missing entity")
+        for operation in transaction.entity_operations:
+            if not set(operation.source_entity_ids + operation.target_entity_ids) <= known_entities:
+                raise GraphIntegrityError(
+                    f"entity operation {operation.id} references missing entities"
+                )
         for claim in transaction.claims:
             entity_refs = {claim.subject_id}
             if claim.object_entity_id:
@@ -264,11 +348,22 @@ class JSONGraphStore:
                 return latest
             timestamp = datetime.now(UTC)
             inverse: list[GraphChange] = []
-            for change in reversed(target.changes):
+            rollback_order = {
+                "entity_operation": 0,
+                "claim": 1,
+                "conflict": 2,
+                "entity": 3,
+            }
+            ordered_changes = sorted(
+                reversed(target.changes),
+                key=lambda item: rollback_order[item.resource_type],
+            )
+            for change in ordered_changes:
                 bucket_name = {
                     "entity": "entities",
                     "claim": "claims",
                     "conflict": "conflicts",
+                    "entity_operation": "entity_operations",
                 }[change.resource_type]
                 bucket = data[bucket_name]
                 current = bucket.get(change.resource_id)
@@ -290,6 +385,8 @@ class JSONGraphStore:
                         current["active"] = False
                     elif change.resource_type == "conflict" and current is not None:
                         current["status"] = "resolved"
+                    elif change.resource_type == "entity_operation" and current is not None:
+                        current["status"] = "rolled_back"
                     inverse.append(
                         GraphChange(
                             resource_type=change.resource_type,

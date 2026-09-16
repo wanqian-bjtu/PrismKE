@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
-from prismke.domain import ReviewDecision
+import orjson
+
+from prismke.domain import CanonicalEntity, ReviewDecision
 from prismke.workflow import PrismKEService
 
 
@@ -175,6 +177,74 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         result = await service.graph_store.healthcheck()
         return result.model_dump(mode="json")
 
+    async def search_entities(
+        query: str, entity_type: str, limit: int
+    ) -> list[dict[str, Any]]:
+        return [
+            item.model_dump(mode="json")
+            for item in await service.search_entities(query, entity_type, limit)
+        ]
+
+    def entity_reviews(status: str) -> list[dict[str, Any]]:
+        return [
+            item.model_dump(mode="json")
+            for item in service.list_entity_reviews(None if status == "all" else status)
+        ]
+
+    async def entity_history(entity_id: str) -> list[dict[str, Any]]:
+        return [
+            item.model_dump(mode="json")
+            for item in await service.entity_history(entity_id)
+        ]
+
+    async def review_entity_task(
+        task_id: str,
+        run_id: str,
+        action: str,
+        selected_entity_id: str,
+        reviewer: str,
+    ) -> dict[str, Any]:
+        if action in {"approve", "reject_operation"}:
+            revision = await service.review_entity_operation(
+                task_id, action == "approve", reviewer or None
+            )
+            return revision.model_dump(mode="json") if revision else {"status": "rejected"}
+        if action not in {"link", "create", "reject"}:
+            raise ValueError(f"unsupported entity review action: {action}")
+        state = await service.review_entity(
+            run_id,
+            task_id,
+            cast(Literal["link", "create", "reject"], action),
+            selected_entity_id or None,
+        )
+        return _state_summary(state)
+
+    async def propose_merge(
+        source_ids: str, target_id: str, reasons: str
+    ) -> dict[str, Any]:
+        task = await service.propose_entity_merge(
+            [item.strip() for item in source_ids.split(",") if item.strip()],
+            target_id.strip(),
+            [item.strip() for item in reasons.split(";") if item.strip()],
+        )
+        return task.model_dump(mode="json")
+
+    async def propose_split(
+        source_id: str,
+        target_entities_json: str,
+        assignments_json: str,
+        reasons: str,
+    ) -> dict[str, Any]:
+        target_payloads = orjson.loads(target_entities_json)
+        assignments = orjson.loads(assignments_json)
+        task = await service.propose_entity_split(
+            source_id.strip(),
+            [CanonicalEntity.model_validate(item) for item in target_payloads],
+            {str(key): str(value) for key, value in assignments.items()},
+            [item.strip() for item in reasons.split(";") if item.strip()],
+        )
+        return task.model_dump(mode="json")
+
     claim_headers = ["Claim ID", "主语", "关系", "宾语", "置信度", "状态", "证据"]
     with gr.Blocks(title="PrismKE 研究工作台") as demo:
         gr.Markdown("# PrismKE 研究工作台")
@@ -250,6 +320,104 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             graph_button.click(
                 neighborhood, [entity_id, depth], [graph_plot, graph_output]
             )
+
+        with gr.Tab("实体治理"):
+            with gr.Row():
+                entity_query = gr.Textbox(label="名称、别名或上下文")
+                entity_type = gr.Textbox(label="实体类型")
+                entity_limit = gr.Slider(1, 20, value=10, step=1, label="候选数")
+            entity_search_button = gr.Button("检索候选")
+            entity_search_output = gr.JSON(label="候选及评分分解")
+            entity_search_button.click(
+                search_entities,
+                [entity_query, entity_type, entity_limit],
+                [entity_search_output],
+            )
+            with gr.Accordion("证据与候选邻域", open=False):
+                with gr.Row():
+                    with gr.Column(min_width=280):
+                        mention_evidence_id = gr.Textbox(label="提及 Evidence ID")
+                        mention_evidence_button = gr.Button("查看提及证据")
+                        mention_evidence_metadata = gr.JSON(label="提及证据")
+                        mention_evidence_preview = gr.Image(label="证据区域", type="filepath")
+                    with gr.Column(min_width=280):
+                        candidate_entity_id = gr.Textbox(label="候选 Entity ID")
+                        candidate_neighborhood_button = gr.Button("查看候选邻域")
+                        candidate_neighborhood_plot = gr.Plot(label="候选邻域")
+                        candidate_neighborhood_output = gr.JSON(label="邻域事实与证据引用")
+                mention_evidence_button.click(
+                    show_evidence, [mention_evidence_id],
+                    [mention_evidence_metadata, mention_evidence_preview],
+                )
+                candidate_neighborhood_button.click(
+                    neighborhood, [candidate_entity_id, gr.State(1)],
+                    [candidate_neighborhood_plot, candidate_neighborhood_output],
+                )
+            with gr.Row():
+                entity_review_status = gr.Dropdown(
+                    ["pending", "resolved", "all"], value="pending", label="审核状态"
+                )
+                entity_review_load = gr.Button("刷新实体审核队列")
+            entity_review_queue = gr.JSON(label="实体链接、合并与拆分任务")
+            entity_review_load.click(
+                entity_reviews, [entity_review_status], [entity_review_queue]
+            )
+            with gr.Row():
+                entity_task_id = gr.Textbox(label="Task ID")
+                entity_run_id = gr.Textbox(label="Run ID（链接审核时填写）")
+                entity_review_action = gr.Dropdown(
+                    ["link", "create", "reject", "approve", "reject_operation"],
+                    value="link",
+                    label="审核动作",
+                )
+            with gr.Row():
+                selected_entity_id = gr.Textbox(label="选择的 Entity ID")
+                entity_reviewer = gr.Textbox(label="审核人")
+            entity_review_button = gr.Button("提交实体审核", variant="primary")
+            entity_review_output = gr.JSON(label="审核结果")
+            entity_review_button.click(
+                review_entity_task,
+                [
+                    entity_task_id,
+                    entity_run_id,
+                    entity_review_action,
+                    selected_entity_id,
+                    entity_reviewer,
+                ],
+                [entity_review_output],
+            )
+            gr.Markdown("### 实体合并建议")
+            merge_sources = gr.Textbox(label="源 Entity ID，逗号分隔")
+            merge_target = gr.Textbox(label="保留的 Entity ID")
+            merge_reasons = gr.Textbox(label="理由，分号分隔")
+            merge_button = gr.Button("创建合并审核任务")
+            merge_output = gr.JSON(label="合并建议")
+            merge_button.click(
+                propose_merge,
+                [merge_sources, merge_target, merge_reasons],
+                [merge_output],
+            )
+            gr.Markdown("### 实体拆分建议")
+            split_source = gr.Textbox(label="原 Entity ID")
+            split_targets = gr.Code(
+                label="新实体 JSON 数组", language="json", value="[]"
+            )
+            split_assignments = gr.Code(
+                label="Claim 到新 Entity 的映射 JSON", language="json", value="{}"
+            )
+            split_reasons = gr.Textbox(label="理由，分号分隔")
+            split_button = gr.Button("创建拆分审核任务")
+            split_output = gr.JSON(label="拆分建议")
+            split_button.click(
+                propose_split,
+                [split_source, split_targets, split_assignments, split_reasons],
+                [split_output],
+            )
+            with gr.Accordion("实体治理历史", open=False):
+                history_entity_id = gr.Textbox(label="实体 Entity ID")
+                history_button = gr.Button("查询治理与回滚历史")
+                history_output = gr.JSON(label="实体 Revision 历史")
+                history_button.click(entity_history, [history_entity_id], [history_output])
 
         with gr.Tab("版本"):
             revision_button = gr.Button("刷新版本")

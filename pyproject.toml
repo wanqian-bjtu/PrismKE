@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "prismke"
-version = "0.3.1"
+version = "0.4.0"
 description = "Schema-guided, evidence-aware multimodal knowledge graph construction"
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
@@ -51,12 +51,29 @@ web = [
   "python-multipart>=0.0.20,<1",
   "uvicorn>=0.34,<1",
 ]
+embedding = [
+  "FlagEmbedding>=1.3,<2",
+  "torch==2.6.0",
+]
 
 [project.scripts]
 prismke = "prismke.cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/prismke"]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu124", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[[tool.uv.index]]
+name = "aliyun"
+url = "https://mirrors.aliyun.com/pypi/simple"
+default = true
 
 [tool.pytest.ini_options]
 addopts = "-q"
@@ -78,5 +95,24 @@ packages = ["prismke"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["networkx", "networkx.*", "plotly", "plotly.*", "pymupdf", "pymupdf.*"]
+module = [
+  "networkx",
+  "networkx.*",
+  "plotly",
+  "plotly.*",
+  "pymupdf",
+  "pymupdf.*",
+]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+  "FlagEmbedding",
+  "FlagEmbedding.*",
+  "huggingface_hub",
+  "huggingface_hub.*",
+  "torch",
+  "torch.*",
+]
+ignore_missing_imports = true
+follow_imports = "skip"

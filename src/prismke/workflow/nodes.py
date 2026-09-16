@@ -5,9 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from prismke.core.errors import EvidenceIntegrityError
-from prismke.core.ids import stable_id
+from prismke.core.ids import canonical_hash, stable_id
 from prismke.domain import (
     ClaimStatus,
+    EntityEmbedding,
     ExtractionRequest,
     GraphChange,
     GraphCommit,
@@ -22,16 +23,18 @@ from prismke.domain import (
     load_schema,
 )
 from prismke.governance import (
-    EntityResolver,
     MultimodalAlignmentService,
+    SemanticEntityResolver,
     collect_mentions,
     detect_conflicts,
+    entity_embedding_text,
     normalize_claims,
     route_by_risk,
 )
 from prismke.parsing import ParserRegistry, select_analysis_assets
 from prismke.persistence.base import EvidenceStore, GraphStore
-from prismke.providers.base import LLMProvider, OCRProvider, VLMProvider
+from prismke.providers.base import EmbeddingProvider, LLMProvider, OCRProvider, VLMProvider
+from prismke.providers.embedding import DisabledEmbeddingProvider
 
 
 class WorkflowNodes:
@@ -43,13 +46,24 @@ class WorkflowNodes:
         graph_store: GraphStore,
         evidence_store: EvidenceStore,
         parsers: ParserRegistry,
+        *,
+        embedding_provider: EmbeddingProvider | None = None,
+        entity_top_k: int = 10,
+        entity_auto_link_threshold: float = 0.88,
+        entity_review_threshold: float = 0.65,
+        entity_min_margin: float = 0.08,
     ) -> None:
         self.provider = provider
         self.ocr_provider = ocr_provider
         self.vlm_provider = vlm_provider
+        self.embedding_provider = embedding_provider or DisabledEmbeddingProvider()
         self.graph_store = graph_store
         self.evidence_store = evidence_store
         self.parsers = parsers
+        self.entity_top_k = entity_top_k
+        self.entity_auto_link_threshold = entity_auto_link_threshold
+        self.entity_review_threshold = entity_review_threshold
+        self.entity_min_margin = entity_min_margin
 
     async def ingest(self, state: WorkflowState) -> WorkflowState:
         if not SourceDocument(path=state.input_path).path.is_file():
@@ -152,28 +166,48 @@ class WorkflowNodes:
 
     async def resolve_entities(self, state: WorkflowState) -> WorkflowState:
         assert state.output_schema is not None
-        resolver = EntityResolver(
-            SchemaIndex(state.output_schema), await self.graph_store.list_entities()
+        resolver = SemanticEntityResolver(
+            SchemaIndex(state.output_schema),
+            self.graph_store,
+            self.embedding_provider,
+            run_id=state.run_id,
+            top_k=self.entity_top_k,
+            auto_link_threshold=self.entity_auto_link_threshold,
+            review_threshold=self.entity_review_threshold,
+            min_margin=self.entity_min_margin,
         )
-        resolution = resolver.resolve(collect_mentions(state.candidates))
+        resolution = await resolver.resolve(collect_mentions(state.candidates))
         state.entities = resolution.entities
+        state.mention_to_entity = resolution.mention_to_entity
+        state.entity_resolution_decisions = resolution.decisions or []
+        resolved = {
+            item.mention_id: item
+            for item in state.entity_review_tasks
+            if item.status == "resolved" and item.mention_id is not None
+        }
+        state.entity_review_tasks = [
+            resolved.get(item.mention_id, item) if item.mention_id is not None else item
+            for item in (resolution.review_tasks or [])
+        ]
         state.warnings.extend(
             f"review_required:{mention_id}:{','.join(reasons)}"
             for mention_id, reasons in resolution.review_reasons.items()
+        )
+        state.status = (
+            "awaiting_review"
+            if any(item.status == "pending" for item in state.entity_review_tasks)
+            else "running"
         )
         return state
 
     async def normalize_claims(self, state: WorkflowState) -> WorkflowState:
         assert state.output_schema is not None
-        resolver = EntityResolver(SchemaIndex(state.output_schema), state.entities)
-        resolution = resolver.resolve(collect_mentions(state.candidates))
-        entities = {item.id: item for item in resolution.entities}
-        state.entities = list(entities.values())
+        entities = {item.id: item for item in state.entities}
         state.claims = normalize_claims(
             state.candidates,
             SchemaIndex(state.output_schema),
             entities,
-            resolution.mention_to_entity,
+            state.mention_to_entity,
         )
         return state
 
@@ -311,5 +345,26 @@ class WorkflowNodes:
                         f"claim {claim.id} references invalid evidence {evidence_id}"
                     )
         await self.graph_store.commit(state.graph_commit)
+        if (
+            self.embedding_provider.fingerprint() != "embedding:disabled"
+            and state.graph_commit.entities
+        ):
+            active_entities = [item for item in state.graph_commit.entities if item.active]
+            texts = [entity_embedding_text(item) for item in active_entities]
+            vectors = await self.embedding_provider.encode(texts)
+            await self.graph_store.upsert_entity_embeddings(
+                [
+                    EntityEmbedding(
+                        entity_id=entity.id,
+                        model_fingerprint=self.embedding_provider.fingerprint(),
+                        text_hash=canonical_hash(text),
+                        dimension=len(vector),
+                        vector=vector,
+                    )
+                    for entity, text, vector in zip(
+                        active_entities, texts, vectors, strict=True
+                    )
+                ]
+            )
         state.status = "completed"
         return state

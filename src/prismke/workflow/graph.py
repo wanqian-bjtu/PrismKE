@@ -13,7 +13,7 @@ from prismke.parsing import ParserRegistry
 from prismke.persistence.base import EvidenceStore, GraphStore
 from prismke.persistence.checkpoints import open_checkpointer
 from prismke.persistence.runs import RunRepository
-from prismke.providers.base import LLMProvider, OCRProvider, VLMProvider
+from prismke.providers.base import EmbeddingProvider, LLMProvider, OCRProvider, VLMProvider
 from prismke.workflow.nodes import WorkflowNodes
 
 
@@ -37,6 +37,12 @@ class PrismKEWorkflow:
         checkpoint_path: Path,
         runs: RunRepository,
         parsers: ParserRegistry | None = None,
+        *,
+        embedding_provider: EmbeddingProvider | None = None,
+        entity_top_k: int = 10,
+        entity_auto_link_threshold: float = 0.88,
+        entity_review_threshold: float = 0.65,
+        entity_min_margin: float = 0.08,
     ) -> None:
         self.checkpoint_path = checkpoint_path
         self.runs = runs
@@ -47,6 +53,11 @@ class PrismKEWorkflow:
             graph_store,
             evidence_store,
             parsers or ParserRegistry(),
+            embedding_provider=embedding_provider,
+            entity_top_k=entity_top_k,
+            entity_auto_link_threshold=entity_auto_link_threshold,
+            entity_review_threshold=entity_review_threshold,
+            entity_min_margin=entity_min_margin,
         )
 
     @staticmethod
@@ -146,6 +157,11 @@ class PrismKEWorkflow:
         state = PrismKEWorkflow._state(graph_state)
         return "review" if state.status == "awaiting_review" else "continue"
 
+    @staticmethod
+    def _after_entity_resolution(graph_state: GraphState) -> str:
+        state = PrismKEWorkflow._state(graph_state)
+        return "review" if state.status == "awaiting_review" else "continue"
+
     def _build_graph(self, checkpointer: Any) -> Any:
         builder = StateGraph(GraphState)
         before_extraction = [
@@ -156,14 +172,17 @@ class PrismKEWorkflow:
             ("persist_evidence", self.nodes.persist_evidence),
             ("load_schema", self.nodes.load_schema),
         ]
-        after_extraction = [
-            ("resolve_entities", self.nodes.resolve_entities),
+        after_resolution = [
             ("normalize_claims", self.nodes.normalize_claims),
             ("detect_conflicts", self.nodes.detect_conflicts),
             ("route_by_risk", self.nodes.route_by_risk),
         ]
-        for name, handler in [*before_extraction, *after_extraction]:
+        for name, handler in [*before_extraction, *after_resolution]:
             builder.add_node(name, cast(Any, self._node(name, handler)))
+        builder.add_node(
+            "resolve_entities",
+            cast(Any, self._node("resolve_entities", self.nodes.resolve_entities)),
+        )
         builder.add_node(
             "extract_text_claims",
             cast(
@@ -203,8 +222,13 @@ class PrismKEWorkflow:
             ["extract_text_claims", "extract_visual_claims"], "align_modalities"
         )
         builder.add_edge("align_modalities", "resolve_entities")
+        builder.add_conditional_edges(
+            "resolve_entities",
+            self._after_entity_resolution,
+            {"review": END, "continue": "normalize_claims"},
+        )
         for (left, _), (right, _) in zip(
-            after_extraction, after_extraction[1:], strict=False
+            after_resolution, after_resolution[1:], strict=False
         ):
             builder.add_edge(left, right)
         builder.add_conditional_edges(
@@ -254,6 +278,21 @@ class PrismKEWorkflow:
                 config,
                 {"payload": state.model_dump(mode="json")},
                 as_node="route_by_risk",
+            )
+        self.runs.save(state)
+        return True
+
+    async def record_entity_review(self, state: WorkflowState) -> bool:
+        async with open_checkpointer(self.checkpoint_path) as saver:
+            graph = self._build_graph(saver)
+            config = self._config(state.run_id)
+            snapshot = await graph.aget_state(config)
+            if not snapshot.values:
+                return False
+            await graph.aupdate_state(
+                config,
+                {"payload": state.model_dump(mode="json")},
+                as_node="resolve_entities",
             )
         self.runs.save(state)
         return True
