@@ -639,7 +639,10 @@ class PrismKEService:
             "prepare_graph_commit",
             "commit_graph",
         }:
-            return self.review_tail_workflow(state)
+            return self.review_tail_workflow(
+                state,
+                use_embeddings=(not state.review_workspace and not state.correction_tail_only),
+            )
         if self.review_metadata:
             validate_workspace_run(self.settings.runtime_dir, state)
         if not state.review_workspace:
@@ -659,10 +662,19 @@ class PrismKEService:
             review_only=True,
         )
 
-    def review_tail_workflow(self, state: WorkflowState) -> PrismKEWorkflow:
+    def review_tail_workflow(
+        self, state: WorkflowState, *, use_embeddings: bool = False
+    ) -> PrismKEWorkflow:
         self.reviews.compatible(state)
         if state.review_workspace:
             validate_workspace_run(self.settings.runtime_dir, state)
+        embedding: EmbeddingProvider = DisabledEmbeddingProvider()
+        if use_embeddings:
+            embedding = self.embedding_provider()
+            if embedding.fingerprint() != state.embedding_provider_fingerprint:
+                raise ProviderConfigurationError(
+                    "embedding configuration changed since run creation"
+                )
         return PrismKEWorkflow(
             MockLLMProvider(),
             DisabledOCRProvider(),
@@ -671,7 +683,7 @@ class PrismKEService:
             self.evidence_store,
             self.settings.checkpoint_path,
             self.runs,
-            embedding_provider=DisabledEmbeddingProvider(),
+            embedding_provider=embedding,
             review_only=True,
         )
 

@@ -95,6 +95,7 @@ class WorkflowState(BaseModel):
     superseded_review_tasks: list[ReviewTask] = Field(default_factory=list)
     review_sync_pending: bool = False
     pending_correction_id: str | None = None
+    correction_tail_only: bool = False
 
     run_id: str
     input_path: str

@@ -278,6 +278,7 @@ class CorrectionService:
             ):
                 raise ValueError("stale review version; create a new preview")
             before = task.model_dump(mode="json")
+            state.correction_tail_only = True
             if proposal.kind == "entity":
                 target = (
                     proposal.selected_entity_id

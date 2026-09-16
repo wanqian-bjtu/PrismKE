@@ -386,3 +386,110 @@ async def test_committed_entity_exclusion_is_exact_compensation(
     state = await service.confirm_review_commit(state.run_id, "tester")
     assert (await service.graph_store.get_claim(original_claim_id)).tx_to is not None
     assert len(state.superseded_review_tasks) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["json", "neo4j"])
+async def test_identity_correction_requires_new_fact_review(
+    tmp_path: Path,
+    schema_path: Path,
+    backend: str,
+) -> None:
+    from prismke.domain import CanonicalEntity, EntityCandidate
+
+    if backend == "neo4j" and os.getenv("PRISMKE_TEST_NEO4J") != "1":
+        pytest.skip("dedicated Neo4j fixture required")
+    service, state = await paused_source(
+        tmp_path / "source", schema_path, name=f"Identity-v06-{uuid4().hex}"
+    )
+    target = CanonicalEntity(
+        id=f"entity:alternate-{uuid4().hex}", name="Alternate System", entity_type="Software"
+    )
+    state.entities.append(target)
+    state.entity_review_tasks[0].candidates.append(
+        EntityCandidate(
+            entity_id=target.id,
+            retrieval_score=0.8,
+            name_score=0.8,
+            context_score=0.8,
+            final_score=0.8,
+        )
+    )
+    await service.review_tail_workflow(state).record_entity_review(state)
+    if backend == "neo4j":
+        settings = Settings()
+        assert settings.neo4j_uri == "bolt://127.0.0.1:17687"
+        service.graph_store = Neo4jGraphStore(
+            settings.neo4j_uri,
+            settings.neo4j_user,
+            settings.neo4j_password or "test",
+            settings.neo4j_database,
+            evidence_store=service.evidence_store,
+        )
+    await service.review_entity(state.run_id, "task:entity", "create", reviewer="tester")
+    state = await service.resume(state.run_id)
+    old_claim_id = state.claims[0].id
+    await service.review(state.run_id, old_claim_id, ReviewDecision.APPROVE, "tester")
+    state = await service.resume(state.run_id)
+    source = service.reviews.repository.events(state.run_id)[0]
+    proposal = await service.corrections.propose(
+        state.run_id,
+        source.id,
+        "link",
+        target.id,
+        1,
+        "tester",
+        "identity correction",
+        "link-correction",
+    )
+    await service.corrections.apply(proposal.id, True)
+    state = await service.resume(state.run_id)
+    assert state.status == "awaiting_review" and len(state.review_tasks) == 1
+    assert state.review_tasks[0].status == "pending" and state.claims[0].id != old_claim_id
+    with pytest.raises(ValueError):
+        await service.confirm_review_commit(state.run_id, "tester")
+    await service.review(state.run_id, state.claims[0].id, ReviewDecision.APPROVE, "tester")
+    state = await service.resume(state.run_id)
+    assert state.current_node == "prepare_graph_commit"
+    state = await service.confirm_review_commit(state.run_id, "tester")
+    assert (await service.graph_store.get_claim(old_claim_id)).tx_to is not None
+    assert (await service.graph_store.get_claim(state.claims[0].id)).subject_id == target.id
+    await service.graph_store.rollback_revision(state.revision.id)
+    assert (await service.graph_store.get_claim(old_claim_id)).tx_to is None
+    assert (await service.graph_store.get_claim(state.claims[0].id)).tx_to is not None
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_compensation_failure_replays_same_revision(
+    tmp_path: Path,
+    schema_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, state = await paused_source(tmp_path / "source", schema_path)
+    await service.review_entity(state.run_id, "task:entity", "create", reviewer="tester")
+    state = await service.resume(state.run_id)
+    await service.review(state.run_id, state.claims[0].id, ReviewDecision.APPROVE, "tester")
+    state = await service.resume(state.run_id)
+    graph_before = service.graph_store.path.read_bytes()
+    source = service.reviews.repository.events(state.run_id)[-1]
+    proposal = await service.corrections.propose(
+        state.run_id, source.id, "reject", None, 1, "tester", "unsupported", "failure"
+    )
+    await service.corrections.apply(proposal.id, True)
+    await service.resume(state.run_id)
+
+    async def fail(payload: object) -> None:
+        raise OSError("graph write fault")
+
+    monkeypatch.setattr(service.graph_store, "commit", fail)
+    with pytest.raises(OSError):
+        await service.confirm_review_commit(state.run_id, "tester")
+    assert service.graph_store.path.read_bytes() == graph_before
+    assert service.review_progress(state.run_id)["review_sync_pending"]
+    monkeypatch.undo()
+    restarted = PrismKEService(Settings(_env_file=None, runtime_dir=service.settings.runtime_dir))
+    await restarted.reviews.recover(state.run_id)
+    await restarted.reviews.recover(state.run_id)
+    assert len(await restarted.graph_store.list_revisions()) == 2
+    assert (await restarted.graph_store.get_claim(state.claims[0].id)).tx_to is not None
