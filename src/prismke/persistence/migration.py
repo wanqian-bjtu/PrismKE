@@ -54,8 +54,7 @@ async def migrate_json_graph(
         for item_id, item in payload.get("entities", {}).items()
     }
     claims = {
-        item_id: Claim.model_validate(item)
-        for item_id, item in payload.get("claims", {}).items()
+        item_id: Claim.model_validate(item) for item_id, item in payload.get("claims", {}).items()
     }
     conflicts = {
         item_id: ConflictSet.model_validate(item)
@@ -120,6 +119,7 @@ async def migrate_json_graph(
                 claims=revision_claims,
                 conflicts=revision_conflicts,
                 revision=revision,
+                validation_context=revision.validation_context,
             )
         )
         report.committed_revisions = index + 1

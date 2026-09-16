@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from prismke.core.errors import EvidenceIntegrityError, SchemaValidationError
+from prismke.core.errors import EvidenceIntegrityError, GraphIntegrityError
 from prismke.core.ids import canonical_hash, stable_id
 from prismke.domain import (
     ClaimStatus,
+    CommitValidationContext,
     EntityEmbedding,
     ExtractionRequest,
     GraphChange,
@@ -16,7 +17,6 @@ from prismke.domain import (
     GraphRevision,
     LocalizationLevel,
     OCRRequest,
-    ReviewTask,
     SchemaIndex,
     SourceDocument,
     VisualExtractionRequest,
@@ -32,7 +32,7 @@ from prismke.governance import (
     normalize_claims,
     route_by_risk,
 )
-from prismke.governance.claim_normalization import merge_supporting_claims
+from prismke.governance.validation import ValidationService
 from prismke.parsing import ParserRegistry, select_analysis_assets
 from prismke.persistence.base import EvidenceStore, GraphStore
 from prismke.providers.base import EmbeddingProvider, LLMProvider, OCRProvider, VLMProvider
@@ -121,6 +121,7 @@ class WorkflowNodes:
         state.text_candidates = result.candidates
         state.warnings.extend(result.warnings)
         state.provider_calls.extend(result.call_records)
+        state.validation = ValidationService.merge(state.validation, result.validation.issues)
         return state
 
     async def extract_visual_claims(self, state: WorkflowState) -> WorkflowState:
@@ -157,6 +158,7 @@ class WorkflowNodes:
                 state.document.evidence.append(evidence)
             state.warnings.extend(result.warnings)
             state.provider_calls.extend(result.call_records)
+            state.validation = ValidationService.merge(state.validation, result.validation.issues)
         return state
 
     async def align_modalities(self, state: WorkflowState) -> WorkflowState:
@@ -168,6 +170,12 @@ class WorkflowNodes:
 
     async def resolve_entities(self, state: WorkflowState) -> WorkflowState:
         assert state.output_schema is not None
+        assert state.document is not None
+        issues = await ValidationService().candidates(
+            state.candidates, SchemaIndex(state.output_schema), state.document, self.evidence_store
+        )
+        state.validation = ValidationService.merge(state.validation, issues)
+        excluded = ValidationService.blocked_candidate_ids(state.candidates, state.validation)
         resolver = SemanticEntityResolver(
             SchemaIndex(state.output_schema),
             self.graph_store,
@@ -178,7 +186,9 @@ class WorkflowNodes:
             review_threshold=self.entity_review_threshold,
             min_margin=self.entity_min_margin,
         )
-        resolution = await resolver.resolve(collect_mentions(state.candidates))
+        resolution = await resolver.resolve(
+            collect_mentions([c for c in state.candidates if c.id not in excluded])
+        )
         state.entities = resolution.entities
         state.mention_to_entity = resolution.mention_to_entity
         state.entity_resolution_decisions = resolution.decisions or []
@@ -198,47 +208,38 @@ class WorkflowNodes:
         state.status = (
             "awaiting_review"
             if any(item.status == "pending" for item in state.entity_review_tasks)
+            or state.validation.blocking_count
             else "running"
         )
         return state
 
     async def normalize_claims(self, state: WorkflowState) -> WorkflowState:
         assert state.output_schema is not None
+        assert state.document is not None
         entities = {item.id: item for item in state.entities}
-        if state.review_workspace:
-            # Invalid extraction remains reviewable but never becomes a formal Claim.
-            claims = []
-            issues: dict[str, str] = {}
-            tasks = {task.claim_id: task for task in state.review_tasks}
-            for candidate in state.candidates:
-                try:
-                    claims.extend(
-                        normalize_claims(
-                            [candidate],
-                            SchemaIndex(state.output_schema),
-                            entities,
-                            state.mention_to_entity,
-                        )
-                    )
-                except SchemaValidationError as exc:
-                    issues[candidate.id] = str(exc)
-                    if candidate.id not in tasks:
-                        tasks[candidate.id] = ReviewTask(
-                            id=stable_id("review", state.run_id, candidate.id, "schema"),
-                            run_id=state.run_id,
-                            claim_id=candidate.id,
-                            reasons=["schema_violation", str(exc)],
-                        )
-            state.claims = merge_supporting_claims(claims)
-            state.normalization_issues = issues
-            state.review_tasks = list(tasks.values())
-            return state
+        blocked = ValidationService.blocked_candidate_ids(state.candidates, state.validation)
+        eligible = [c for c in state.candidates if c.id not in blocked]
+        issues = await ValidationService().candidates(
+            eligible,
+            SchemaIndex(state.output_schema),
+            state.document,
+            self.evidence_store,
+            entities,
+            state.mention_to_entity,
+        )
+        state.validation = ValidationService.merge(
+            state.validation,
+            issues,
+            canonical_hash([c.model_dump(mode="json") for c in state.candidates]),
+        )
+        blocked.update(i.target_id for i in issues)
         state.claims = normalize_claims(
-            state.candidates,
+            [c for c in eligible if c.id not in blocked],
             SchemaIndex(state.output_schema),
             entities,
             state.mention_to_entity,
         )
+        state.validation.passed_count = len(state.claims)
         return state
 
     async def detect_conflicts(self, state: WorkflowState) -> WorkflowState:
@@ -251,14 +252,9 @@ class WorkflowNodes:
     async def route_by_risk(self, state: WorkflowState) -> WorkflowState:
         state.claims, new_reviews = route_by_risk(state.run_id, state.claims, state.conflicts)
         resolved = {item.claim_id: item for item in state.review_tasks if item.status == "resolved"}
-        blocked_reviews = [
-            task for task in state.review_tasks if task.claim_id in state.normalization_issues
-        ]
-        state.review_tasks = [
-            resolved.get(item.claim_id, item) for item in new_reviews
-        ] + blocked_reviews
+        state.review_tasks = [resolved.get(item.claim_id, item) for item in new_reviews]
         for task in state.review_tasks:
-            if task.status != "resolved" or task.claim_id in state.normalization_issues:
+            if task.status != "resolved":
                 continue
             claim = next(item for item in state.claims if item.id == task.claim_id)
             claim.status = (
@@ -269,12 +265,18 @@ class WorkflowNodes:
         state.status = (
             "awaiting_review"
             if any(item.status == "pending" for item in state.review_tasks)
+            or state.validation.blocking_count
             else "running"
         )
         return state
 
     async def prepare_graph_commit(self, state: WorkflowState) -> WorkflowState:
         assert state.document is not None
+        if state.validation.blocking_count:
+            raise GraphIntegrityError(
+                f"VALIDATION_BLOCKED: {state.validation.blocking_count} 个问题未排除"
+            )
+        assert state.output_schema is not None
         accepted = [
             claim
             for claim in state.claims
@@ -349,6 +351,13 @@ class WorkflowNodes:
             changes=changes,
         )
         state.revision = revision
+        schema_id = canonical_hash(state.output_schema.model_dump(mode="json"))
+        context = CommitValidationContext(
+            schemas={schema_id: state.output_schema},
+            claim_schema_ids={claim.id: schema_id for claim in accepted},
+            document_asset_ids={state.document.id: [a.id for a in state.document.media_assets]},
+        )
+        revision.validation_context = context
         state.graph_commit = GraphCommit(
             documents=[
                 GraphDocument(
@@ -370,6 +379,14 @@ class WorkflowNodes:
             claims=accepted,
             conflicts=conflicts,
             revision=revision,
+            validation_context=context,
+        )
+        await ValidationService().commit(
+            state.graph_commit,
+            {**existing_entities, **{e.id: e for e in entities}},
+            {e.id: e for e in state.document.evidence},
+            {state.document.id},
+            self.evidence_store,
         )
         return state
 
@@ -398,9 +415,7 @@ class WorkflowNodes:
                         dimension=len(vector),
                         vector=vector,
                     )
-                    for entity, text, vector in zip(
-                        active_entities, texts, vectors, strict=True
-                    )
+                    for entity, text, vector in zip(active_entities, texts, vectors, strict=True)
                 ]
             )
         state.status = "completed"

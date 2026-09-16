@@ -17,12 +17,15 @@ from prismke.domain import (
     EntityReviewTask,
     GraphRevision,
     ReviewDecision,
+    ValidationResult,
+    ValidationReviewDecision,
     WorkflowState,
     load_schema,
     utc_now,
 )
 from prismke.governance import EntityGovernanceService
 from prismke.governance.entity_resolution import ENTITY_RESOLUTION_POLICY_VERSION
+from prismke.governance.validation import ValidationService
 from prismke.parsing import ParserRegistry
 from prismke.persistence import (
     AuditLog,
@@ -50,7 +53,7 @@ from prismke.providers.base import EmbeddingProvider, LLMProvider, OCRProvider, 
 from prismke.workflow.graph import PrismKEWorkflow
 from prismke.workflow.review_workspace import validate_workspace_run, workspace_metadata
 
-PIPELINE_VERSION = "0.4.0"
+PIPELINE_VERSION = "0.5.0"
 ASSET_POLICY_VERSION = "assets-v3"
 ALIGNMENT_POLICY_VERSION = "alignment-v1"
 
@@ -64,8 +67,14 @@ class PrismKEService:
         if self.review_metadata and self.settings.graph_store != "json" and graph_store is None:
             raise ValueError("imported review workspace must use its isolated JSON graph")
         self.runs = RunRepository(self.settings.runs_dir)
-        self.graph_store = graph_store or self._create_graph_store()
         self.evidence_store = FileEvidenceStore(self.settings.evidence_dir)
+        self.graph_store = graph_store or self._create_graph_store()
+        if isinstance(self.graph_store, (JSONGraphStore, Neo4jGraphStore)):
+            if isinstance(graph_store, (JSONGraphStore, Neo4jGraphStore)) and isinstance(
+                graph_store.evidence_store, FileEvidenceStore
+            ):
+                self.evidence_store = graph_store.evidence_store
+            self.graph_store.evidence_store = self.evidence_store
         self.audit = AuditLog(self.settings.audit_path)
         self.entity_governance_repository = EntityGovernanceRepository(
             self.settings.entity_governance_path
@@ -89,6 +98,70 @@ class PrismKEService:
 
     async def close(self) -> None:
         await self.graph_store.close()
+
+    async def validate_run(self, run_id: str) -> ValidationResult:
+        state = self.show_run(run_id)
+        if state.document is None or state.output_schema is None:
+            raise ValueError("run has no parsed document/schema to validate")
+        from prismke.domain import SchemaIndex
+
+        issues = await ValidationService().candidates(
+            state.candidates,
+            SchemaIndex(state.output_schema),
+            state.document,
+            self.evidence_store,
+            {e.id: e for e in state.entities} if state.entities else None,
+            state.mention_to_entity if state.entities else None,
+        )
+        return ValidationService.merge(
+            state.validation,
+            issues,
+            canonical_hash(state.document.model_dump(mode="json")),
+            len(state.claims),
+        )
+
+    async def exclude_validation_issue(
+        self, run_id: str, issue_id: str, reviewer: str, comment: str = ""
+    ) -> WorkflowState:
+        if not reviewer.strip():
+            raise ValueError("reviewer is required")
+        with self.runs.mutation_lock(run_id):
+            state = self.show_run(run_id)
+            if state.pipeline_version != PIPELINE_VERSION or state.status != "awaiting_review":
+                raise ValueError("validation decision is stale or incompatible")
+            issue = next((i for i in state.validation.issues if i.id == issue_id), None)
+            if issue is None or issue.status != "open" or "exclude" not in issue.allowed_actions:
+                raise ValueError("validation issue already handled or unavailable")
+            issue.status = "excluded"
+            state.validation_decisions.append(
+                ValidationReviewDecision(
+                    issue_id=issue_id, reviewer=reviewer.strip(), comment=comment
+                )
+            )
+            state.validation = ValidationService.merge(state.validation, [])
+            state.status = (
+                "awaiting_review"
+                if (
+                    state.validation.blocking_count
+                    or any(t.status == "pending" for t in state.entity_review_tasks)
+                    or any(t.status == "pending" for t in state.review_tasks)
+                )
+                else "running"
+            )
+            state.graph_commit = None
+            workflow = self.review_workflow(state)
+            if state.current_node == "resolve_entities":
+                updated = await workflow.record_entity_review(state)
+            else:
+                updated = await workflow.record_review(state)
+            if not updated:
+                raise LegacyCheckpointError("checkpoint unavailable")
+            self.audit.record(
+                "exclude_validation_issue",
+                run_id,
+                state.validation_decisions[-1].model_dump(mode="json"),
+            )
+            return state
 
     @staticmethod
     def _validate_endpoint(value: str, variable: str) -> None:
@@ -364,6 +437,7 @@ class PrismKEService:
             ASSET_POLICY_VERSION,
             ALIGNMENT_POLICY_VERSION,
             ENTITY_RESOLUTION_POLICY_VERSION,
+            "validation-v1",
             self.settings.entity_top_k,
             self.settings.entity_auto_link_threshold,
             self.settings.entity_review_threshold,
@@ -452,9 +526,11 @@ class PrismKEService:
             "node": state.current_node,
             "entity_pending": entity_pending,
             "claim_pending": claim_pending,
+            "validation_pending": state.validation.blocking_count,
             "isolated": state.review_workspace,
             "can_resume": not entity_pending
             and not claim_pending
+            and not state.validation.blocking_count
             and state.status != "completed"
             and state.current_node != "prepare_graph_commit"
             and not retry_commit,
@@ -462,6 +538,7 @@ class PrismKEService:
             and (state.current_node == "prepare_graph_commit" or retry_commit)
             and not entity_pending
             and not claim_pending
+            and not state.validation.blocking_count
             and (not state.submission_confirmed or retry_commit),
             "submission": {
                 "entities": len(state.graph_commit.entities),
@@ -556,8 +633,7 @@ class PrismKEService:
             )
         workflow = self.review_workflow(state)
         claim = next((item for item in state.claims if item.id == claim_id), None)
-        schema_blocked = claim_id in state.normalization_issues
-        if claim is None and not schema_blocked:
+        if claim is None:
             raise KeyError(f"claim not found: {claim_id}")
         task = next((item for item in state.review_tasks if item.claim_id == claim_id), None)
         if task is None:
@@ -566,8 +642,6 @@ class PrismKEService:
             raise ValueError("review task has already been resolved")
         if state.review_workspace and not (reviewer or "").strip():
             raise ValueError("reviewer is required in an isolated review workspace")
-        if schema_blocked and decision != ReviewDecision.REJECT:
-            raise ValueError("Schema硬约束不满足的候选仅可拒绝，不能批准写图")
         task.status = "resolved"
         task.decision = decision
         task.resolved_at = utc_now()
@@ -710,8 +784,10 @@ class PrismKEService:
             raise LegacyCheckpointError(
                 "this run was created by an older pipeline and cannot be resumed with v0.4"
             )
-        if any(task.status == "pending" for task in state.entity_review_tasks) or any(
-            task.status == "pending" for task in state.review_tasks
+        if (
+            state.validation.blocking_count
+            or any(task.status == "pending" for task in state.entity_review_tasks)
+            or any(task.status == "pending" for task in state.review_tasks)
         ):
             raise ValueError("pending reviews must be resolved before continuation")
         workflow = self.review_workflow(state)
@@ -733,8 +809,10 @@ class PrismKEService:
                 state.current_node != "prepare_graph_commit" and not retry_commit
             ):
                 raise ValueError("run is not at an isolated submission preview")
-            if any(task.status == "pending" for task in state.entity_review_tasks) or any(
-                task.status == "pending" for task in state.review_tasks
+            if (
+                state.validation.blocking_count
+                or any(task.status == "pending" for task in state.entity_review_tasks)
+                or any(task.status == "pending" for task in state.review_tasks)
             ):
                 raise ValueError("pending reviews prevent graph submission")
             if state.graph_commit is None or (state.submission_confirmed and not retry_commit):
