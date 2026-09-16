@@ -27,7 +27,7 @@ def build_validation_tab(gr: Any, service: PrismKEService) -> None:
         detail = gr.JSON(label="问题与候选影响")
         evidence = gr.Dropdown(label="问题证据", choices=[])
         evidence_text = gr.Textbox(label="校验证据文本", interactive=False)
-        evidence_image = gr.Image(label="校验证据区域", interactive=False)
+        evidence_image = gr.Image(label="校验证据区域", interactive=False, visible=False)
         reviewer = gr.Textbox(label="校验审核人")
         comment = gr.Textbox(label="排除意见")
         confirm = gr.Checkbox(label="确认排除此候选，保留原始问题及审计")
@@ -84,12 +84,12 @@ def build_validation_tab(gr: Any, service: PrismKEService) -> None:
 
         async def preview(run_id: str | None, eid: str | None) -> tuple[Any, Any]:
             if not eid or not run_id:
-                return "无可定位证据", None
+                return "无可定位证据", gr.update(value=None, visible=False)
             try:
-                result = await controller.evidence(run_id, eid)
-                return result
+                text, image = await controller.evidence(run_id, eid)
+                return text, gr.update(value=image, visible=image is not None)
             except Exception:
-                return "证据读取失败或完整性校验失败", None
+                return "证据读取失败或完整性校验失败", gr.update(value=None, visible=False)
 
         async def submit(run_id: str, issue_id: str, name: str, note: str, confirmed: bool) -> str:
             if not confirmed:
