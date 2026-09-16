@@ -19,8 +19,11 @@ from prismke.evaluation import (
     evaluate_entity_linking_manifest,
     evaluate_manifest,
 )
+from prismke.evaluation.annotations import export_reviewed_annotations
 from prismke.governance import rebuild_entity_index
 from prismke.persistence import FileEvidenceStore, Neo4jGraphStore, migrate_json_graph
+from prismke.providers import BGEM3EmbeddingProvider, MockEmbeddingProvider
+from prismke.providers.base import EmbeddingProvider
 from prismke.workflow import PrismKEService
 
 app = typer.Typer(no_args_is_help=True, help="PrismKE knowledge construction CLI")
@@ -141,42 +144,66 @@ def evaluate(
 def evaluate_entities(
     manifest: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
     output: Annotated[Path, typer.Option("--output", dir_okay=False)],
-    embedding_provider: Annotated[
-        str | None, typer.Option("--embedding-provider")
-    ] = None,
+    embedding_provider: Annotated[str | None, typer.Option("--embedding-provider")] = None,
+    protocol: Annotated[str | None, typer.Option("--protocol")] = None,
 ) -> None:
     """Evaluate semantic linking, NIL decisions and cross-document clustering."""
     settings = Settings()
     if embedding_provider is not None:
         settings.embedding_provider = embedding_provider
-    service = PrismKEService(settings)
+    if protocol not in {None, "fixed", "sequential"}:
+        raise typer.BadParameter("protocol must be fixed or sequential")
+    provider_instance: EmbeddingProvider
+    if settings.embedding_provider == "mock":
+        provider_instance = MockEmbeddingProvider()
+    elif settings.embedding_provider == "bge-m3":
+        provider_instance = BGEM3EmbeddingProvider(
+            model_name=settings.embedding_model,
+            model_revision=settings.embedding_model_revision,
+            device=settings.embedding_device,
+            use_fp16=settings.embedding_use_fp16,
+            batch_size=settings.embedding_batch_size,
+            max_tokens=settings.embedding_max_tokens,
+            cache_dir=settings.embedding_cache_dir,
+            model_cache_dir=settings.embedding_model_cache_dir,
+            allow_download=False,
+        )
+    else:
+        raise typer.BadParameter("entity evaluation requires explicit mock or bge-m3")
 
     async def execute() -> EntityLinkingEvaluationReport:
-        try:
-            return await evaluate_entity_linking_manifest(
-                manifest,
-                service.embedding_provider(),
-                top_k=settings.entity_top_k,
-                auto_link_threshold=settings.entity_auto_link_threshold,
-                review_threshold=settings.entity_review_threshold,
-                min_margin=settings.entity_min_margin,
-            )
-        finally:
-            await service.close()
+        return await evaluate_entity_linking_manifest(
+            manifest,
+            provider_instance,
+            top_k=settings.entity_top_k,
+            auto_link_threshold=settings.entity_auto_link_threshold,
+            review_threshold=settings.entity_review_threshold,
+            min_margin=settings.entity_min_margin,
+            protocol=protocol,  # type: ignore[arg-type]
+        )
 
     report = asyncio.run(execute())
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_bytes(
-        orjson.dumps(report.model_dump(mode="json"), option=orjson.OPT_INDENT_2)
-    )
+    output.write_bytes(orjson.dumps(report.model_dump(mode="json"), option=orjson.OPT_INDENT_2))
     _print_model(report)
+
+
+@app.command("export-entity-annotations")
+def export_entity_annotations(
+    workbook: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    package: Annotated[Path, typer.Option("--package", exists=True, file_okay=False)],
+    output: Annotated[Path, typer.Option("--output", file_okay=False)],
+) -> None:
+    """Export human-confirmed entity answers without modifying the workbook."""
+    try:
+        _print_model(export_reviewed_annotations(workbook, package, output))
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 @app.command("migrate-graph")
 def migrate_graph(
-    source: Annotated[
-        Path, typer.Option("--from-json", exists=True, dir_okay=False)
-    ],
+    source: Annotated[Path, typer.Option("--from-json", exists=True, dir_okay=False)],
     destination: Annotated[str, typer.Option("--to")] = "neo4j",
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
 ) -> None:
@@ -189,9 +216,7 @@ def migrate_graph(
         target = None
         if not dry_run:
             if not settings.neo4j_password:
-                raise ProviderConfigurationError(
-                    "migration requires PRISMKE_NEO4J_PASSWORD"
-                )
+                raise ProviderConfigurationError("migration requires PRISMKE_NEO4J_PASSWORD")
             target = Neo4jGraphStore(
                 settings.neo4j_uri,
                 settings.neo4j_user,
