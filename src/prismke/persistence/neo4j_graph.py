@@ -609,7 +609,8 @@ class Neo4jGraphStore:
             hops = depth * 2
             result = await session.run(
                 "MATCH (center:Entity {id: $id}) "
-                f"OPTIONAL MATCH (center)-[:SUBJECT|OBJECT*1..{hops}]-(n) "
+                f"OPTIONAL MATCH p=(center)-[:SUBJECT|OBJECT*1..{hops}]-(n) "
+                "WHERE all(node IN nodes(p) WHERE NOT node:Claim OR node.tx_to IS NULL) "
                 "WITH center, "
                 "collect(DISTINCT CASE WHEN n:Entity THEN n.payload END) AS entities, "
                 "collect(DISTINCT CASE WHEN n:Claim THEN n.payload END) AS claims "

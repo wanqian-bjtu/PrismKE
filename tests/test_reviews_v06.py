@@ -163,6 +163,8 @@ async def test_committed_fact_correction_and_restore(
     state = await service.confirm_review_commit(state.run_id, "tester")
     assert state.status == "completed"
     assert (await service.graph_store.get_claim(claim_id)).tx_to is not None
+    neighborhood = await service.graph_store.get_neighborhood(state.claims[0].subject_id)
+    assert claim_id not in {c.id for c in neighborhood.claims}
     assert state.revision.review_events and len(state.revision.changes) == 1
     # The confirmation event advances the task version but preserves the semantic decision.
     assert state.review_tasks[0].version == 3
@@ -493,3 +495,56 @@ async def test_compensation_failure_replays_same_revision(
     await restarted.reviews.recover(state.run_id)
     assert len(await restarted.graph_store.list_revisions()) == 2
     assert (await restarted.graph_store.get_claim(state.claims[0].id)).tx_to is not None
+
+
+@pytest.mark.asyncio
+async def test_exact_compensation_and_stale_rollback(tmp_path: Path, schema_path: Path) -> None:
+    from prismke.core.errors import GraphIntegrityError
+
+    service, state = await paused_source(tmp_path / "source", schema_path)
+    await service.review_entity(state.run_id, "task:entity", "create", reviewer="tester")
+    state = await service.resume(state.run_id)
+    await service.review(state.run_id, state.claims[0].id, ReviewDecision.APPROVE, "tester")
+    state = await service.resume(state.run_id)
+    first_revision_id = state.revision.id
+    source = service.reviews.repository.events(state.run_id)[-1]
+    proposal = await service.corrections.propose(
+        state.run_id, source.id, "reject", None, 1, "tester", "recheck", "exact"
+    )
+    await service.corrections.apply(proposal.id, True)
+    state = await service.resume(state.run_id)
+    transaction = state.graph_commit
+    transaction.claims[0].confidence = 0.6
+    transaction.revision.changes[0].after = transaction.claims[0].model_dump(mode="json")
+    await service.graph_store.commit(transaction)
+    await service.graph_store.commit(transaction)
+    assert (await service.graph_store.get_claim(state.claims[0].id)).confidence == 0.6
+    before = service.graph_store.path.read_bytes()
+    with pytest.raises(GraphIntegrityError, match="STALE_ROLLBACK"):
+        await service.graph_store.rollback_revision(first_revision_id)
+    assert service.graph_store.path.read_bytes() == before
+    # Missing resource guards cannot be bypassed by direct storage calls.
+    transaction = transaction.model_copy(deep=True)
+    transaction.revision.id = "revision:unguarded"
+    transaction.revision.parent_id = (await service.graph_store.latest_revision()).id
+    transaction.correction_guard.expected_resources.clear()
+    transaction.revision.correction_guard = transaction.correction_guard
+    with pytest.raises(GraphIntegrityError, match="MISSING_RESOURCE_GUARD"):
+        await service.graph_store.commit(transaction)
+    assert service.graph_store.path.read_bytes() == before
+
+
+@pytest.mark.asyncio
+async def test_legacy_run_cannot_be_corrected(tmp_path: Path, schema_path: Path) -> None:
+    from prismke.core.errors import LegacyCheckpointError
+
+    service, state = await paused_source(tmp_path / "source", schema_path)
+    await service.review_entity(state.run_id, "task:entity", "create", reviewer="tester")
+    source = service.reviews.repository.events(state.run_id)[0]
+    state = service.show_run(state.run_id)
+    state.pipeline_version = "0.5.0"
+    service.runs.save(state)
+    with pytest.raises(LegacyCheckpointError):
+        await service.corrections.propose(
+            state.run_id, source.id, "reject", None, 1, "tester", "recheck", "legacy"
+        )

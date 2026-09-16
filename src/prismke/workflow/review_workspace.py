@@ -145,6 +145,13 @@ async def import_review_run(source: Path, run_id: str, target: Path) -> Workflow
         destination_reviews = ReviewRepository(target / "reviews.sqlite")
         with closing(sqlite3.connect(f"{source_reviews.as_uri()}?mode=ro", uri=True)) as src:
             src.execute("BEGIN")
+            versions = dict(
+                src.execute("SELECT task_id,version FROM versions WHERE run_id=?", (run_id,))
+            )
+            if any(
+                versions.get(task.id, 0) != task.version for task in original.entity_review_tasks
+            ) or any(versions.get(task.id, 0) != task.version for task in original.review_tasks):
+                raise ValueError("source task versions and summary disagree; recover before import")
             if src.execute(
                 "SELECT 1 FROM events e JOIN outbox o ON o.event_id=e.id "
                 "WHERE e.run_id=? AND o.delivered=0",

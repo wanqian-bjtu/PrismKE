@@ -587,7 +587,23 @@ class PrismKEService:
     def claim_review_detail(self, run_id: str, task_id: str) -> dict[str, Any]:
         from prismke.workflow.review_details import claim_task_detail
 
-        return claim_task_detail(self.show_run(run_id), task_id)
+        try:
+            return claim_task_detail(self.show_run(run_id), task_id)
+        except (KeyError, StopIteration):
+            event = next(
+                (
+                    e
+                    for e in reversed(self.reviews.repository.events(run_id))
+                    if e.kind == "claim" and e.task_id == task_id
+                ),
+                None,
+            )
+            if event is None:
+                raise KeyError("claim review task not found") from None
+            historical = WorkflowState.model_validate(self.reviews.repository.event_state(event.id))
+            detail = claim_task_detail(historical, task_id)
+            detail["historical_only"] = True
+            return detail
 
     def review_progress(self, run_id: str) -> dict[str, Any]:
         state = self.show_run(run_id)

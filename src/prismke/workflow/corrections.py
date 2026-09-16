@@ -204,7 +204,9 @@ class CorrectionService:
                 if set(claim.source_candidate_ids) - own_ids:
                     blocked.append(f"SHARED_CLAIM: {claim.id}")
                 for evidence_id in claim.evidence_ids:
-                    ref = await self.service.evidence_store.get(evidence_id)
+                    ref = await self.service.graph_store.get_evidence(evidence_id)
+                    if ref is None:
+                        ref = await self.service.evidence_store.get(evidence_id)
                     if state.document is None or ref.document_id != state.document.id:
                         blocked.append(f"SHARED_DOCUMENT_SUPPORT: {claim.id}")
             parent = await self.service.graph_store.latest_revision()
@@ -270,6 +272,16 @@ class CorrectionService:
             parent = await self.service.graph_store.latest_revision()
             if (parent.id if parent else None) != proposal.parent_revision_id:
                 raise ValueError("graph changed; create a new preview")
+            for key, expected in proposal.preview["expected_resources"].items():
+                resource_type, resource_id = key.split(":", 1)
+                current = (
+                    await self.service.graph_store.get_claim(resource_id)
+                    if resource_type == "claim"
+                    else await self.service.graph_store.get_entity(resource_id)
+                )
+                actual = canonical_hash(current.model_dump(mode="json")) if current else None
+                if actual != expected:
+                    raise ValueError(f"STALE_CORRECTION_RESOURCE: {key}")
             tasks = state.entity_review_tasks if proposal.kind == "entity" else state.review_tasks
             task = cast(Any, next(t for t in tasks if t.id == proposal.task_id))
             if (

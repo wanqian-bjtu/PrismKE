@@ -258,7 +258,8 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
             ),
             f"实体待审核 {p.get('entity_pending', 0)} · 事实待审核 {p.get('claim_pending', 0)} · "
             f"校验待处理 {p.get('validation_pending', 0)} · "
-            f"{p.get('status', '未选择运行')} · {p.get('node', '')}",
+            f"{p.get('status', '未选择运行')} · {p.get('node', '')}"
+            + (" · 同步待恢复：继续与写图已禁用" if p.get("review_sync_pending") else ""),
             gr.update(interactive=p.get("can_resume", False)),
             p.get("submission"),
             gr.update(interactive=p.get("can_commit", False)),

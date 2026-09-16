@@ -19,6 +19,9 @@ def build_correction_tab(service: PrismKEService) -> None:
         event = gr.Dropdown(label="原审核事件", choices=[], value=None)
         history = gr.JSON(label="审核历史")
         current = gr.JSON(label="当前决定与证据")
+        evidence_id = gr.Dropdown(label="纠正关联证据", choices=[], value=None)
+        evidence_text = gr.Textbox(label="纠正证据原文", lines=6, interactive=False)
+        evidence_image = gr.Image(label="纠正证据区域", type="filepath", visible=False)
         version = gr.State(None)
         action = gr.Radio(label="替代决定", choices=[], value=None)
         candidate = gr.Dropdown(label="替代候选实体", choices=[], value=None)
@@ -31,9 +34,19 @@ def build_correction_tab(service: PrismKEService) -> None:
         apply_button = gr.Button("确认应用纠正", variant="stop")
         outcome = gr.JSON(label="纠正状态")
 
-        def load_tasks(rid: str | None) -> Any:
-            events = service.reviews.repository.events(rid) if rid else []
-            choices = list(dict.fromkeys((f"{e.kind} · {e.task_id}", e.task_id) for e in events))
+        async def load_tasks(rid: str | None) -> Any:
+            if not rid:
+                return gr.update(choices=[], value=None)
+            events = service.reviews.repository.events(rid)
+            choices = []
+            for item in {e.task_id: e for e in events}.values():
+                if item.kind == "entity":
+                    detail = await service.entity_review_detail(rid, item.task_id)
+                    label = (detail.get("mention") or {}).get("name", item.task_id)
+                else:
+                    detail = service.claim_review_detail(rid, item.task_id)
+                    label = controller.fact_label(detail["claim"])
+                choices.append((label, item.task_id))
             return gr.update(choices=choices, value=None)
 
         def load_history(rid: str, tid: str | None) -> tuple[Any, Any]:
@@ -57,6 +70,7 @@ def build_correction_tab(service: PrismKEService) -> None:
                     None,
                     gr.update(choices=[], value=None),
                     gr.update(choices=[], value=None),
+                    gr.update(choices=[], value=None),
                 )
             selected = next(e for e in service.reviews.repository.events(rid) if e.id == eid)
             detail = (
@@ -77,7 +91,15 @@ def build_correction_tab(service: PrismKEService) -> None:
                 detail["task"]["version"],
                 gr.update(choices=actions, value=None),
                 gr.update(choices=candidates, value=None, visible=selected.kind == "entity"),
+                gr.update(
+                    choices=detail["evidence_ids"],
+                    value=detail["evidence_ids"][0] if detail["evidence_ids"] else None,
+                ),
             )
+
+        async def show_evidence(rid: str, eid: str | None) -> tuple[str, Any]:
+            text, image = await controller.evidence(rid, eid) if eid else ("", None)
+            return text, gr.update(value=image, visible=image is not None)
 
         async def propose(
             rid: str,
@@ -114,7 +136,8 @@ def build_correction_tab(service: PrismKEService) -> None:
             load_tasks, [run], [task]
         )
         task.change(load_history, [run, task], [event, history])
-        event.change(load_event, [run, event], [current, version, action, candidate])
+        event.change(load_event, [run, event], [current, version, action, candidate, evidence_id])
+        evidence_id.change(show_evidence, [run, evidence_id], [evidence_text, evidence_image])
         preview_button.click(
             propose,
             [run, event, action, candidate, version, person, reason],

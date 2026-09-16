@@ -78,6 +78,13 @@ class ReviewRepository:
             ).fetchone()
         return ReviewEvent.model_validate_json(row[0]) if row else None
 
+    def event_state(self, event_id: str) -> dict[str, Any]:
+        with closing(self.connect()) as c:
+            row = c.execute("SELECT state FROM events WHERE id=?", (event_id,)).fetchone()
+        if row is None:
+            raise KeyError("review event not found")
+        return orjson.loads(row[0])  # type: ignore[no-any-return]
+
     def version(self, run_id: str, task_id: str) -> int:
         with closing(self.connect()) as c:
             row = c.execute(

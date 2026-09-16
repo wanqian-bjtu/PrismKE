@@ -191,6 +191,8 @@ class JSONGraphStore:
             next_frontier: set[str] = set()
             for payload in data["claims"].values():
                 claim = Claim.model_validate(payload)
+                if claim.tx_to is not None:
+                    continue
                 endpoints = {claim.subject_id}
                 if claim.object_entity_id:
                     endpoints.add(claim.object_entity_id)
