@@ -8,11 +8,12 @@ from typing import Any
 import orjson
 from pydantic import BaseModel, Field
 
-from prismke.core.errors import GraphIntegrityError
+from prismke.core.errors import EvidenceIntegrityError, GraphIntegrityError
 from prismke.domain import (
     CanonicalEntity,
     Claim,
     ConflictSet,
+    EntityOperation,
     EvidenceRef,
     GraphCommit,
     GraphDocument,
@@ -72,7 +73,7 @@ async def migrate_json_graph(
                     continue
                 try:
                     item = await evidence_store.get(evidence_id)
-                except Exception:
+                except EvidenceIntegrityError:
                     warnings.append(f"missing_evidence:{evidence_id}")
                     continue
                 evidence[item.id] = item
@@ -86,14 +87,21 @@ async def migrate_json_graph(
                     ),
                 )
 
+    historical_claims = {
+        (revision.id, change.resource_id): Claim.model_validate(change.after)
+        for revision in revisions
+        for change in revision.changes
+        if change.resource_type == "claim" and change.after is not None
+    }
     blocked = {
         cid
         for revision in revisions
         for cid in revision.claim_ids
         if cid in claims
-        and claims[cid].tx_to is None
+        and historical_claims.get((revision.id, cid), claims[cid]).tx_to is None
         and (
             revision.validation_context is None
+            or revision.validation_context.policy_version != "validation-v1"
             or cid not in revision.validation_context.claim_schema_ids
         )
     }
@@ -123,6 +131,7 @@ async def migrate_json_graph(
         revision_conflicts = [
             conflicts[item] for item in revision.conflict_ids if item in conflicts
         ]
+        revision_operations = []
         # Replay recorded post-change snapshots rather than copying the final state
         # into every historical revision.
         for change in revision.changes:
@@ -137,6 +146,8 @@ async def migrate_json_graph(
             elif change.resource_type == "conflict":
                 revision_conflicts = [c for c in revision_conflicts if c.id != change.resource_id]
                 revision_conflicts.append(ConflictSet.model_validate(change.after))
+            elif change.resource_type == "entity_operation":
+                revision_operations.append(EntityOperation.model_validate(change.after))
         evidence_ids = {
             evidence_id for claim in revision_claims for evidence_id in claim.evidence_ids
         }
@@ -149,6 +160,7 @@ async def migrate_json_graph(
                 entities=revision_entities,
                 claims=revision_claims,
                 conflicts=revision_conflicts,
+                entity_operations=revision_operations,
                 revision=revision,
                 validation_context=revision.validation_context,
             )

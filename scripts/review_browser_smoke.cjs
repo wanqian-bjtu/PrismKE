@@ -55,6 +55,8 @@ async function main() {
       await page.getByRole('button', { name: '排除候选', exact: true }).waitFor();
       await page.waitForFunction(() => [...document.querySelectorAll('button')]
         .some(e => e.textContent.trim() === '排除候选' && !e.disabled));
+      await page.waitForFunction(() => [...document.querySelectorAll('textarea')]
+        .some(e => e.value.includes('页码：') && e.value.includes('PrismKE')));
       await page.screenshot({ path: path.join(output, 'validation-desktop.png'), fullPage: true });
       await page.setViewportSize({ width: 390, height: 844 });
       await page.screenshot({ path: path.join(output, 'validation-mobile.png'), fullPage: true });

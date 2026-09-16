@@ -16,7 +16,17 @@ from prismke.api import create_app
 from prismke.core.errors import GraphIntegrityError, LegacyCheckpointError, ProviderResponseError
 from prismke.core.ids import file_sha256
 from prismke.core.settings import Settings
-from prismke.domain import GraphCommit, GraphRevision
+from prismke.domain import (
+    BBox,
+    EvidenceKind,
+    EvidenceRef,
+    GraphChange,
+    GraphCommit,
+    GraphRevision,
+    Modality,
+    ValidationResult,
+)
+from prismke.governance.validation import ValidationService
 from prismke.persistence import JSONGraphStore, Neo4jGraphStore
 from prismke.providers import MockLLMProvider, OpenAICompatibleLLMProvider
 from prismke.providers.validation import summarize, validate_item
@@ -251,6 +261,82 @@ async def test_same_revision_different_transaction_cannot_be_noop(tmp_path: Path
     assert store.path.read_bytes() == before
 
 
+@pytest.mark.parametrize(
+    "update",
+    [
+        {"char_start": 0},
+        {"char_start": -1, "char_end": 3},
+        {"char_start": 3, "char_end": 2},
+        {"page_number": 0},
+        {"bbox": BBox(x0=0, y0=0, x1=10, y1=10)},
+        {
+            "bbox": BBox(x0=0, y0=0, x1=101, y1=10),
+            "coordinate_space": "image_pixels",
+            "canvas_width": 100,
+            "canvas_height": 100,
+        },
+        {
+            "bbox": BBox(x0=-0.1, y0=0, x1=0.5, y1=0.5),
+            "coordinate_space": "normalized",
+            "canvas_width": 100,
+            "canvas_height": 100,
+        },
+    ],
+)
+def test_evidence_location_boundaries(update: dict[str, object]) -> None:
+    ref = EvidenceRef(
+        id="ev:location",
+        kind=EvidenceKind.TEXT_SPAN,
+        document_id="document:test",
+        source_hash="a" * 64,
+        modality=Modality.TEXT,
+    )
+    assert ValidationService.location_error(ref.model_copy(update=update)) is not None
+
+
+@pytest.mark.asyncio
+async def test_unavailable_evidence_store_is_not_an_excludable_candidate(
+    tmp_path: Path, schema_path: Path
+) -> None:
+    service, state = await mixed_run(tmp_path, schema_path)
+    service.evidence_store.blobs_dir.rename(tmp_path / "offline-blobs")
+    with pytest.raises(OSError):
+        await service.validate_run(state.run_id)
+
+
+def test_validation_report_merge_preserves_audit_status() -> None:
+    issue = ValidationService.issue(
+        "UNKNOWN_RELATION", "schema", "candidate", "c1", "relation", "未知关系"
+    )
+    previous = ValidationResult(issues=[issue], blocking_count=1)
+    issue.status = "excluded"
+    result = ValidationService.merge(previous, [issue.model_copy(update={"status": "open"})])
+    assert result.blocking_count == 0 and len(result.issues) == 1
+    assert result.issues[0].status == "excluded"
+
+
+@pytest.mark.asyncio
+async def test_entity_type_update_cannot_bypass_existing_claim_validation(tmp_path: Path) -> None:
+    store = JSONGraphStore(tmp_path / "graph")
+    transaction = versioned_transaction()
+    await prepare_fixture_commit(store, transaction)
+    await store.commit(transaction)
+    updated = transaction.entities[0].model_copy(update={"entity_type": "Undeclared"})
+    before = store.path.read_bytes()
+    with pytest.raises(GraphIntegrityError, match="UNKNOWN_ENTITY_TYPE"):
+        await store.commit(
+            GraphCommit(
+                entities=[updated],
+                revision=GraphRevision(
+                    id="revision:type-change",
+                    run_id="type-change",
+                    parent_id=transaction.revision.id,
+                ),
+            )
+        )
+    assert store.path.read_bytes() == before
+
+
 @pytest.mark.asyncio
 async def test_only_closing_legacy_claim_does_not_require_schema(tmp_path: Path) -> None:
     from prismke.domain import utc_now
@@ -269,6 +355,93 @@ async def test_only_closing_legacy_claim_does_not_require_schema(tmp_path: Path)
         )
     )
     assert (await store.get_claim(closing.id)).tx_to is not None
+
+
+@pytest.mark.asyncio
+async def test_entity_only_rollback_revalidates_later_active_claims(tmp_path: Path) -> None:
+    store = JSONGraphStore(tmp_path / "graph")
+    transaction = versioned_transaction()
+    entity = transaction.entities[0]
+    original = entity.model_copy(update={"entity_type": "Undeclared"})
+    await store.commit(
+        GraphCommit(
+            entities=[original], revision=GraphRevision(id="rev:original", run_id="original")
+        )
+    )
+    await store.commit(
+        GraphCommit(
+            entities=[entity],
+            revision=GraphRevision(
+                id="rev:entity-only",
+                run_id="entity-only",
+                parent_id="rev:original",
+                entity_ids=[entity.id],
+                changes=[
+                    GraphChange(
+                        resource_type="entity",
+                        resource_id=entity.id,
+                        action="update",
+                        before=original.model_dump(mode="json"),
+                        after=entity.model_dump(mode="json"),
+                    )
+                ],
+            ),
+        )
+    )
+    transaction.revision.parent_id = "rev:entity-only"
+    await prepare_fixture_commit(store, transaction)
+    await store.commit(transaction)
+    before = store.path.read_bytes()
+    with pytest.raises(GraphIntegrityError, match="UNKNOWN_ENTITY_TYPE"):
+        await store.rollback_revision("rev:entity-only")
+    assert store.path.read_bytes() == before
+
+
+@pytest.mark.asyncio
+async def test_unsupported_validation_policy_is_not_silently_replaced(tmp_path: Path) -> None:
+    store = JSONGraphStore(tmp_path / "graph")
+    transaction = versioned_transaction()
+    await prepare_fixture_commit(store, transaction)
+    transaction.validation_context.policy_version = "unsupported"
+    before = store.path.read_bytes()
+    with pytest.raises(GraphIntegrityError, match="MISSING_SCHEMA_CONTEXT"):
+        await store.commit(transaction)
+    assert store.path.read_bytes() == before
+
+
+@pytest.mark.asyncio
+async def test_readonly_validation_checks_claims_not_only_candidates(
+    tmp_path: Path, schema_path: Path
+) -> None:
+    service, state = await mixed_run(tmp_path, schema_path)
+    await service.exclude_validation_issue(state.run_id, state.validation.issues[0].id, "tester")
+    state = await service.resume(state.run_id)
+    state.claims[0].relation_id = "undeclared"
+    service.runs.save(state)
+    before = file_sha256(service.runs._target(state.run_id))
+    report = await service.validate_run(state.run_id)
+    assert any(i.code == "UNKNOWN_RELATION" and i.target_type == "claim" for i in report.issues)
+    assert all(not i.allowed_actions for i in report.issues if i.target_type == "claim")
+    assert file_sha256(service.runs._target(state.run_id)) == before
+
+
+@pytest.mark.asyncio
+async def test_literal_cannot_bypass_declared_entity_range(tmp_path: Path) -> None:
+    from prismke.core.ids import canonical_hash
+
+    store = JSONGraphStore(tmp_path / "graph")
+    transaction = versioned_transaction()
+    await prepare_fixture_commit(store, transaction)
+    context = transaction.validation_context
+    schema = next(iter(context.schemas.values())).model_copy(deep=True)
+    next(r for r in schema.relations if r.id == "version").range = ["Software"]
+    sid = canonical_hash(schema.model_dump(mode="json"))
+    context.schemas = {sid: schema}
+    context.claim_schema_ids = {transaction.claims[0].id: sid}
+    before = store.path.read_bytes()
+    with pytest.raises(GraphIntegrityError, match="SCHEMA_DOMAIN_RANGE"):
+        await store.commit(transaction)
+    assert store.path.read_bytes() == before
 
 
 @pytest.mark.asyncio

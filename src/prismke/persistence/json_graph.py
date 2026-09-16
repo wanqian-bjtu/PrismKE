@@ -348,6 +348,9 @@ class JSONGraphStore:
     async def rollback_revision(self, revision_id: str) -> GraphRevision:
         with self.lock:
             data = self._read()
+            previous_entities = {
+                k: CanonicalEntity.model_validate(v) for k, v in data["entities"].items()
+            }
             target_payload = next(
                 (item for item in data["revisions"] if item["id"] == revision_id), None
             )
@@ -453,10 +456,24 @@ class JSONGraphStore:
                 {c.id for c in restored_claims},
             )
             compensation.validation_context = context
+            transaction = GraphCommit(
+                entities=[
+                    CanonicalEntity.model_validate(data["entities"][eid])
+                    for eid in compensation.entity_ids
+                ],
+                claims=restored_claims,
+                revision=compensation,
+                validation_context=context,
+            )
+            transaction = final_state_commit(
+                transaction,
+                {k: Claim.model_validate(v) for k, v in data["claims"].items()},
+                previous_entities,
+                [GraphRevision.model_validate(r) for r in reversed(data["revisions"])],
+            )
+            bind_commit_provenance(transaction)
             await ValidationService().commit(
-                GraphCommit(
-                    claims=restored_claims, revision=compensation, validation_context=context
-                ),
+                transaction,
                 {k: CanonicalEntity.model_validate(v) for k, v in data["entities"].items()},
                 {k: EvidenceRef.model_validate(v) for k, v in data["evidence"].items()},
                 set(data["documents"]),

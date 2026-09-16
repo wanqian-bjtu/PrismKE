@@ -6,15 +6,21 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-from prismke.core.errors import LegacyCheckpointError, ProviderConfigurationError
+from prismke.core.errors import (
+    GraphIntegrityError,
+    LegacyCheckpointError,
+    ProviderConfigurationError,
+)
 from prismke.core.ids import canonical_hash, file_sha256, stable_id
 from prismke.core.settings import Settings
 from prismke.domain import (
     CanonicalEntity,
     ClaimStatus,
+    CommitValidationContext,
     EntityCandidate,
     EntityMention,
     EntityReviewTask,
+    GraphCommit,
     GraphRevision,
     ReviewDecision,
     ValidationResult,
@@ -105,14 +111,75 @@ class PrismKEService:
             raise ValueError("run has no parsed document/schema to validate")
         from prismke.domain import SchemaIndex
 
+        blocked = ValidationService.blocked_candidate_ids(state.candidates, state.validation)
         issues = await ValidationService().candidates(
-            state.candidates,
+            [c for c in state.candidates if c.id not in blocked],
             SchemaIndex(state.output_schema),
             state.document,
             self.evidence_store,
             {e.id: e for e in state.entities} if state.entities else None,
             state.mention_to_entity if state.entities else None,
         )
+        sid = canonical_hash(state.output_schema.model_dump(mode="json"))
+        context = (
+            CommitValidationContext(
+                schemas={sid: state.output_schema},
+                claim_schema_ids={c.id: sid for c in state.claims},
+                document_asset_ids={state.document.id: [a.id for a in state.document.media_assets]},
+            )
+            if state.pipeline_version == PIPELINE_VERSION
+            else None
+        )
+        for claim in state.claims:
+            try:
+                await ValidationService().commit(
+                    GraphCommit(
+                        claims=[claim],
+                        revision=GraphRevision(id="readonly-validation", run_id=state.run_id),
+                        validation_context=context,
+                    ),
+                    {e.id: e for e in state.entities},
+                    {e.id: e for e in state.document.evidence},
+                    {state.document.id},
+                    self.evidence_store,
+                )
+            except GraphIntegrityError as error:
+                for code in str(error).split(":", 1)[0].split(","):
+                    issue = ValidationService.issue(
+                        code.strip(),
+                        "commit",
+                        "claim",
+                        claim.id,
+                        "claim",
+                        "事实只读复核未通过，不能用排除候选绕过存储约束",
+                        claim.evidence_ids,
+                    )
+                    issue.allowed_actions = []
+                    issues.append(issue)
+        claim_ids = {c.id for c in state.claims}
+        for conflict in state.conflicts:
+            if not set(conflict.claim_ids) <= claim_ids:
+                issue = ValidationService.issue(
+                    "MISSING_CONFLICT_MEMBER",
+                    "reference",
+                    "conflict",
+                    conflict.id,
+                    "claim_ids",
+                    "冲突集合引用未知事实",
+                )
+                issue.allowed_actions = []
+                issues.append(issue)
+        if state.status == "failed":
+            issue = ValidationService.issue(
+                "INCOMPLETE_PIPELINE",
+                "commit",
+                "document",
+                state.document.id,
+                "status",
+                "运行失败，不能将不完整抽取解释为校验通过",
+            )
+            issue.allowed_actions = []
+            issues.append(issue)
         return ValidationService.merge(
             state.validation,
             issues,
@@ -628,9 +695,7 @@ class PrismKEService:
     ) -> WorkflowState:
         state = self.runs.load(run_id)
         if state.pipeline_version != PIPELINE_VERSION:
-            raise LegacyCheckpointError(
-                "this run was created by an older pipeline and cannot be resumed with v0.4"
-            )
+            raise LegacyCheckpointError("旧流程不能由 v0.5 恢复；v0.4 运行请使用 v0.4.1 接续")
         workflow = self.review_workflow(state)
         claim = next((item for item in state.claims if item.id == claim_id), None)
         if claim is None:
@@ -702,9 +767,7 @@ class PrismKEService:
     ) -> WorkflowState:
         state = self.runs.load(run_id)
         if state.pipeline_version != PIPELINE_VERSION:
-            raise LegacyCheckpointError(
-                "this run was created by an older pipeline and cannot be resumed with v0.4"
-            )
+            raise LegacyCheckpointError("旧流程不能由 v0.5 恢复；v0.4 运行请使用 v0.4.1 接续")
         workflow = self.review_workflow(state)
         task = next((item for item in state.entity_review_tasks if item.id == task_id), None)
         if task is None or task.mention_id is None:
@@ -781,9 +844,7 @@ class PrismKEService:
     async def _resume(self, run_id: str) -> WorkflowState:
         state = self.runs.load(run_id)
         if state.pipeline_version != PIPELINE_VERSION:
-            raise LegacyCheckpointError(
-                "this run was created by an older pipeline and cannot be resumed with v0.4"
-            )
+            raise LegacyCheckpointError("旧流程不能由 v0.5 恢复；v0.4 运行请使用 v0.4.1 接续")
         if (
             state.validation.blocking_count
             or any(task.status == "pending" for task in state.entity_review_tasks)

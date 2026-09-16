@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import orjson
 import pytest
 from validated_fixtures import JSONGraphStore
 
+from prismke.core.errors import GraphIntegrityError
 from prismke.domain import (
     CanonicalEntity,
     Claim,
@@ -64,3 +66,22 @@ async def test_json_migration_is_idempotent(tmp_path: Path) -> None:
     assert first.committed_revisions == 1
     assert second.committed_revisions == 1
     assert len(await target.list_revisions()) == 1
+
+
+@pytest.mark.asyncio
+async def test_missing_legacy_schema_context_blocks_before_migration(tmp_path: Path) -> None:
+    source = JSONGraphStore(tmp_path / "source")
+    await source.commit(versioned_transaction())
+    payload = source.snapshot()
+    for revision in payload["revisions"]:
+        revision.pop("validation_context", None)
+        revision.pop("commit_fingerprint", None)
+    legacy = tmp_path / "legacy.json"
+    legacy.write_bytes(orjson.dumps(payload))
+    report = await migrate_json_graph(legacy, None, dry_run=True)
+    assert report.blocked_claim_ids == ["claim:migration"]
+    target = JSONGraphStore(tmp_path / "target")
+    before = target.path.read_bytes()
+    with pytest.raises(GraphIntegrityError, match="MISSING_SCHEMA_CONTEXT"):
+        await migrate_json_graph(legacy, target)
+    assert target.path.read_bytes() == before

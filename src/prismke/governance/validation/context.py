@@ -55,6 +55,7 @@ def final_state_commit(
     }
     context = context_for_claims(revisions, additional)
     if transaction.validation_context is not None:
+        context.policy_version = transaction.validation_context.policy_version
         context.schemas.update(transaction.validation_context.schemas)
         context.claim_schema_ids.update(transaction.validation_context.claim_schema_ids)
         context.document_asset_ids.update(transaction.validation_context.document_asset_ids)
@@ -72,7 +73,7 @@ def context_for_claims(
     result = CommitValidationContext()
     for revision in revisions:
         context = revision.validation_context
-        if context is None:
+        if context is None or context.policy_version != "validation-v1":
             continue
         result.document_asset_ids.update(context.document_asset_ids)
         for claim_id in claim_ids:

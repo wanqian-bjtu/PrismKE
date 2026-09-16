@@ -205,6 +205,14 @@ class ValidationService:
                     )
             if schema.relation(c.relation) is None:
                 add("UNKNOWN_RELATION", "schema", "relation", "关系未声明，宽松模式也不允许写图")
+            relation = schema.relation(c.relation)
+            if relation and relation.range and not isinstance(c.object, EntityMention):
+                add(
+                    "SCHEMA_DOMAIN_RANGE",
+                    "schema",
+                    "object",
+                    "关系要求实体型宾语，不能使用文字值替代",
+                )
             if not c.evidence_ids:
                 add("MISSING_EVIDENCE", "evidence", "evidence_ids", "候选缺少证据")
             for eid in c.evidence_ids:
@@ -297,7 +305,11 @@ class ValidationService:
                 and subject.entity_type not in relation.domain
             ):
                 failures.append("SCHEMA_DOMAIN_RANGE")
-            if relation and obj and relation.range and obj.entity_type not in relation.range:
+            if (
+                relation
+                and relation.range
+                and (obj is None or obj.entity_type not in relation.range)
+            ):
                 failures.append("SCHEMA_DOMAIN_RANGE")
             if not claim.evidence_ids:
                 failures.append("MISSING_EVIDENCE")

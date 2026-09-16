@@ -187,11 +187,19 @@ class FileEvidenceStore:
         return self._load_ref(evidence_id)
 
     async def exists(self, evidence_id: str) -> bool:
+        self._require_available()
         return self._ref_path(evidence_id).is_file()
 
+    def _require_available(self) -> None:
+        for directory in (self.refs_dir, self.blobs_dir):
+            # Fail on unavailable stores, not as an excludable candidate problem.
+            with os.scandir(directory) as entries:
+                next(entries, None)
+
     async def verify(self, evidence_id: str) -> bool:
+        self._require_available()
         try:
             self._load_ref(evidence_id)
-        except (EvidenceIntegrityError, OSError):
+        except (EvidenceIntegrityError, FileNotFoundError):
             return False
         return True

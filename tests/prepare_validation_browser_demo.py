@@ -21,7 +21,9 @@ async def main() -> None:
     invalid.id = "candidate:browser-invalid-relation"
     invalid.relation = "undeclared_browser_relation"
     state.candidates.append(invalid)
-    workflow = service._workflow(MockLLMProvider(), DisabledOCRProvider(), DisabledVLMProvider(), False)
+    workflow = service._workflow(
+        MockLLMProvider(), DisabledOCRProvider(), DisabledVLMProvider(), False
+    )
     await workflow.record_entity_review(state)
     await import_review_run(source, state.run_id, target)
     print(state.run_id)
