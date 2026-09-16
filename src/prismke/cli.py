@@ -11,6 +11,8 @@ import typer
 from pydantic import BaseModel
 from rich.console import Console
 
+from prismke import __version__
+
 from prismke.core.errors import ProviderConfigurationError
 from prismke.core.settings import Settings
 from prismke.domain import ReviewDecision, load_schema
@@ -28,6 +30,12 @@ from prismke.workflow import PrismKEService
 
 app = typer.Typer(no_args_is_help=True, help="PrismKE knowledge construction CLI")
 console = Console()
+
+
+@app.command("version")
+def version() -> None:
+    """Show the software version (independent of checkpoint protocol)."""
+    console.print(__version__)
 
 
 def _print_model(model: object) -> None:

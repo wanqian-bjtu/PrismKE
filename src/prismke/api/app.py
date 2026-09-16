@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Annotated, Literal, cast
 from uuid import uuid4
 
+from prismke import __version__
+
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -76,7 +78,7 @@ def create_app(
         yield
         await service.close()
 
-    app = FastAPI(title="PrismKE API", version="0.4.0", lifespan=lifespan)
+    app = FastAPI(title="PrismKE API", version=__version__, lifespan=lifespan)
     app.state.prismke_service = service
 
     async def authorize(authorization: str | None = Header(default=None)) -> None:

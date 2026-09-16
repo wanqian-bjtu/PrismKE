@@ -7,6 +7,8 @@ from typing import Any, Literal, cast
 
 import orjson
 
+from prismke import __version__
+
 from prismke.domain import CanonicalEntity, ReviewDecision
 from prismke.web.review import build_review_tabs
 from prismke.workflow import PrismKEService
@@ -242,7 +244,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
 
     claim_headers = ["Claim ID", "主语", "关系", "宾语", "置信度", "状态", "证据"]
     with gr.Blocks(title="PrismKE 研究工作台") as demo:
-        gr.Markdown("# PrismKE 研究工作台")
+        gr.Markdown(f"# PrismKE 研究工作台 · {__version__}")
         if service.review_metadata:
             gr.Markdown("**隔离审核工作区 · 原评测只读 · 抽取调用禁用**")
         build_review_tabs(service)
