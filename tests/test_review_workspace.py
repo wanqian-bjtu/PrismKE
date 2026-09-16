@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -165,7 +166,7 @@ async def test_import_review_resume_preview_commit_and_rollback(
     service.ocr_provider = lambda _: (_ for _ in ()).throw(AssertionError("OCR constructed"))  # type: ignore[method-assign]
     service.vlm_provider = lambda _: (_ for _ in ()).throw(AssertionError("VLM constructed"))  # type: ignore[method-assign]
     assert len(state.entity_review_tasks) == 1
-    with pytest.raises(ValueError, match="pending reviews"):
+    with pytest.raises(ValueError, match="AWAITING_REVIEW"):
         await service.resume(state.run_id)
     with pytest.raises(ValueError, match="reviewer is required"):
         await service.review_entity(state.run_id, "task:entity", "create")
@@ -229,7 +230,7 @@ async def test_conflict_review_keeps_peer_independent(tmp_path: Path, schema_pat
     assert len(detail["conflict_peers"]) == 1
     await service.review(state.run_id, first.claim_id, ReviewDecision.APPROVE, "tester")
     assert service.show_run(state.run_id).review_tasks[1].status == "pending"
-    with pytest.raises(ValueError, match="pending reviews"):
+    with pytest.raises(ValueError, match="AWAITING_REVIEW"):
         await service.resume(state.run_id)
     await service.review(
         state.run_id, second.claim_id, ReviewDecision.REJECT, "tester", "conflict checked"
@@ -294,6 +295,14 @@ async def test_review_api_details_auth_and_no_extraction(
             == 409
         )
         assert client.post(f"/api/v1/runs/{state.run_id}/resume").status_code == 202
+        for _ in range(500):
+            execution = client.get(f"/api/v1/runs/{state.run_id}/execution").json()
+            if not execution["active"]:
+                assert execution["status"] == "awaiting_review"
+                break
+            time.sleep(0.02)
+        else:
+            pytest.fail("review continuation did not settle")
         claim_task = client.get(f"/api/v1/runs/{state.run_id}").json()["review_tasks"][0]
         assert (
             client.get(f"/api/v1/runs/{state.run_id}/reviews/{claim_task['id']}").status_code == 200
