@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from validated_fixtures import JSONGraphStore
 
 from prismke.domain import (
     CanonicalEntity,
@@ -11,7 +12,7 @@ from prismke.domain import (
     GraphCommit,
     GraphRevision,
 )
-from prismke.persistence import JSONGraphStore, migrate_json_graph
+from prismke.persistence import migrate_json_graph
 
 
 def versioned_transaction() -> GraphCommit:
@@ -57,6 +58,7 @@ async def test_json_migration_is_idempotent(tmp_path: Path) -> None:
     source = JSONGraphStore(tmp_path / "source")
     await source.commit(versioned_transaction())
     target = JSONGraphStore(tmp_path / "target")
+    target.evidence_store = source.evidence_store
     first = await migrate_json_graph(source.path, target)
     second = await migrate_json_graph(source.path, target)
     assert first.committed_revisions == 1

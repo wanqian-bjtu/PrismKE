@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 
 import pytest
+from validated_fixtures import JSONGraphStore
 
 from prismke.core.errors import GraphIntegrityError
 from prismke.domain import (
@@ -17,7 +18,6 @@ from prismke.domain import (
     GraphRevision,
     Modality,
 )
-from prismke.persistence import JSONGraphStore
 
 
 def transaction(revision_id: str = "rev:1", parent_id: str | None = None) -> GraphCommit:

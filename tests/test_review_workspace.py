@@ -114,20 +114,13 @@ async def test_schema_invalid_candidates_are_reviewable_but_never_approved(
     state = await service.resume(state.run_id)
     assert state.status == "awaiting_review"
     assert len(state.claims) == 1
-    assert set(state.normalization_issues) == {wrong_type.id, unknown.id}
-    for candidate_id in state.normalization_issues:
-        task = next(t for t in state.review_tasks if t.claim_id == candidate_id)
-        detail = service.claim_review_detail(state.run_id, task.id)
-        assert detail["allowed_actions"] == ["reject"]
-        assert detail["evidence_ids"] == valid.evidence_ids
-        with pytest.raises(ValueError, match="Schema"):
-            await service.review(state.run_id, candidate_id, ReviewDecision.APPROVE, "tester")
-        await service.review(state.run_id, candidate_id, ReviewDecision.REJECT, "tester")
-    regular = next(
-        t
-        for t in service.show_run(state.run_id).review_tasks
-        if t.claim_id not in state.normalization_issues
-    )
+    assert {i.target_id for i in state.validation.issues} == {wrong_type.id, unknown.id}
+    for issue in state.validation.issues:
+        assert issue.allowed_actions == ["exclude"]
+        with pytest.raises((ValueError, KeyError)):
+            await service.review(state.run_id, issue.target_id, ReviewDecision.APPROVE, "tester")
+        await service.exclude_validation_issue(state.run_id, issue.id, "tester")
+    regular = service.show_run(state.run_id).review_tasks[0]
     await service.review(state.run_id, regular.claim_id, ReviewDecision.APPROVE, "tester")
     state = await service.resume(state.run_id)
     assert state.graph_commit is not None

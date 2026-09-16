@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from validated_fixtures import JSONGraphStore, prepare_fixture_commit
 
 from prismke.api import create_app
 from prismke.core.errors import GraphIntegrityError
@@ -26,7 +27,7 @@ from prismke.governance import (
     rebuild_entity_index,
 )
 from prismke.governance.entity_resolution import entity_embedding_text
-from prismke.persistence import EntityGovernanceRepository, JSONGraphStore
+from prismke.persistence import EntityGovernanceRepository
 from prismke.providers import DisabledEmbeddingProvider, MockEmbeddingProvider
 from prismke.workflow import PrismKEService
 
@@ -36,10 +37,7 @@ class ContextEmbeddingProvider:
         return "embedding:test-context"
 
     async def encode(self, texts: list[str]) -> list[list[float]]:
-        return [
-            [1.0, 0.0] if "cloud" in text.lower() else [0.0, 1.0]
-            for text in texts
-        ]
+        return [[1.0, 0.0] if "cloud" in text.lower() else [0.0, 1.0] for text in texts]
 
 
 class BrokenEmbeddingProvider:
@@ -57,20 +55,28 @@ async def test_exact_alias_with_strong_context_conflict_requires_review(
 ) -> None:
     store = JSONGraphStore(tmp_path / "graph")
     entity = CanonicalEntity(
-        id="entity:aurora", name="Aurora", entity_type="Organization",
+        id="entity:aurora",
+        name="Aurora",
+        entity_type="Organization",
         context_summary="cloud database infrastructure",
     )
-    await store.commit(GraphCommit(
-        entities=[entity], revision=GraphRevision(id="seed", run_id="seed")
-    ))
+    await store.commit(
+        GraphCommit(entities=[entity], revision=GraphRevision(id="seed", run_id="seed"))
+    )
     provider = ContextEmbeddingProvider()
     await rebuild_entity_index(store, provider, backend="json", batch_size=32, dry_run=False)
     resolver = SemanticEntityResolver(
-        SchemaIndex(load_schema(schema_path)), store, provider, run_id="conflicting-context",
+        SchemaIndex(load_schema(schema_path)),
+        store,
+        provider,
+        run_id="conflicting-context",
     )
     mention = EntityMention(
-        id="mention:aurora-health", name="Aurora", entity_type="Organization",
-        context="clinical medicine research", evidence_ids=["evidence:health"],
+        id="mention:aurora-health",
+        name="Aurora",
+        entity_type="Organization",
+        context="clinical medicine research",
+        evidence_ids=["evidence:health"],
     )
     result = await resolver.resolve([mention])
     assert result.review_tasks and "strong_context_conflict" in result.review_tasks[0].reasons
@@ -86,16 +92,21 @@ async def test_ambiguous_exact_name_proposes_distinct_nil(
         CanonicalEntity(id="entity:first", name="Atlas", entity_type="Software"),
         CanonicalEntity(id="entity:second", name="Atlas", entity_type="Software"),
     ]
-    await store.commit(GraphCommit(
-        entities=entities, revision=GraphRevision(id="seed", run_id="seed")
-    ))
+    await store.commit(
+        GraphCommit(entities=entities, revision=GraphRevision(id="seed", run_id="seed"))
+    )
     resolver = SemanticEntityResolver(
-        SchemaIndex(load_schema(schema_path)), store, DisabledEmbeddingProvider(),
+        SchemaIndex(load_schema(schema_path)),
+        store,
+        DisabledEmbeddingProvider(),
         run_id="ambiguous",
     )
     mention = EntityMention(
-        id="mention:atlas", name="Atlas", entity_type="Software",
-        context="a newly developed astronomy application", evidence_ids=["evidence:atlas"],
+        id="mention:atlas",
+        name="Atlas",
+        entity_type="Software",
+        context="a newly developed astronomy application",
+        evidence_ids=["evidence:atlas"],
     )
     bundle = await resolver.resolve([mention])
     assert bundle.review_tasks and len(bundle.review_tasks) == 1
@@ -108,7 +119,8 @@ async def test_split_does_not_overwrite_existing_target(tmp_path: Path) -> None:
     store = JSONGraphStore(tmp_path / "graph")
     await seed_graph(store)
     governance = EntityGovernanceService(
-        store, EntityGovernanceRepository(tmp_path / "governance.json"),
+        store,
+        EntityGovernanceRepository(tmp_path / "governance.json"),
         DisabledEmbeddingProvider(),
     )
     existing = await store.get_entity("entity:b")
@@ -129,10 +141,12 @@ async def test_entity_content_update_invalidates_derived_vector(tmp_path: Path) 
     await rebuild_entity_index(store, provider, backend="json", batch_size=32, dry_run=False)
     source = await store.get_entity("entity:a")
     assert source is not None
-    await store.commit(GraphCommit(
+    transaction = GraphCommit(
         entities=[source.model_copy(update={"aliases": ["New alias"]})],
         revision=GraphRevision(id="update", run_id="update", parent_id="revision:seed"),
-    ))
+    )
+    await prepare_fixture_commit(store, transaction)
+    await store.commit(transaction)
     embeddings = await store.list_entity_embeddings()
     assert "entity:a" not in {item.entity_id for item in embeddings}
 
@@ -161,18 +175,18 @@ async def seed_graph(store: JSONGraphStore) -> None:
             evidence_ids=["evidence:2"],
         ),
     ]
-    await store.commit(
-        GraphCommit(
-            entities=entities,
-            claims=claims,
-            revision=GraphRevision(
-                id="revision:seed",
-                run_id="seed",
-                entity_ids=[item.id for item in entities],
-                claim_ids=[item.id for item in claims],
-            ),
-        )
+    transaction = GraphCommit(
+        entities=entities,
+        claims=claims,
+        revision=GraphRevision(
+            id="revision:seed",
+            run_id="seed",
+            entity_ids=[item.id for item in entities],
+            claim_ids=[item.id for item in claims],
+        ),
     )
+    await prepare_fixture_commit(store, transaction)
+    await store.commit(transaction)
 
 
 @pytest.mark.asyncio
@@ -197,9 +211,7 @@ async def test_json_vector_search_and_semantic_resolution(
             )
         ]
     )
-    assert await store.search_entities(
-        vector, "Software", 10, "embedding:outdated"
-    ) == []
+    assert await store.search_entities(vector, "Software", 10, "embedding:outdated") == []
     resolver = SemanticEntityResolver(
         SchemaIndex(load_schema(schema_path)),
         store,
@@ -224,9 +236,7 @@ async def test_json_vector_search_and_semantic_resolution(
 
 
 @pytest.mark.asyncio
-async def test_same_name_different_type_requires_review(
-    tmp_path: Path, schema_path: Path
-) -> None:
+async def test_same_name_different_type_requires_review(tmp_path: Path, schema_path: Path) -> None:
     store = JSONGraphStore(tmp_path / "graph")
     await store.commit(
         GraphCommit(
@@ -289,9 +299,7 @@ async def test_same_name_same_type_uses_context_vector_reranking(
         )
     )
     provider = ContextEmbeddingProvider()
-    await rebuild_entity_index(
-        store, provider, backend="json", batch_size=32, dry_run=False
-    )
+    await rebuild_entity_index(store, provider, backend="json", batch_size=32, dry_run=False)
     resolver = SemanticEntityResolver(
         SchemaIndex(load_schema(schema_path)),
         store,
@@ -392,9 +400,7 @@ async def test_stale_merge_proposal_cannot_be_applied(tmp_path: Path) -> None:
     await seed_graph(store)
     repository = EntityGovernanceRepository(tmp_path / "entity-governance.json")
     governance = EntityGovernanceService(store, repository, MockEmbeddingProvider())
-    task = await governance.propose_merge(
-        ["entity:a", "entity:b"], "entity:a", ["duplicate"]
-    )
+    task = await governance.propose_merge(["entity:a", "entity:b"], "entity:a", ["duplicate"])
     entity = await store.get_entity("entity:a")
     assert entity is not None
     await store.commit(
@@ -496,9 +502,7 @@ def test_entity_search_and_merge_review_api(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_entity_review_pauses_and_resumes_workflow(
-    tmp_path: Path, schema_path: Path
-) -> None:
+async def test_entity_review_pauses_and_resumes_workflow(tmp_path: Path, schema_path: Path) -> None:
     settings = Settings(
         _env_file=None,
         runtime_dir=tmp_path / "runtime",
@@ -531,8 +535,7 @@ async def test_entity_review_pauses_and_resumes_workflow(
     assert completed.status == "completed"
     assert completed.mention_to_entity[task.mention_id] == task.proposed_entity_id
     embeddings = {
-        item.entity_id: item
-        for item in await service.graph_store.list_entity_embeddings()
+        item.entity_id: item for item in await service.graph_store.list_entity_embeddings()
     }
     assert task.proposed_entity_id in embeddings
     run_payload = next(settings.runs_dir.glob("*.json")).read_text(encoding="utf-8")
