@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -10,6 +11,15 @@ from prismke.api import create_app
 from prismke.core.errors import GraphIntegrityError
 from prismke.core.settings import Settings
 from prismke.workflow import PrismKEService
+
+
+def wait_execution(client: TestClient, run_id: str) -> None:
+    for _ in range(500):
+        response = client.get(f"/api/v1/runs/{run_id}/execution")
+        if not response.json()["active"]:
+            return
+        time.sleep(0.02)
+    raise AssertionError("execution timed out")
 
 
 def test_non_loopback_binding_requires_token(tmp_path: Path) -> None:
@@ -53,6 +63,7 @@ def test_upload_run_uses_shared_service(tmp_path: Path, schema_path: Path) -> No
         )
         assert response.status_code == 202
         run_id = response.json()["run_id"]
+        wait_execution(client, run_id)
         state = client.get(f"/api/v1/runs/{run_id}")
         claims = client.get(f"/api/v1/runs/{run_id}/claims")
     assert state.status_code == 200
@@ -83,6 +94,7 @@ def test_review_and_resume_commit_an_awaiting_claim(tmp_path: Path, schema_path:
             data={"provider": "mock"},
         )
         run_id = response.json()["run_id"]
+        wait_execution(client, run_id)
         awaiting = client.get(f"/api/v1/runs/{run_id}").json()
         assert awaiting["status"] == "awaiting_review"
         task_id = awaiting["review_tasks"][0]["id"]
@@ -95,6 +107,7 @@ def test_review_and_resume_commit_an_awaiting_claim(tmp_path: Path, schema_path:
 
         resumed = client.post(f"/api/v1/runs/{run_id}/resume")
         assert resumed.status_code == 202
+        wait_execution(client, run_id)
         completed = client.get(f"/api/v1/runs/{run_id}").json()
 
     assert completed["status"] == "completed"
@@ -124,6 +137,7 @@ def test_revision_diff_and_rollback_endpoints(tmp_path: Path, schema_path: Path)
                 },
                 data={"provider": "mock"},
             )
+            wait_execution(client, response.json()["run_id"])
             state = client.get(f"/api/v1/runs/{response.json()['run_id']}").json()
             assert state["status"] == "completed"
             revision_ids.append(state["revision"]["id"])
