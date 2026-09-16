@@ -331,7 +331,14 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
             gr.update(choices=peer_ids, value=peer_ids[0] if peer_ids else None),
             effect,
             gr.update(interactive=detail["task"]["status"] == "pending"),
-            gr.update(value=None),
+            gr.update(
+                value=None,
+                choices=[("链接候选", "link"), ("创建新实体", "create"), ("拒绝提及", "reject")]
+                if kind == "entity"
+                else [("拒绝事实", "reject")]
+                if detail.get("allowed_actions") == ["reject"]
+                else [("批准事实", "approve"), ("拒绝事实", "reject")],
+            ),
         )
 
     async def evidence(rid: str | None, eid: str | None) -> tuple[str, Any]:

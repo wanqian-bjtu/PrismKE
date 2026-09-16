@@ -84,6 +84,31 @@ def claim_task_detail(state: WorkflowState, task_id: str) -> dict[str, Any]:
     task = next((item for item in state.review_tasks if item.id == task_id), None)
     if task is None:
         raise KeyError("claim review task not found")
+    if task.claim_id in state.normalization_issues:
+        candidate = next(item for item in state.candidates if item.id == task.claim_id)
+        return {
+            "run_id": state.run_id,
+            "task": task.model_dump(mode="json"),
+            "claim": {
+                "id": candidate.id,
+                "subject_name": candidate.subject.name,
+                "object_name": candidate.object.name
+                if isinstance(candidate.object, EntityMention)
+                else candidate.object,
+                "relation_id": candidate.relation,
+                "confidence": candidate.confidence,
+                "status": "schema_blocked",
+                "evidence_ids": candidate.evidence_ids,
+            },
+            "risk_flags": [
+                "Schema硬约束不满足：仅可拒绝；不得批准写图或自动改写",
+                state.normalization_issues[candidate.id],
+            ],
+            "allowed_actions": ["reject"],
+            "conflicts": [],
+            "conflict_peers": [],
+            "evidence_ids": candidate.evidence_ids,
+        }
     entities = {item.id: item for item in state.entities}
 
     def describe(claim: Any) -> dict[str, Any]:

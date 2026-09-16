@@ -81,6 +81,66 @@ async def paused_source(
 
 
 @pytest.mark.asyncio
+async def test_schema_invalid_candidates_are_reviewable_but_never_approved(
+    tmp_path: Path,
+    schema_path: Path,
+) -> None:
+    source, old = await paused_source(tmp_path / "source", schema_path)
+    original_hash = file_sha256(source.runs._target(old.run_id))
+    valid = old.candidates[0]
+    wrong_type = valid.model_copy(deep=True)
+    wrong_type.id = "candidate:wrong-type"
+    wrong_type.subject.entity_type = "Organization"
+    unknown = valid.model_copy(deep=True)
+    unknown.id = "candidate:unknown-relation"
+    unknown.relation = "not_in_schema"
+    old.candidates += [wrong_type, unknown]
+    # The selected canonical type, not the raw mention type, controls validation.
+    wrong_type.subject.id = "mention:wrong-type"
+    entity = old.entities[0].model_copy(deep=True)
+    entity.id = "entity:wrong-type"
+    entity.entity_type = "Organization"
+    old.entities.append(entity)
+    old.mention_to_entity[wrong_type.subject.id] = entity.id
+    workflow = source._workflow(
+        MockLLMProvider(), DisabledOCRProvider(), DisabledVLMProvider(), False
+    )
+    assert await workflow.record_entity_review(old)
+    original_hash = file_sha256(source.runs._target(old.run_id))
+    target = tmp_path / "review"
+    state = await import_review_run(source.settings.runtime_dir, old.run_id, target)
+    service = PrismKEService(Settings(_env_file=None, runtime_dir=target))
+    await service.review_entity(state.run_id, "task:entity", "create", reviewer="tester")
+    state = await service.resume(state.run_id)
+    assert state.status == "awaiting_review"
+    assert len(state.claims) == 1
+    assert set(state.normalization_issues) == {wrong_type.id, unknown.id}
+    for candidate_id in state.normalization_issues:
+        task = next(t for t in state.review_tasks if t.claim_id == candidate_id)
+        detail = service.claim_review_detail(state.run_id, task.id)
+        assert detail["allowed_actions"] == ["reject"]
+        assert detail["evidence_ids"] == valid.evidence_ids
+        with pytest.raises(ValueError, match="Schema"):
+            await service.review(state.run_id, candidate_id, ReviewDecision.APPROVE, "tester")
+        await service.review(state.run_id, candidate_id, ReviewDecision.REJECT, "tester")
+    regular = next(
+        t
+        for t in service.show_run(state.run_id).review_tasks
+        if t.claim_id not in state.normalization_issues
+    )
+    await service.review(state.run_id, regular.claim_id, ReviewDecision.APPROVE, "tester")
+    state = await service.resume(state.run_id)
+    assert state.graph_commit is not None
+    assert len(state.graph_commit.claims) == 1
+    assert not service.review_progress(state.run_id)["can_resume"]
+    assert service.review_progress(state.run_id)["can_commit"]
+    state = await service.confirm_review_commit(state.run_id, "tester")
+    assert state.status == "completed"
+    assert len(await service.graph_store.list_claims()) == 1
+    assert file_sha256(source.runs._target(old.run_id)) == original_hash
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("backend", ["json", "neo4j"])
 async def test_import_review_resume_preview_commit_and_rollback(
     tmp_path: Path,

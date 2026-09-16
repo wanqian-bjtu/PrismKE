@@ -556,7 +556,8 @@ class PrismKEService:
             )
         workflow = self.review_workflow(state)
         claim = next((item for item in state.claims if item.id == claim_id), None)
-        if claim is None:
+        schema_blocked = claim_id in state.normalization_issues
+        if claim is None and not schema_blocked:
             raise KeyError(f"claim not found: {claim_id}")
         task = next((item for item in state.review_tasks if item.claim_id == claim_id), None)
         if task is None:
@@ -565,13 +566,16 @@ class PrismKEService:
             raise ValueError("review task has already been resolved")
         if state.review_workspace and not (reviewer or "").strip():
             raise ValueError("reviewer is required in an isolated review workspace")
+        if schema_blocked and decision != ReviewDecision.REJECT:
+            raise ValueError("Schema硬约束不满足的候选仅可拒绝，不能批准写图")
         task.status = "resolved"
         task.decision = decision
         task.resolved_at = utc_now()
         task.reviewer, task.review_comment = reviewer, comment
-        claim.status = (
-            ClaimStatus.APPROVED if decision == ReviewDecision.APPROVE else ClaimStatus.REJECTED
-        )
+        if claim is not None:
+            claim.status = (
+                ClaimStatus.APPROVED if decision == ReviewDecision.APPROVE else ClaimStatus.REJECTED
+            )
         state.status = (
             "awaiting_review"
             if any(item.status == "pending" for item in state.review_tasks)

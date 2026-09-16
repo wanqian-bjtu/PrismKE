@@ -120,6 +120,7 @@ class WorkflowState(BaseModel):
     claims: list[Claim] = Field(default_factory=list)
     conflicts: list[ConflictSet] = Field(default_factory=list)
     review_tasks: list[ReviewTask] = Field(default_factory=list)
+    normalization_issues: dict[str, str] = Field(default_factory=dict)
     graph_commit: GraphCommit | None = None
     revision: GraphRevision | None = None
     warnings: list[str] = Field(default_factory=list)
