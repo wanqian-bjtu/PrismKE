@@ -32,7 +32,7 @@ from prismke.providers.http_client import post_chat_completion
 
 PROMPT_VERSION = "visual-schema-claims-v3"
 PROTOCOL_VERSION = "chat-completions-vision-v1"
-PROVIDER_VERSION = "0.2.0"
+PROVIDER_VERSION = "0.2.1"
 
 
 def _visual_prompt(request: VisualExtractionRequest) -> str:
@@ -48,8 +48,8 @@ def _visual_prompt(request: VisualExtractionRequest) -> str:
         "contains body paragraphs, do not copy them or the full OCR transcript into observations. "
         "Use short labels and concise descriptions (at most 160 characters each), retaining "
         "only the visible details needed to support claims. "
-        "and auxiliary context disagree, output the fact visible in the image. Omit any visual "
-        "claim that cannot be confirmed from image pixels or image-derived OCR.\n"
+        "If the image and auxiliary context disagree, output the fact visible in the image. "
+        "Omit any visual claim that cannot be confirmed from image pixels or image-derived OCR.\n"
         "Observation fields: label, description, confidence, optional "
         "bbox=[x0,y0,x1,y1] normalized to 0..1, attributes. Claim fields: subject, relation, "
         "object, subject_type, optional object_type, confidence, observation_index. A claim "
@@ -130,8 +130,11 @@ class OpenAICompatibleVLMProvider:
         )
 
     def _image_data_url(self, path: str) -> str:
-        with Image.open(path) as image:
+        with Image.open(path) as source:
+            image: Image.Image = source
             image.load()
+            if image.mode not in {"RGB", "RGBA", "L", "LA", "P", "1"}:
+                image = image.convert("RGB")
             if max(image.size) > self.max_image_edge:
                 image.thumbnail((self.max_image_edge, self.max_image_edge))
             output = BytesIO()

@@ -179,7 +179,12 @@ class _EvaluationService(PrismKEService):
             transport=BudgetedTransport(self.budget),
         )
         provider.cached_state = self.cached_text_state
-        provider.cache_dir = self.settings.runtime_dir / "extraction-cache" / "text"
+        cache_root = (
+            self.budget.ledger_path.parent
+            if self.budget.ledger_path is not None
+            else self.settings.runtime_dir
+        )
+        provider.cache_dir = cache_root / "extraction-cache" / "text"
         return provider
 
     def vlm_provider(self, name: str) -> VLMProvider:
