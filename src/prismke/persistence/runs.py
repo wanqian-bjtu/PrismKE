@@ -45,6 +45,9 @@ class RunRepository:
     def mutation_lock(self, run_id: str) -> FileLock:
         return FileLock(str(self._target(run_id).with_suffix(".lock")), timeout=0)
 
+    def creation_lock(self, run_id: str) -> FileLock:
+        return FileLock(str(self._target(run_id).with_suffix(".creation.lock")), timeout=30)
+
     def load(self, run_id: str) -> WorkflowState:
         target = self._target(run_id)
         if not target.is_file() and self._legacy_target(run_id).is_file():

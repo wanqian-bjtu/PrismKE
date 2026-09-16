@@ -44,6 +44,7 @@ class EvaluationCaseResult(BaseModel):
     alignment_passed: bool = False
     localization_passed: bool = False
     provider_calls: int = 0
+    unknown_usage_calls: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
     latency_ms: float = 0.0
@@ -66,6 +67,7 @@ class EvaluationReport(BaseModel):
     bbox_validity: float
     scenario_pass_rate: float
     provider_calls: int
+    unknown_usage_calls: int = 0
     input_tokens: int
     output_tokens: int
     latency_ms: float

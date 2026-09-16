@@ -3,22 +3,31 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from time import perf_counter
 from typing import Any, Literal
 
 import httpx
 
 from prismke.core.errors import ProviderRequestError
-from prismke.core.ids import stable_id
+from prismke.core.execution_control import current_execution
+from prismke.core.ids import canonical_hash, stable_id
 from prismke.domain import ProviderCallRecord
 from prismke.providers.pricing import estimate_cost_cny
 
 
-def _usage(payload: dict[str, Any]) -> tuple[int, int, int]:
+def _usage(payload: dict[str, Any]) -> tuple[int | None, int | None, int | None]:
     usage = payload.get("usage") or {}
-    input_tokens = int(usage.get("prompt_tokens", usage.get("input_tokens", 0)) or 0)
-    output_tokens = int(usage.get("completion_tokens", usage.get("output_tokens", 0)) or 0)
-    total_tokens = int(usage.get("total_tokens", input_tokens + output_tokens) or 0)
+    input_raw = usage.get("prompt_tokens", usage.get("input_tokens"))
+    output_raw = usage.get("completion_tokens", usage.get("output_tokens"))
+    if not isinstance(input_raw, int) or not isinstance(output_raw, int):
+        return None, None, None
+    input_tokens, output_tokens = input_raw, output_raw
+    if min(input_tokens, output_tokens) < 0:
+        return None, None, None
+    total_tokens = usage.get("total_tokens", input_tokens + output_tokens)
+    if not isinstance(total_tokens, int) or total_tokens != input_tokens + output_tokens:
+        return None, None, None
     return input_tokens, output_tokens, total_tokens
 
 
@@ -55,8 +64,10 @@ def _record(
     payload = payload or {}
     input_tokens, output_tokens, total_tokens = _usage(payload)
     response_model = str(payload["model"]) if payload.get("model") else None
-    estimated_cost, snapshot = estimate_cost_cny(
-        response_model or requested_model, input_tokens, output_tokens
+    estimated_cost, snapshot = (
+        estimate_cost_cny(response_model or requested_model, input_tokens, output_tokens)
+        if input_tokens is not None and output_tokens is not None
+        else (None, None)
     )
     request_id = payload.get("id")
     return ProviderCallRecord(
@@ -97,6 +108,7 @@ async def post_chat_completion(
     operation_id: str,
     prompt_version: str,
     transport: httpx.AsyncBaseTransport | None = None,
+    provider_fingerprint: str | None = None,
 ) -> tuple[dict[str, Any], ProviderCallRecord]:
     """Post one chat completion with bounded retry and sanitized failures."""
 
@@ -104,13 +116,53 @@ async def post_chat_completion(
     headers = {"Authorization": f"Bearer {api_key}"}
     retry_count = 0
     delay = 0.5
+    control = current_execution.get()
     for attempt in range(3):
+        key = stable_id(
+            "http-request",
+            provider,
+            operation_id,
+            base_url.rstrip("/"),
+            prompt_version,
+            canonical_hash(body),
+            attempt,
+        )
+        if control:
+            cached = control.begin_request(
+                key,
+                {
+                    "provider": provider,
+                    "operation_id": operation_id,
+                    "model": str(body["model"]),
+                    "prompt_version": prompt_version,
+                    "provider_fingerprint": provider_fingerprint,
+                    "input_hash": canonical_hash(body),
+                    "http_attempt": attempt,
+                },
+            )
+            if cached is not None:
+                return cached, _record(
+                    provider=provider,
+                    operation_id=operation_id,
+                    requested_model=str(body["model"]),
+                    prompt_version=prompt_version,
+                    started=started,
+                    retry_count=attempt,
+                    status="succeeded",
+                    payload=cached,
+                )
         try:
             async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
                 response = await client.post(
                     f"{base_url.rstrip('/')}/chat/completions", headers=headers, json=body
                 )
-            if (response.status_code == 429 or response.status_code >= 500) and attempt < 2:
+            if control and response.is_error:
+                control.finish_request(
+                    key, "unknown" if response.status_code >= 500 else "rejected", None, False
+                )
+            if (
+                response.status_code == 429 or (response.status_code >= 500 and not control)
+            ) and attempt < 2:
                 retry_count += 1
                 await asyncio.sleep(delay)
                 delay *= 2
@@ -131,6 +183,8 @@ async def post_chat_completion(
             try:
                 payload = dict(response.json())
             except ValueError as exc:
+                if control:
+                    control.finish_request(key, "unknown", None, False)
                 record = _record(
                     provider=provider,
                     operation_id=operation_id,
@@ -142,6 +196,30 @@ async def post_chat_completion(
                     error_code="invalid_response",
                 )
                 raise ProviderRequestError("模型服务返回了无效 JSON", call_record=record) from exc
+            if control:
+                # Only response fields required for replay; never persist the request or headers.
+                safe = {k: payload[k] for k in ("id", "model", "choices", "usage") if k in payload}
+
+                def scrub(value: Any) -> Any:
+                    if isinstance(value, str):
+                        return re.sub(
+                            r"data:image/[^\s\"]+",
+                            "[image omitted]",
+                            value.replace(api_key, "[secret omitted]"),
+                        )
+                    if isinstance(value, dict):
+                        return {
+                            k: scrub(v)
+                            for k, v in value.items()
+                            if k not in {"authorization", "api_key", "image_url"}
+                        }
+                    if isinstance(value, list):
+                        return [scrub(v) for v in value]
+                    return value
+
+                safe = scrub(safe)
+                control.finish_request(key, "completed", safe, _usage(payload)[2] is not None)
+                payload = safe
             return payload, _record(
                 provider=provider,
                 operation_id=operation_id,
@@ -156,7 +234,9 @@ async def post_chat_completion(
             raise
         except httpx.TimeoutException as exc:
             kind = "timeout"
-            if attempt < 2:
+            if control:
+                control.finish_request(key, "unknown", None, False)
+            if attempt < 2 and not control:
                 retry_count += 1
                 await asyncio.sleep(delay)
                 delay *= 2
@@ -174,7 +254,9 @@ async def post_chat_completion(
             )
             raise ProviderRequestError(message, call_record=record) from exc
         except httpx.NetworkError as exc:
-            if attempt < 2:
+            if control:
+                control.finish_request(key, "unknown", None, False)
+            if attempt < 2 and not control:
                 retry_count += 1
                 await asyncio.sleep(delay)
                 delay *= 2
@@ -191,4 +273,8 @@ async def post_chat_completion(
                 error_code=code,
             )
             raise ProviderRequestError(message, call_record=record) from exc
+        except asyncio.CancelledError:
+            if control:
+                control.finish_request(key, "unknown", None, False)
+            raise
     raise RuntimeError("unreachable")

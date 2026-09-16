@@ -11,7 +11,6 @@ from uuid import uuid4
 
 from fastapi import (
     APIRouter,
-    BackgroundTasks,
     Depends,
     FastAPI,
     File,
@@ -27,9 +26,11 @@ from filelock import Timeout
 
 from prismke import __version__
 from prismke.api.models import (
+    CancelRequest,
     CorrectionRequest,
     EntityReviewRequest,
     MergeProposalRequest,
+    ResumeRequest,
     ReviewRequest,
     RollbackRequest,
     RunAccepted,
@@ -42,6 +43,7 @@ from prismke.core.errors import (
     ProviderConfigurationError,
 )
 from prismke.core.settings import Settings
+from prismke.persistence.execution import ExecutionConflict
 from prismke.workflow import PrismKEService
 
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
@@ -83,8 +85,11 @@ def create_app(
             except Exception:
                 # Keep the pending outbox visible; never resume extraction on startup.
                 continue
-        yield
-        await service.close()
+        await service.executions.start()
+        try:
+            yield
+        finally:
+            await service.close()
 
     app = FastAPI(title="PrismKE API", version=__version__, lifespan=lifespan)
     app.state.prismke_service = service
@@ -101,16 +106,8 @@ def create_app(
 
     api = APIRouter(prefix="/api/v1", dependencies=[Depends(authorize)])
 
-    async def execute_safely(run_id: str) -> None:
-        try:
-            await service.execute_run(run_id)
-        except Exception:
-            # The workflow records a sanitized failure in RunRepository.
-            return
-
     @api.post("/runs", response_model=RunAccepted, status_code=202)
     async def create_run(
-        background_tasks: BackgroundTasks,
         document: Annotated[UploadFile, File()],
         schema_file: Annotated[UploadFile, File(alias="schema")],
         provider: Annotated[str, Form()] = "mock",
@@ -131,8 +128,13 @@ def create_app(
             allow_remote_assets,
         )
         if created:
-            background_tasks.add_task(execute_safely, state.run_id)
-        return RunAccepted(run_id=state.run_id, status=state.status, created=created)
+            service.executions.enqueue(state.run_id, "execute")
+        return RunAccepted(
+            run_id=state.run_id,
+            status=state.status,
+            created=created,
+            execution=service.executions.view(state.run_id),
+        )
 
     @api.get("/runs")
     async def list_runs() -> object:
@@ -207,26 +209,53 @@ def create_app(
             ) from exc
 
     @api.post("/runs/{run_id}/resume", status_code=202)
-    async def resume_run(run_id: str, background_tasks: BackgroundTasks) -> RunAccepted:
+    async def resume_run(run_id: str, request: ResumeRequest | None = None) -> RunAccepted:
         try:
             state = service.show_run(run_id)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="run not found") from exc
 
-        if not service.review_progress(run_id)["can_resume"]:
-            raise HTTPException(
-                status_code=409,
-                detail="resolve pending reviews or confirm preview first",
+        try:
+            service.executions.enqueue(
+                run_id, "resume", expected_version=request.expected_version if request else None
             )
+        except (ExecutionConflict, LegacyCheckpointError) as exc:
+            raise HTTPException(status_code=409, detail={"code": str(exc)}) from exc
+        return RunAccepted(
+            run_id=run_id,
+            status=state.status,
+            created=False,
+            execution=service.executions.view(run_id),
+        )
 
-        async def resume_safely() -> None:
-            try:
-                await service.resume(run_id)
-            except Exception:
-                return
+    @api.get("/runs/{run_id}/execution")
+    async def execution_status(run_id: str) -> object:
+        try:
+            progress = service.review_progress(run_id)
+            return {
+                **progress["execution"],
+                "can_resume": progress["can_resume"],
+                "can_commit": progress["can_commit"],
+            }
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="run not found") from exc
 
-        background_tasks.add_task(resume_safely)
-        return RunAccepted(run_id=run_id, status=state.status, created=False)
+    @api.get("/runs/{run_id}/execution-events")
+    async def execution_events(run_id: str) -> object:
+        try:
+            service.show_run(run_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="run not found") from exc
+        return service.executions.repository.events(run_id)
+
+    @api.post("/runs/{run_id}/cancel")
+    async def cancel_run(run_id: str, request: CancelRequest) -> object:
+        try:
+            return service.executions.cancel(run_id, **request.model_dump())
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="run not found") from exc
+        except (ExecutionConflict, LegacyCheckpointError) as exc:
+            raise HTTPException(status_code=409, detail={"code": str(exc)}) from exc
 
     @api.get("/runs/{run_id}/claims")
     async def get_run_claims(run_id: str) -> object:
@@ -427,7 +456,11 @@ def create_app(
     @api.get("/health")
     async def health() -> object:
         graph = await service.graph_store.healthcheck()
-        return {"status": "ok" if graph.healthy else "degraded", "graph": graph}
+        return {
+            "status": "ok" if graph.healthy else "degraded",
+            "graph": graph,
+            "execution": service.executions.health(),
+        }
 
     app.include_router(api)
     if mount_ui:

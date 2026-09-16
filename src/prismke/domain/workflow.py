@@ -50,9 +50,9 @@ class ProviderCallRecord(BaseModel):
     requested_model: str
     response_model: str | None = None
     request_id: str | None = None
-    input_tokens: int = Field(default=0, ge=0)
-    output_tokens: int = Field(default=0, ge=0)
-    total_tokens: int = Field(default=0, ge=0)
+    input_tokens: int | None = Field(default=None, ge=0)
+    output_tokens: int | None = Field(default=None, ge=0)
+    total_tokens: int | None = Field(default=None, ge=0)
     latency_ms: float = Field(ge=0.0)
     retry_count: int = Field(default=0, ge=0)
     status: Literal["succeeded", "failed"]

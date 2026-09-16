@@ -13,6 +13,18 @@ class RunAccepted(BaseModel):
     run_id: str
     status: str
     created: bool
+    execution: dict[str, object] | None = None
+
+
+class CancelRequest(BaseModel):
+    operator: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+    request_id: str = Field(min_length=1)
+    expected_version: int = Field(ge=0)
+
+
+class ResumeRequest(BaseModel):
+    expected_version: int | None = Field(default=None, ge=0)
 
 
 class ReviewRequest(BaseModel):

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from typing import Annotated
+from uuid import uuid4
 
 import orjson
 import typer
@@ -95,6 +96,24 @@ def run(
 def show_run(run_id: str) -> None:
     """Print the latest serialized state of a run."""
     _print_model(PrismKEService().show_run(run_id))
+
+
+@app.command("execution-status")
+def execution_status(run_id: str) -> None:
+    """Read durable task status without starting a worker."""
+    _print_model(PrismKEService().executions.view(run_id))
+
+
+@app.command("cancel")
+def cancel_execution(
+    run_id: str,
+    operator: Annotated[str, typer.Option("--operator")],
+    reason: Annotated[str, typer.Option("--reason")],
+) -> None:
+    """Persist a cooperative cancellation without taking worker ownership."""
+    service = PrismKEService()
+    view = service.executions.view(run_id)
+    _print_model(service.executions.cancel(run_id, operator, reason, uuid4().hex, view["version"]))
 
 
 @app.command()

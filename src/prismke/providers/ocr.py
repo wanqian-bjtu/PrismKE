@@ -6,6 +6,7 @@ import asyncio
 from importlib import import_module
 from typing import Any
 
+from prismke.core.execution_control import ExecutionPaused, check_execution
 from prismke.core.ids import stable_id
 from prismke.domain import (
     BBox,
@@ -86,6 +87,7 @@ class PaddleOCRProvider:
             return OCRResult()
         engine = self._get_engine()
         for asset in assets:
+            check_execution()
             try:
                 for result_index, result in enumerate(engine.predict(asset.path)):
                     payload = self._payload(result)
@@ -140,6 +142,8 @@ class PaddleOCRProvider:
                             warnings.append(
                                 f"low_confidence_ocr:block={block.id}:score={score:.3f}"
                             )
+            except ExecutionPaused:
+                raise
             except Exception as exc:
                 warnings.append(f"ocr_failed:asset={asset.id}:{type(exc).__name__}:{exc}")
         return OCRResult(text_blocks=blocks, evidence=evidence, warnings=warnings)
