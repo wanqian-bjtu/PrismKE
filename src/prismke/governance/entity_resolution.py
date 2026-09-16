@@ -260,6 +260,18 @@ class SemanticEntityResolver:
                 reasons.append("ontology_addition")
             normalized = normalize_label(mention.name)
             exact_matches = exact.get((normalized, entity_type), [])
+            if (
+                len(exact_matches) == 1
+                and provider_enabled
+                and exact_matches[0].context_summary
+                and mention.context.strip()
+            ):
+                try:
+                    scores = await self._context_scores(mention, exact_matches)
+                    if scores.get(exact_matches[0].id, 1.0) < 0.65:
+                        reasons.append("strong_context_conflict")
+                except Exception:
+                    reasons.append("context_verification_unavailable")
             if len(exact_matches) == 1 and not reasons:
                 mapping[mention.id] = exact_matches[0].id
                 decisions.append(
@@ -390,7 +402,7 @@ class SemanticEntityResolver:
                         margin=margin,
                         reasons=["high_confidence_semantic_link"],
                     )
-                elif best.final_score >= self.review_threshold:
+                elif best.final_score >= self.review_threshold or reasons:
                     reasons.extend(["ambiguous_semantic_candidates", "human_review_required"])
                     decision = EntityResolutionDecision(
                         mention_id=mention.id,

@@ -52,6 +52,32 @@ class BrokenEmbeddingProvider:
 
 
 @pytest.mark.asyncio
+async def test_exact_alias_with_strong_context_conflict_requires_review(
+    tmp_path: Path, schema_path: Path
+) -> None:
+    store = JSONGraphStore(tmp_path / "graph")
+    entity = CanonicalEntity(
+        id="entity:aurora", name="Aurora", entity_type="Organization",
+        context_summary="cloud database infrastructure",
+    )
+    await store.commit(GraphCommit(
+        entities=[entity], revision=GraphRevision(id="seed", run_id="seed")
+    ))
+    provider = ContextEmbeddingProvider()
+    await rebuild_entity_index(store, provider, backend="json", batch_size=32, dry_run=False)
+    resolver = SemanticEntityResolver(
+        SchemaIndex(load_schema(schema_path)), store, provider, run_id="conflicting-context",
+    )
+    mention = EntityMention(
+        id="mention:aurora-health", name="Aurora", entity_type="Organization",
+        context="clinical medicine research", evidence_ids=["evidence:health"],
+    )
+    result = await resolver.resolve([mention])
+    assert result.review_tasks and "strong_context_conflict" in result.review_tasks[0].reasons
+    assert mention.id not in result.mention_to_entity
+
+
+@pytest.mark.asyncio
 async def test_ambiguous_exact_name_proposes_distinct_nil(
     tmp_path: Path, schema_path: Path
 ) -> None:
