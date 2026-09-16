@@ -159,7 +159,7 @@ async def test_import_review_resume_preview_commit_and_rollback(
         )
     service = PrismKEService(Settings(_env_file=None, runtime_dir=target), graph_store=store)
     starting_claim_ids = {claim.id for claim in await service.graph_store.list_claims()}
-    starting_revisions = len(await service.graph_store.list_revisions())
+    starting_revisions = len(await service.graph_store.list_revisions(limit=10000))
     service.provider = lambda _: (_ for _ in ()).throw(AssertionError("LLM constructed"))  # type: ignore[method-assign]
     service.ocr_provider = lambda _: (_ for _ in ()).throw(AssertionError("OCR constructed"))  # type: ignore[method-assign]
     service.vlm_provider = lambda _: (_ for _ in ()).throw(AssertionError("VLM constructed"))  # type: ignore[method-assign]
@@ -199,7 +199,7 @@ async def test_import_review_resume_preview_commit_and_rollback(
     assert state.revision is not None
     compensation = await service.graph_store.rollback_revision(state.revision.id)
     assert (await service.graph_store.get_claim(task.claim_id)).tx_to is not None  # type: ignore[union-attr]
-    assert len(await service.graph_store.list_revisions()) == starting_revisions + 2
+    assert len(await service.graph_store.list_revisions(limit=10000)) == starting_revisions + 2
     assert (await service.graph_store.diff_revisions(state.revision.id, compensation.id)).changes
     assert file_sha256(source.runs._target(old.run_id)) == original_hash
     assert file_sha256(source.graph_store.path) == graph_hash  # type: ignore[attr-defined]
