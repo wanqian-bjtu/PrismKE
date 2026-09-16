@@ -8,7 +8,6 @@ from typing import Any, Literal, cast
 import orjson
 
 from prismke import __version__
-
 from prismke.domain import CanonicalEntity, ReviewDecision
 from prismke.web.review import build_review_tabs
 from prismke.workflow import PrismKEService

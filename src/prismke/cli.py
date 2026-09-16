@@ -12,7 +12,6 @@ from pydantic import BaseModel
 from rich.console import Console
 
 from prismke import __version__
-
 from prismke.core.errors import ProviderConfigurationError
 from prismke.core.settings import Settings
 from prismke.domain import ReviewDecision, load_schema

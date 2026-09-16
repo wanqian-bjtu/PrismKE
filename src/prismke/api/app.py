@@ -9,8 +9,6 @@ from pathlib import Path
 from typing import Annotated, Literal, cast
 from uuid import uuid4
 
-from prismke import __version__
-
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -27,6 +25,7 @@ from fastapi import (
 from fastapi.responses import Response
 from filelock import Timeout
 
+from prismke import __version__
 from prismke.api.models import (
     EntityReviewRequest,
     MergeProposalRequest,
