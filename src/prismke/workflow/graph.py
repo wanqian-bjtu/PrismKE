@@ -9,6 +9,7 @@ from typing import Any, TypedDict, cast
 from langgraph.graph import END, START, StateGraph
 
 from prismke.domain import WorkflowState
+from prismke.governance.validation import ValidationService
 from prismke.parsing import ParserRegistry
 from prismke.persistence.base import EvidenceStore, GraphStore
 from prismke.persistence.checkpoints import open_checkpointer
@@ -48,6 +49,11 @@ class PrismKEWorkflow:
         self.checkpoint_path = checkpoint_path
         self.runs = runs
         self.review_only = review_only
+        # Direct workflow construction must use the same evidence verifier as the service.
+        from prismke.persistence import JSONGraphStore, Neo4jGraphStore
+
+        if isinstance(graph_store, (JSONGraphStore, Neo4jGraphStore)):
+            graph_store.evidence_store = evidence_store
         self.nodes = WorkflowNodes(
             provider,
             ocr_provider,
@@ -130,6 +136,9 @@ class PrismKEWorkflow:
         state.text_candidates = text_state.text_candidates
         state.visual_candidates = visual_state.visual_candidates
         state.document = visual_state.document
+        state.validation = ValidationService.merge(
+            state.validation, [*text_state.validation.issues, *visual_state.validation.issues]
+        )
         calls = [
             *state.provider_calls,
             *text_state.provider_calls,

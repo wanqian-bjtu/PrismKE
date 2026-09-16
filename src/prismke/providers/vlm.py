@@ -24,12 +24,15 @@ from prismke.domain import (
     LocalizationLevel,
     Modality,
     ProviderCallRecord,
+    ValidationResult,
     VisualExtractionRequest,
     VisualObservation,
     normalize_label,
 )
+from prismke.governance.validation import ValidationService
 from prismke.providers.common import candidate_from_payload, parse_json_object
 from prismke.providers.http_client import post_chat_completion
+from prismke.providers.validation import summarize, validate_item
 
 PROMPT_VERSION = "visual-schema-claims-v4"
 PROTOCOL_VERSION = "chat-completions-vision-v1"
@@ -208,11 +211,31 @@ class OpenAICompatibleVLMProvider:
                     "模型服务在一次修复后仍未返回有效的结构化 JSON",
                     call_records=records,
                 ) from exc
+        issues = []
+        if not isinstance(payload.get("claims"), list) or not isinstance(
+            payload.get("observations", []), list
+        ):
+            raise ProviderResponseError(
+                "视觉 JSON 必须包含 claims 数组及 observations 数组", call_records=records
+            )
         observations: list[VisualObservation] = []
+        observations_by_index: dict[int, VisualObservation] = {}
         evidence: list[EvidenceRef] = []
         warnings: list[str] = []
         uncalibrated_observations: set[int] = set()
         for index, item in enumerate(payload.get("observations", [])):
+            if not isinstance(item, dict) or not isinstance(item.get("attributes", {}), dict):
+                issues.append(
+                    ValidationService.issue(
+                        "INVALID_OBSERVATION_STRUCTURE",
+                        "structure",
+                        "observation",
+                        stable_id("invalid-observation", asset.id, index),
+                        f"observations[{index}]",
+                        "视觉观察结构不合法，已隔离",
+                    )
+                )
+                continue
             raw_bbox = item.get("bbox")
             bbox = None
             if raw_bbox is not None:
@@ -236,7 +259,9 @@ class OpenAICompatibleVLMProvider:
             evidence_id = (
                 asset.evidence_id
                 if bbox is None
-                else stable_id("ev", request.document.id, asset.id, "vlm", index, *raw_bbox)
+                else stable_id(
+                    "ev", request.document.id, asset.id, "vlm", index, *cast(list[Any], raw_bbox)
+                )
             )
             observation_id = stable_id(
                 "observation",
@@ -246,6 +271,18 @@ class OpenAICompatibleVLMProvider:
                 item.get("label", ""),
                 item.get("description", ""),
             )
+            if raw_bbox is not None and bbox is None or index in uncalibrated_observations:
+                issues.append(
+                    ValidationService.issue(
+                        "INVALID_OBSERVATION_STRUCTURE",
+                        "structure",
+                        "observation",
+                        observation_id,
+                        f"observations[{index}]",
+                        "视觉观察的置信度或区域不合法，关联候选已隔离",
+                        [asset.evidence_id],
+                    )
+                )
             if bbox is not None:
                 evidence.append(
                     EvidenceRef(
@@ -277,13 +314,20 @@ class OpenAICompatibleVLMProvider:
                     attributes=dict(item.get("attributes", {})),
                 )
             )
+            observations_by_index[index] = observations[-1]
         candidates = []
         ocr_context = "\n".join(block.text for block in request.ocr_blocks)
         grounding_context = ocr_context or asset.context_text
-        for item in payload.get("claims", []):
+        for index, item in enumerate(payload.get("claims", [])):
+            issue = validate_item(item, asset.id, index)
+            if issue is not None:
+                issues.append(issue)
+                continue
             oi = item.get("observation_index")
             observation = (
-                observations[oi] if isinstance(oi, int) and 0 <= oi < len(observations) else None
+                observations_by_index.get(oi)
+                if isinstance(oi, int) and not isinstance(oi, bool)
+                else None
             )
             try:
                 candidate = candidate_from_payload(
@@ -310,12 +354,23 @@ class OpenAICompatibleVLMProvider:
                     and uncalibrated_observations
                 ):
                     candidate.uncalibrated_visual_confidence = True
-            except (KeyError, TypeError, ValueError) as exc:
-                warnings.append(f"visual_claim_invalid:asset={asset.id}:{exc}")
+            except (KeyError, TypeError, ValueError):
+                issues.append(
+                    ValidationService.issue(
+                        "INVALID_CANDIDATE_STRUCTURE",
+                        "structure",
+                        "candidate",
+                        stable_id("invalid-candidate", asset.id, index),
+                        f"claims[{index}]",
+                        "视觉候选字段不合法，已隔离",
+                        summary=summarize(item),
+                    )
+                )
         return ExtractionResult(
             candidates=candidates,
             observations=observations,
             evidence=evidence,
             warnings=warnings,
             call_records=records,
+            validation=ValidationService.merge(ValidationResult(), issues),
         )

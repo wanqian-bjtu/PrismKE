@@ -9,9 +9,11 @@ import httpx
 
 from prismke.core.errors import ProviderResponseError
 from prismke.core.ids import stable_id
-from prismke.domain import ExtractionRequest, ExtractionResult, ProviderCallRecord
+from prismke.domain import ExtractionRequest, ExtractionResult, ProviderCallRecord, ValidationResult
+from prismke.governance.validation import ValidationService
 from prismke.providers.common import candidate_from_payload, parse_json_object
 from prismke.providers.http_client import post_chat_completion
+from prismke.providers.validation import summarize, validate_item
 
 PROMPT_VERSION = "schema-claims-v1"
 PROTOCOL_VERSION = "chat-completions-v1"
@@ -108,10 +110,30 @@ class OpenAICompatibleLLMProvider:
         blocks_by_evidence = {item.evidence_id: item for item in request.document.text_blocks}
         candidates = []
         warnings: list[str] = []
-        for item in payload.get("claims", []):
+        issues = []
+        items = payload.get("claims")
+        if not isinstance(items, list):
+            raise ProviderResponseError("模型 JSON 缺少 claims 数组", call_records=records)
+        for position, item in enumerate(items):
+            issue = validate_item(item, request.document.id, position)
+            if issue is not None:
+                issues.append(issue)
+                continue
             evidence_id = str(item.get("evidence_id", ""))
             if evidence_id not in evidence:
                 warnings.append("provider_returned_unknown_evidence_id")
+                issues.append(
+                    ValidationService.issue(
+                        "UNKNOWN_EVIDENCE",
+                        "reference",
+                        "candidate",
+                        stable_id("invalid-candidate", request.document.id, position),
+                        f"claims[{position}].evidence_id",
+                        "候选引用未知证据",
+                        [evidence_id] if evidence_id else [],
+                        summarize(item),
+                    )
+                )
                 continue
             context = blocks_by_evidence.get(evidence_id)
             candidates.append(
@@ -126,4 +148,5 @@ class OpenAICompatibleLLMProvider:
             candidates=candidates,
             warnings=warnings,
             call_records=records,
+            validation=ValidationService.merge(ValidationResult(), issues),
         )

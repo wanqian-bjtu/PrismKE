@@ -33,6 +33,7 @@ from prismke.api.models import (
     RollbackRequest,
     RunAccepted,
     SplitProposalRequest,
+    ValidationExcludeRequest,
 )
 from prismke.core.errors import (
     GraphIntegrityError,
@@ -172,6 +173,30 @@ def create_app(
             return service.show_run(run_id)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="run not found") from exc
+
+    @api.get("/runs/{run_id}/validation")
+    async def run_validation(run_id: str) -> object:
+        try:
+            return await service.validate_run(run_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="run not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @api.post("/runs/{run_id}/validation-issues/{issue_id}/exclude")
+    async def exclude_validation(
+        run_id: str, issue_id: str, request: ValidationExcludeRequest
+    ) -> object:
+        try:
+            return await service.exclude_validation_issue(
+                run_id, issue_id, request.reviewer, request.comment
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="run not found") from exc
+        except (ValueError, LegacyCheckpointError, Timeout) as exc:
+            raise HTTPException(
+                status_code=409, detail="校验问题已处理、过期或当前不可排除"
+            ) from exc
 
     @api.post("/runs/{run_id}/resume", status_code=202)
     async def resume_run(run_id: str, background_tasks: BackgroundTasks) -> RunAccepted:

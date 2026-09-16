@@ -25,6 +25,13 @@ from prismke.domain import (
     GraphRevision,
     RevisionDiff,
 )
+from prismke.governance.validation import ValidationService
+from prismke.governance.validation.context import (
+    bind_commit_provenance,
+    context_for_claims,
+    final_state_commit,
+)
+from prismke.persistence.base import EvidenceStore
 
 
 def _dump(model: Any) -> str:
@@ -44,7 +51,9 @@ class Neo4jGraphStore:
         database: str = "neo4j",
         *,
         driver: Any | None = None,
+        evidence_store: EvidenceStore | None = None,
     ) -> None:
+        self.evidence_store = evidence_store
         if driver is None:
             try:
                 from neo4j import AsyncGraphDatabase
@@ -118,8 +127,7 @@ class Neo4jGraphStore:
             return GraphHealth(backend="neo4j", healthy=False, message=type(exc).__name__)
         return GraphHealth(backend="neo4j", healthy=True)
 
-    @staticmethod
-    async def _commit_tx(tx: Any, transaction: GraphCommit) -> None:
+    async def _commit_tx(self, tx: Any, transaction: GraphCommit) -> None:
         result = await tx.run(
             "MERGE (h:GraphHead {id: 'singleton'}) "
             "SET h.lock_nonce=randomUUID() RETURN h.latest_id AS latest_id"
@@ -148,6 +156,47 @@ class Neo4jGraphStore:
                 f"got {transaction.revision.parent_id}"
             )
 
+        entity_result = await tx.run("MATCH (n:Entity) RETURN n.payload AS payload")
+        entities = {
+            _load(r["payload"], CanonicalEntity).id: _load(r["payload"], CanonicalEntity)
+            async for r in entity_result
+        }
+        previous_entities = dict(entities)
+        entities.update({e.id: e for e in transaction.entities})
+        evidence_result = await tx.run("MATCH (n:Evidence) RETURN n.payload AS payload")
+        evidence_map = {
+            _load(r["payload"], EvidenceRef).id: _load(r["payload"], EvidenceRef)
+            async for r in evidence_result
+        }
+        evidence_map.update({e.id: e for e in transaction.evidence})
+        document_result = await tx.run("MATCH (n:Document) RETURN n.id AS id")
+        document_ids = {r["id"] async for r in document_result} | {
+            d.id for d in transaction.documents
+        }
+        claim_result = await tx.run("MATCH (n:Claim) RETURN n.payload AS payload")
+        current_claims = {
+            _load(r["payload"], Claim).id: _load(r["payload"], Claim) async for r in claim_result
+        }
+        from prismke.persistence.json_graph import JSONGraphStore
+
+        transaction.claims = [
+            JSONGraphStore._merge_claim(current_claims[c.id].model_dump(mode="json"), c)
+            if c.id in current_claims
+            else c
+            for c in transaction.claims
+        ]
+        current_claims.update({c.id: c for c in transaction.claims})
+        revision_result = await tx.run(
+            "MATCH (n:Revision) RETURN n.payload AS payload ORDER BY n.created_at DESC"
+        )
+        revisions = [_load(r["payload"], GraphRevision) async for r in revision_result]
+        await ValidationService().commit(
+            final_state_commit(transaction, current_claims, previous_entities, revisions),
+            entities,
+            evidence_map,
+            document_ids,
+            self.evidence_store,
+        )
         for document in transaction.documents:
             await tx.run(
                 "MERGE (n:Document {id: $id}) "
@@ -181,7 +230,8 @@ class Neo4jGraphStore:
                 await tx.run(
                     "MATCH (n:Entity {id: $id}) "
                     "REMOVE n.embedding, n.embedding_model, n.embedding_text_hash, "
-                    "n.embedding_dimension", id=entity.id,
+                    "n.embedding_dimension",
+                    id=entity.id,
                 )
             if not entity.active:
                 closing_claim_ids = [claim.id for claim in transaction.claims]
@@ -280,9 +330,7 @@ class Neo4jGraphStore:
                 claim_ids=conflict.claim_ids,
             )
         for operation in transaction.entity_operations:
-            referenced_entities = set(
-                operation.source_entity_ids + operation.target_entity_ids
-            )
+            referenced_entities = set(operation.source_entity_ids + operation.target_entity_ids)
             result = await tx.run(
                 "MATCH (n:Entity) WHERE n.id IN $ids RETURN collect(n.id) AS ids",
                 ids=sorted(referenced_entities),
@@ -314,8 +362,7 @@ class Neo4jGraphStore:
                     )
                 else:
                     await tx.run(
-                        "MATCH ()-[r:MERGED_INTO {operation_id: $operation_id}]->() "
-                        "DELETE r",
+                        "MATCH ()-[r:MERGED_INTO {operation_id: $operation_id}]->() DELETE r",
                         operation_id=operation.id,
                     )
         revision = transaction.revision
@@ -360,6 +407,8 @@ class Neo4jGraphStore:
         )
 
     async def commit(self, transaction: GraphCommit) -> None:
+        bind_commit_provenance(transaction)
+        transaction = transaction.model_copy(deep=True)
         await self._ensure_schema()
         async with self.driver.session(database=self.database) as session:
             await session.execute_write(self._commit_tx, transaction)
@@ -424,15 +473,13 @@ class Neo4jGraphStore:
             for record in records:
                 candidate = [float(value) for value in record["embedding"]]
                 candidate_norm = math.sqrt(sum(value * value for value in candidate)) or 1.0
-                score = sum(
-                    left * right for left, right in zip(vector, candidate, strict=True)
-                ) / (query_norm * candidate_norm)
+                score = sum(left * right for left, right in zip(vector, candidate, strict=True)) / (
+                    query_norm * candidate_norm
+                )
                 matches.append(
                     (_load(record["payload"], CanonicalEntity), max(-1.0, min(1.0, score)))
                 )
-            return sorted(
-                matches, key=lambda item: (-round(item[1], 12), item[0].id)
-            )[:top_k]
+            return sorted(matches, key=lambda item: (-round(item[1], 12), item[0].id))[:top_k]
         async with self.driver.session(database=self.database) as session:
             result = await session.run(
                 "MATCH (n:Entity {entity_type: $entity_type}) "
@@ -450,13 +497,11 @@ class Neo4jGraphStore:
             if len(candidate) != len(vector):
                 continue
             candidate_norm = math.sqrt(sum(value * value for value in candidate)) or 1.0
-            score = sum(
-                left * right for left, right in zip(vector, candidate, strict=True)
-            ) / (query_norm * candidate_norm)
+            score = sum(left * right for left, right in zip(vector, candidate, strict=True)) / (
+                query_norm * candidate_norm
+            )
             matches.append((_load(record["payload"], CanonicalEntity), score))
-        return sorted(
-            matches, key=lambda item: (-round(item[1], 12), item[0].id)
-        )[:top_k]
+        return sorted(matches, key=lambda item: (-round(item[1], 12), item[0].id))[:top_k]
 
     async def list_entity_embeddings(self) -> list[EntityEmbedding]:
         async with self.driver.session(database=self.database) as session:
@@ -481,6 +526,7 @@ class Neo4jGraphStore:
     async def upsert_entity_embeddings(self, embeddings: list[EntityEmbedding]) -> None:
         await self._ensure_schema()
         async with self.driver.session(database=self.database) as session:
+
             async def write(tx: Any) -> None:
                 for embedding in embeddings:
                     result = await tx.run(
@@ -621,9 +667,7 @@ class Neo4jGraphStore:
                 else:
                     continue
                 entities.append(replacement_entity)
-                current_payload = (
-                    current_entity.model_dump(mode="json") if current_entity else None
-                )
+                current_payload = current_entity.model_dump(mode="json") if current_entity else None
                 replacement_payload = replacement_entity.model_dump(mode="json")
             elif change.resource_type == "claim":
                 current_claim = current_claims.get(change.resource_id)
@@ -640,9 +684,7 @@ class Neo4jGraphStore:
                 current_payload = current_claim.model_dump(mode="json") if current_claim else None
                 replacement_payload = replacement_claim.model_dump(mode="json")
             elif change.resource_type == "conflict":
-                current_conflict = await self._get(
-                    "ConflictSet", change.resource_id, ConflictSet
-                )
+                current_conflict = await self._get("ConflictSet", change.resource_id, ConflictSet)
                 if change.action == "create" and current_conflict is not None:
                     replacement_conflict = current_conflict.model_copy(
                         update={"status": "resolved"}
@@ -674,9 +716,7 @@ class Neo4jGraphStore:
                     continue
                 entity_operations.append(replacement_operation)
                 current_payload = (
-                    current_operation.model_dump(mode="json")
-                    if current_operation
-                    else None
+                    current_operation.model_dump(mode="json") if current_operation else None
                 )
                 replacement_payload = replacement_operation.model_dump(mode="json")
             inverse.append(
@@ -698,6 +738,10 @@ class Neo4jGraphStore:
             changes=inverse,
             created_at=now,
         )
+        context = context_for_claims(
+            await self.list_revisions(limit=100000), {c.id for c in claims}
+        )
+        revision.validation_context = context
         await self.commit(
             GraphCommit(
                 entities=entities,
@@ -705,6 +749,7 @@ class Neo4jGraphStore:
                 conflicts=conflicts,
                 entity_operations=entity_operations,
                 revision=revision,
+                validation_context=context,
             )
         )
         return revision

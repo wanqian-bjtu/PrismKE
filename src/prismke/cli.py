@@ -55,6 +55,23 @@ def validate_schema(
     )
 
 
+@app.command("validate-run")
+def validate_run(run_id: str) -> None:
+    """Read-only validation of a stored run; exit 1 when blocking issues remain."""
+    service = PrismKEService()
+
+    async def execute() -> object:
+        try:
+            return await service.validate_run(run_id)
+        finally:
+            await service.close()
+
+    result = asyncio.run(execute())
+    _print_model(result)
+    if getattr(result, "blocking_count", 0):
+        raise typer.Exit(1)
+
+
 @app.command()
 def run(
     input_path: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],

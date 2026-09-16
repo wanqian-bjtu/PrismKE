@@ -19,6 +19,7 @@ from prismke.domain import (
     utc_now,
 )
 from prismke.governance.entity_resolution import entity_embedding_text
+from prismke.governance.validation.context import context_for_claims
 from prismke.persistence.base import GraphStore
 from prismke.persistence.entity_governance import EntityGovernanceRepository
 from prismke.providers.base import EmbeddingProvider
@@ -55,8 +56,7 @@ class EntityGovernanceService:
         claims = [
             item
             for item in await self.graph_store.list_claims()
-            if item.tx_to is None
-            and ({item.subject_id, item.object_entity_id} & set(source_ids))
+            if item.tx_to is None and ({item.subject_id, item.object_entity_id} & set(source_ids))
         ]
         operation = EntityOperation(
             id=stable_id(
@@ -67,16 +67,12 @@ class EntityGovernanceService:
             target_entity_ids=[target_entity_id],
             affected_claim_ids=sorted(item.id for item in claims),
             before={
-                "entities": {
-                    item.id: item.model_dump(mode="json") for item in selected.values()
-                },
+                "entities": {item.id: item.model_dump(mode="json") for item in selected.values()},
                 "claims": {item.id: item.model_dump(mode="json") for item in claims},
             },
             after={"survivor_entity_id": target_entity_id},
             reasons=reasons or ["manual_merge_proposal"],
-            evidence_ids=sorted(
-                {evidence for item in claims for evidence in item.evidence_ids}
-            ),
+            evidence_ids=sorted({evidence for item in claims for evidence in item.evidence_ids}),
         )
         task = EntityReviewTask(
             id=stable_id("entity-review", operation.id),
@@ -115,8 +111,7 @@ class EntityGovernanceService:
         claims = {
             item.id: item
             for item in await self.graph_store.list_claims()
-            if item.tx_to is None
-            and source_entity_id in {item.subject_id, item.object_entity_id}
+            if item.tx_to is None and source_entity_id in {item.subject_id, item.object_entity_id}
         }
         if not claim_assignments or not set(claim_assignments) <= set(claims):
             raise ValueError("split assignments must reference active claims of the source")
@@ -246,25 +241,21 @@ class EntityGovernanceService:
                         }
                     ),
                     "attributes": {
-                        key: value
-                        for item in sources
-                        for key, value in item.attributes.items()
+                        key: value for item in sources for key, value in item.attributes.items()
                     }
                     | target.attributes,
                     "source_evidence_ids": sorted(
-                        {
-                            evidence
-                            for item in sources
-                            for evidence in item.source_evidence_ids
-                        }
+                        {evidence for item in sources for evidence in item.source_evidence_ids}
                     ),
                     "active": True,
                 }
             )
             changed_entities[target_id] = merged
             for source in sources:
-                replacement_entity = merged if source.id == target_id else source.model_copy(
-                    update={"active": False}
+                replacement_entity = (
+                    merged
+                    if source.id == target_id
+                    else source.model_copy(update={"active": False})
                 )
                 changed_entities[source.id] = replacement_entity
                 changes.append(
@@ -391,12 +382,13 @@ class EntityGovernanceService:
         embeddings = [
             result
             for result in [
-                await self._embedding(item)
-                for item in changed_entities.values()
-                if item.active
+                await self._embedding(item) for item in changed_entities.values() if item.active
             ]
             if result is not None
         ]
+        context = context_for_claims(
+            await self.graph_store.list_revisions(limit=100000), set(claims)
+        )
         await self.graph_store.commit(
             GraphCommit(
                 entities=list(changed_entities.values()),
@@ -404,6 +396,7 @@ class EntityGovernanceService:
                 entity_operations=[applied],
                 entity_embeddings=embeddings,
                 revision=revision,
+                validation_context=context,
             )
         )
         return revision

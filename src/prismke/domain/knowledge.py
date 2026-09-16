@@ -9,6 +9,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from prismke.domain.documents import EvidenceRef, Modality
+from prismke.domain.validation import CommitValidationContext
 
 
 def utc_now() -> datetime:
@@ -233,6 +234,8 @@ class GraphRevision(BaseModel):
     claim_ids: list[str] = Field(default_factory=list)
     conflict_ids: list[str] = Field(default_factory=list)
     changes: list[GraphChange] = Field(default_factory=list)
+    validation_context: CommitValidationContext | None = None
+    commit_fingerprint: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
 
 
@@ -245,6 +248,7 @@ class GraphCommit(BaseModel):
     entity_operations: list[EntityOperation] = Field(default_factory=list)
     entity_embeddings: list[EntityEmbedding] = Field(default_factory=list)
     revision: GraphRevision
+    validation_context: CommitValidationContext | None = None
 
 
 class GraphHealth(BaseModel):

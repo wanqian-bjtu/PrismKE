@@ -29,4 +29,4 @@ for _ in range(90):
 else:
     raise SystemExit('dedicated Neo4j readiness timeout')
 PY
-"$PROJECT_DIR/.venv/bin/python" -m pytest tests/test_neo4j_integration.py tests/test_review_workspace.py -ra
+"$PROJECT_DIR/.venv/bin/python" -m pytest tests/test_neo4j_integration.py tests/test_review_workspace.py tests/test_validation.py -ra

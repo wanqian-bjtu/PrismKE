@@ -5,6 +5,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from validated_fixtures import prepare_fixture_commit
 
 from prismke.core.errors import GraphIntegrityError
 from prismke.core.settings import Settings
@@ -95,6 +96,7 @@ async def test_live_neo4j_commit_query_and_rollback() -> None:
             claims=[claim],
             revision=revision,
         )
+        await prepare_fixture_commit(store, transaction)
         await store.commit(transaction)
         await store.commit(transaction)
         assert (await store.healthcheck()).healthy
@@ -218,15 +220,15 @@ async def test_live_neo4j_entity_merge_split_and_rollback(tmp_path: Path) -> Non
             entity_ids=[source.id, survivor.id],
             claim_ids=[claim.id],
         )
-        await store.commit(
-            GraphCommit(
-                documents=[document],
-                evidence=[evidence],
-                entities=[source, survivor],
-                claims=[claim],
-                revision=seed,
-            )
+        transaction = GraphCommit(
+            documents=[document],
+            evidence=[evidence],
+            entities=[source, survivor],
+            claims=[claim],
+            revision=seed,
         )
+        await prepare_fixture_commit(store, transaction)
+        await store.commit(transaction)
         governance = EntityGovernanceService(
             store,
             EntityGovernanceRepository(tmp_path / "entity-governance.json"),
@@ -235,9 +237,7 @@ async def test_live_neo4j_entity_merge_split_and_rollback(tmp_path: Path) -> Non
         merge_task = await governance.propose_merge(
             [source.id, survivor.id], survivor.id, ["duplicate entities"]
         )
-        merge_revision = await governance.resolve_operation(
-            merge_task.id, True, "integration-test"
-        )
+        merge_revision = await governance.resolve_operation(merge_task.id, True, "integration-test")
         assert merge_revision is not None
         assert (await store.get_entity(source.id)).active is False  # type: ignore[union-attr]
         assert (await store.get_claim(claim.id)).subject_id == survivor.id  # type: ignore[union-attr]
@@ -270,9 +270,7 @@ async def test_live_neo4j_entity_merge_split_and_rollback(tmp_path: Path) -> Non
             {claim.id: split_target.id},
             ["separate legacy product"],
         )
-        split_revision = await governance.resolve_operation(
-            split_task.id, True, "integration-test"
-        )
+        split_revision = await governance.resolve_operation(split_task.id, True, "integration-test")
         assert split_revision is not None
         assert (await store.get_claim(claim.id)).subject_id == split_target.id  # type: ignore[union-attr]
         await store.rollback_revision(split_revision.id)

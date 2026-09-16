@@ -27,10 +27,18 @@ from prismke.domain import (
     GraphRevision,
     RevisionDiff,
 )
+from prismke.governance.validation import ValidationService
+from prismke.governance.validation.context import (
+    bind_commit_provenance,
+    context_for_claims,
+    final_state_commit,
+)
+from prismke.persistence.base import EvidenceStore
 
 
 class JSONGraphStore:
-    def __init__(self, directory: Path) -> None:
+    def __init__(self, directory: Path, *, evidence_store: EvidenceStore | None = None) -> None:
+        self.evidence_store = evidence_store
         self.directory = directory
         self.path = directory / "graph.json"
         self.lock = FileLock(str(directory / "graph.lock"))
@@ -110,11 +118,7 @@ class JSONGraphStore:
         for entity_id, payload in data["entities"].items():
             entity = CanonicalEntity.model_validate(payload)
             embedding_payload = data["entity_embeddings"].get(entity_id)
-            if (
-                not entity.active
-                or entity.entity_type != entity_type
-                or embedding_payload is None
-            ):
+            if not entity.active or entity.entity_type != entity_type or embedding_payload is None:
                 continue
             embedding = EntityEmbedding.model_validate(embedding_payload)
             if (
@@ -123,16 +127,12 @@ class JSONGraphStore:
                 and embedding.model_fingerprint != model_fingerprint
             ):
                 continue
-            candidate_norm = math.sqrt(
-                sum(value * value for value in embedding.vector)
-            ) or 1.0
+            candidate_norm = math.sqrt(sum(value * value for value in embedding.vector)) or 1.0
             score = sum(
                 left * right for left, right in zip(vector, embedding.vector, strict=True)
             ) / (query_norm * candidate_norm)
             matches.append((entity, max(-1.0, min(1.0, score))))
-        return sorted(
-            matches, key=lambda item: (-round(item[1], 12), item[0].id)
-        )[:top_k]
+        return sorted(matches, key=lambda item: (-round(item[1], 12), item[0].id))[:top_k]
 
     async def list_entity_embeddings(self) -> list[EntityEmbedding]:
         with self.lock:
@@ -146,9 +146,7 @@ class JSONGraphStore:
             if unknown:
                 raise GraphIntegrityError(f"embeddings reference missing entities: {unknown}")
             for embedding in embeddings:
-                data["entity_embeddings"][embedding.entity_id] = embedding.model_dump(
-                    mode="json"
-                )
+                data["entity_embeddings"][embedding.entity_id] = embedding.model_dump(mode="json")
             self._write_atomic(data)
 
     async def list_claims(self) -> list[Claim]:
@@ -289,7 +287,9 @@ class JSONGraphStore:
             if not entity_refs <= known_entities:
                 raise GraphIntegrityError(f"claim {claim.id} references missing entities")
             if transaction.evidence and not set(claim.evidence_ids) <= known_evidence:
-                raise GraphIntegrityError(f"claim {claim.id} references missing evidence")
+                raise GraphIntegrityError(
+                    f"UNKNOWN_EVIDENCE: claim {claim.id} references missing evidence"
+                )
         if not set(transaction.revision.entity_ids) <= known_entities:
             raise GraphIntegrityError("revision references missing entities")
         if not set(transaction.revision.claim_ids) <= known_claims:
@@ -304,11 +304,26 @@ class JSONGraphStore:
         return data, False
 
     async def commit(self, transaction: GraphCommit) -> None:
+        bind_commit_provenance(transaction)
+        transaction = transaction.model_copy(deep=True)
         with self.lock:
             data = self._read()
             updated, is_noop = self._apply(deepcopy(data), transaction)
             if is_noop:
                 return
+            final_transaction = final_state_commit(
+                transaction,
+                {k: Claim.model_validate(v) for k, v in updated["claims"].items()},
+                {k: CanonicalEntity.model_validate(v) for k, v in data["entities"].items()},
+                [GraphRevision.model_validate(r) for r in reversed(data["revisions"])],
+            )
+            await ValidationService().commit(
+                final_transaction,
+                {k: CanonicalEntity.model_validate(v) for k, v in updated["entities"].items()},
+                {k: EvidenceRef.model_validate(v) for k, v in updated["evidence"].items()},
+                set(updated["documents"]),
+                self.evidence_store,
+            )
             self._write_atomic(updated)
 
     async def diff_revisions(self, from_id: str, to_id: str) -> RevisionDiff:
@@ -333,6 +348,9 @@ class JSONGraphStore:
     async def rollback_revision(self, revision_id: str) -> GraphRevision:
         with self.lock:
             data = self._read()
+            previous_entities = {
+                k: CanonicalEntity.model_validate(v) for k, v in data["entities"].items()
+            }
             target_payload = next(
                 (item for item in data["revisions"] if item["id"] == revision_id), None
             )
@@ -428,6 +446,39 @@ class JSONGraphStore:
             )
             if existing is not None:
                 return GraphRevision.model_validate(existing)
+            restored_claims = [
+                Claim.model_validate(data["claims"][c.resource_id])
+                for c in inverse
+                if c.resource_type == "claim"
+            ]
+            context = context_for_claims(
+                [GraphRevision.model_validate(r) for r in reversed(data["revisions"])],
+                {c.id for c in restored_claims},
+            )
+            compensation.validation_context = context
+            transaction = GraphCommit(
+                entities=[
+                    CanonicalEntity.model_validate(data["entities"][eid])
+                    for eid in compensation.entity_ids
+                ],
+                claims=restored_claims,
+                revision=compensation,
+                validation_context=context,
+            )
+            transaction = final_state_commit(
+                transaction,
+                {k: Claim.model_validate(v) for k, v in data["claims"].items()},
+                previous_entities,
+                [GraphRevision.model_validate(r) for r in reversed(data["revisions"])],
+            )
+            bind_commit_provenance(transaction)
+            await ValidationService().commit(
+                transaction,
+                {k: CanonicalEntity.model_validate(v) for k, v in data["entities"].items()},
+                {k: EvidenceRef.model_validate(v) for k, v in data["evidence"].items()},
+                set(data["documents"]),
+                self.evidence_store,
+            )
             data["revisions"].append(compensation.model_dump(mode="json"))
             self._write_atomic(data)
             return compensation
