@@ -53,6 +53,14 @@ def validate_item(
             field = "confidence"
         if "qualifiers" in item and not isinstance(item["qualifiers"], dict):
             field = "qualifiers"
+        if item.get("object_type") is not None and (
+            not isinstance(item["object_type"], str) or not item["object_type"].strip()
+        ):
+            field = "object_type"
+        if "evidence_id" in item and (
+            not isinstance(item["evidence_id"], str) or not item["evidence_id"].strip()
+        ):
+            field = "evidence_id"
         if "evidence_ids" in item and (
             not isinstance(item["evidence_ids"], list)
             or not item["evidence_ids"]
