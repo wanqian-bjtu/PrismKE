@@ -64,8 +64,13 @@ async function main() {
       .some(e => e.value.includes('事实待审核 1')));
     await page.getByText('拒绝事实', { exact: true }).click();
     await page.getByRole('button', { name: '提交当前审核', exact: true }).click();
+    await page.waitForFunction(() => [...document.querySelectorAll('textarea')]
+      .some(e => e.value.includes('事实待审核 0')));
     await page.getByRole('button', { name: '继续处理', exact: true }).click();
-    await page.getByRole('button', { name: '确认写入隔离图谱', exact: true }).waitFor();
+    await page.waitForFunction(() => [...document.querySelectorAll('textarea')]
+      .some(e => e.value.includes('prepare_graph_commit'))
+      && [...document.querySelectorAll('button')].some(e =>
+        e.textContent.trim() === '确认写入隔离图谱' && !e.disabled));
     await page.getByRole('checkbox', { name: '确认将预览内容写入隔离图谱', exact: true }).check();
     await page.getByRole('button', { name: '确认写入隔离图谱', exact: true }).click();
     await page.waitForFunction(() => [...document.querySelectorAll('textarea')]
