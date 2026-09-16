@@ -320,6 +320,32 @@ class MarkdownParser:
                     assets.append(asset)
                     evidence.append(asset_ref)
             cursor += len(raw_line)
+        for ordinal, image in enumerate(BeautifulSoup(content, "html.parser").find_all("img")):
+            src = str(image.get("src", ""))
+            resolved = await _resolve_image(src, path.parent, self.allow_remote)
+            if resolved is None:
+                kind = (
+                    "remote_asset_blocked"
+                    if src.startswith(("http://", "https://"))
+                    else "image_unavailable"
+                )
+                warnings.append(f"{kind}:{src}")
+                continue
+            data, media_type, ref_name = resolved
+            asset, asset_ref, warning = _asset(
+                self.writer,
+                document_id,
+                data,
+                media_type,
+                "markdown_embedded",
+                f"html:{ordinal}:{ref_name}",
+                _html_image_context(image),
+            )
+            if warning:
+                warnings.append(warning)
+            if asset and asset_ref:
+                assets.append(asset)
+                evidence.append(asset_ref)
         return DocumentIR(
             id=document_id,
             source_path=str(path),

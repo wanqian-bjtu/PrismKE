@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "prismke"
-version = "0.4.0"
+version = "0.4.1"
 description = "Schema-guided, evidence-aware multimodal knowledge graph construction"
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
@@ -28,6 +28,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+evaluation = [
+  "openpyxl>=3.1,<4",
+]
 dev = [
   "mypy>=1.14,<2",
   "pytest>=8.3,<10",
@@ -113,6 +116,8 @@ module = [
   "huggingface_hub.*",
   "torch",
   "torch.*",
+  "openpyxl",
+  "openpyxl.*",
 ]
 ignore_missing_imports = true
 follow_imports = "skip"

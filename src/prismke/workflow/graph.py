@@ -43,9 +43,11 @@ class PrismKEWorkflow:
         entity_auto_link_threshold: float = 0.88,
         entity_review_threshold: float = 0.65,
         entity_min_margin: float = 0.08,
+        review_only: bool = False,
     ) -> None:
         self.checkpoint_path = checkpoint_path
         self.runs = runs
+        self.review_only = review_only
         self.nodes = WorkflowNodes(
             provider,
             ocr_provider,
@@ -163,6 +165,8 @@ class PrismKEWorkflow:
         return "review" if state.status == "awaiting_review" else "continue"
 
     def _build_graph(self, checkpointer: Any) -> Any:
+        if self.review_only:
+            return self._build_review_graph(checkpointer)
         builder = StateGraph(GraphState)
         before_extraction = [
             ("ingest", self.nodes.ingest),
@@ -212,24 +216,18 @@ class PrismKEWorkflow:
             "commit_graph", cast(Any, self._node("commit_graph", self.nodes.commit_graph))
         )
         builder.add_edge(START, "ingest")
-        for (left, _), (right, _) in zip(
-            before_extraction, before_extraction[1:], strict=False
-        ):
+        for (left, _), (right, _) in zip(before_extraction, before_extraction[1:], strict=False):
             builder.add_edge(left, right)
         builder.add_edge("load_schema", "extract_text_claims")
         builder.add_edge("load_schema", "extract_visual_claims")
-        builder.add_edge(
-            ["extract_text_claims", "extract_visual_claims"], "align_modalities"
-        )
+        builder.add_edge(["extract_text_claims", "extract_visual_claims"], "align_modalities")
         builder.add_edge("align_modalities", "resolve_entities")
         builder.add_conditional_edges(
             "resolve_entities",
             self._after_entity_resolution,
             {"review": END, "continue": "normalize_claims"},
         )
-        for (left, _), (right, _) in zip(
-            after_resolution, after_resolution[1:], strict=False
-        ):
+        for (left, _), (right, _) in zip(after_resolution, after_resolution[1:], strict=False):
             builder.add_edge(left, right)
         builder.add_conditional_edges(
             "route_by_risk",
@@ -239,6 +237,61 @@ class PrismKEWorkflow:
         builder.add_edge("prepare_graph_commit", "commit_graph")
         builder.add_edge("commit_graph", END)
         return builder.compile(checkpointer=checkpointer)
+
+    def _build_review_graph(self, checkpointer: Any) -> Any:
+        """A tail-only graph: no parser, OCR, model or entity retrieval nodes exist."""
+        builder = StateGraph(GraphState)
+
+        async def forbidden(_: GraphState) -> GraphState:
+            raise ValueError("review workspace cannot execute entity resolution or extraction")
+
+        builder.add_node("resolve_entities", cast(Any, forbidden))
+        for name in (
+            "normalize_claims",
+            "detect_conflicts",
+            "route_by_risk",
+            "prepare_graph_commit",
+            "commit_graph",
+        ):
+            builder.add_node(name, cast(Any, self._node(name, getattr(self.nodes, name))))
+        builder.add_edge(START, "resolve_entities")
+        builder.add_conditional_edges(
+            "resolve_entities",
+            self._after_entity_resolution,
+            {"review": END, "continue": "normalize_claims"},
+        )
+        builder.add_edge("normalize_claims", "detect_conflicts")
+        builder.add_edge("detect_conflicts", "route_by_risk")
+        builder.add_conditional_edges(
+            "route_by_risk",
+            self._after_risk,
+            {"review": END, "continue": "prepare_graph_commit"},
+        )
+        builder.add_conditional_edges(
+            "prepare_graph_commit",
+            lambda value: "commit" if self._state(value).submission_confirmed else "preview",
+            {"commit": "commit_graph", "preview": END},
+        )
+        builder.add_edge("commit_graph", END)
+        return builder.compile(checkpointer=checkpointer)
+
+    async def confirm_submission(self, state: WorkflowState) -> WorkflowState:
+        retry_commit = state.status == "failed" and state.failed_node == "commit_graph"
+        if not self.review_only or (
+            state.current_node != "prepare_graph_commit" and not retry_commit
+        ):
+            raise ValueError("run is not at the isolated submission preview")
+        state.submission_confirmed = True
+        async with open_checkpointer(self.checkpoint_path) as saver:
+            graph = self._build_graph(saver)
+            config = self._config(state.run_id)
+            await graph.aupdate_state(
+                config,
+                {"payload": state.model_dump(mode="json")},
+                as_node="prepare_graph_commit",
+            )
+            result = await graph.ainvoke(None, config)
+        return self._state(cast(GraphState, result))
 
     @staticmethod
     def _config(run_id: str) -> dict[str, dict[str, str]]:
@@ -260,6 +313,17 @@ class PrismKEWorkflow:
             snapshot = await graph.aget_state(config)
             if not snapshot.values:
                 return None
+            if self.review_only:
+                allowed = {
+                    "normalize_claims",
+                    "detect_conflicts",
+                    "route_by_risk",
+                    "prepare_graph_commit",
+                }
+                if set(snapshot.next) - allowed:
+                    raise ValueError("checkpoint would return to a forbidden node")
+                if not snapshot.next:
+                    raise ValueError("no review continuation is scheduled")
             result = await graph.ainvoke(None, config)
         state = self._state(cast(GraphState, result))
         state.retry_count = max(state.retry_count, failed_summary.retry_count)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from prismke.core.errors import EvidenceIntegrityError
+from prismke.core.errors import EvidenceIntegrityError, SchemaValidationError
 from prismke.core.ids import canonical_hash, stable_id
 from prismke.domain import (
     ClaimStatus,
@@ -16,6 +16,7 @@ from prismke.domain import (
     GraphRevision,
     LocalizationLevel,
     OCRRequest,
+    ReviewTask,
     SchemaIndex,
     SourceDocument,
     VisualExtractionRequest,
@@ -31,6 +32,7 @@ from prismke.governance import (
     normalize_claims,
     route_by_risk,
 )
+from prismke.governance.claim_normalization import merge_supporting_claims
 from prismke.parsing import ParserRegistry, select_analysis_assets
 from prismke.persistence.base import EvidenceStore, GraphStore
 from prismke.providers.base import EmbeddingProvider, LLMProvider, OCRProvider, VLMProvider
@@ -203,6 +205,34 @@ class WorkflowNodes:
     async def normalize_claims(self, state: WorkflowState) -> WorkflowState:
         assert state.output_schema is not None
         entities = {item.id: item for item in state.entities}
+        if state.review_workspace:
+            # Invalid extraction remains reviewable but never becomes a formal Claim.
+            claims = []
+            issues: dict[str, str] = {}
+            tasks = {task.claim_id: task for task in state.review_tasks}
+            for candidate in state.candidates:
+                try:
+                    claims.extend(
+                        normalize_claims(
+                            [candidate],
+                            SchemaIndex(state.output_schema),
+                            entities,
+                            state.mention_to_entity,
+                        )
+                    )
+                except SchemaValidationError as exc:
+                    issues[candidate.id] = str(exc)
+                    if candidate.id not in tasks:
+                        tasks[candidate.id] = ReviewTask(
+                            id=stable_id("review", state.run_id, candidate.id, "schema"),
+                            run_id=state.run_id,
+                            claim_id=candidate.id,
+                            reasons=["schema_violation", str(exc)],
+                        )
+            state.claims = merge_supporting_claims(claims)
+            state.normalization_issues = issues
+            state.review_tasks = list(tasks.values())
+            return state
         state.claims = normalize_claims(
             state.candidates,
             SchemaIndex(state.output_schema),
@@ -221,9 +251,14 @@ class WorkflowNodes:
     async def route_by_risk(self, state: WorkflowState) -> WorkflowState:
         state.claims, new_reviews = route_by_risk(state.run_id, state.claims, state.conflicts)
         resolved = {item.claim_id: item for item in state.review_tasks if item.status == "resolved"}
-        state.review_tasks = [resolved.get(item.claim_id, item) for item in new_reviews]
+        blocked_reviews = [
+            task for task in state.review_tasks if task.claim_id in state.normalization_issues
+        ]
+        state.review_tasks = [
+            resolved.get(item.claim_id, item) for item in new_reviews
+        ] + blocked_reviews
         for task in state.review_tasks:
-            if task.status != "resolved":
+            if task.status != "resolved" or task.claim_id in state.normalization_issues:
                 continue
             claim = next(item for item in state.claims if item.id == task.claim_id)
             claim.status = (
@@ -318,7 +353,9 @@ class WorkflowNodes:
             documents=[
                 GraphDocument(
                     id=state.document.id,
-                    filename=Path(state.document.source_path).name,
+                    filename=(
+                        state.document.source_filename or Path(state.document.source_path).name
+                    ),
                     content_hash=state.document.source_hash,
                     media_type=state.document.media_type,
                 )

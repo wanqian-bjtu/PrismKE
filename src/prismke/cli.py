@@ -11,6 +11,7 @@ import typer
 from pydantic import BaseModel
 from rich.console import Console
 
+from prismke import __version__
 from prismke.core.errors import ProviderConfigurationError
 from prismke.core.settings import Settings
 from prismke.domain import ReviewDecision, load_schema
@@ -19,12 +20,21 @@ from prismke.evaluation import (
     evaluate_entity_linking_manifest,
     evaluate_manifest,
 )
+from prismke.evaluation.annotations import export_reviewed_annotations
 from prismke.governance import rebuild_entity_index
 from prismke.persistence import FileEvidenceStore, Neo4jGraphStore, migrate_json_graph
+from prismke.providers import BGEM3EmbeddingProvider, MockEmbeddingProvider
+from prismke.providers.base import EmbeddingProvider
 from prismke.workflow import PrismKEService
 
 app = typer.Typer(no_args_is_help=True, help="PrismKE knowledge construction CLI")
 console = Console()
+
+
+@app.command("version")
+def version() -> None:
+    """Show the software version (independent of checkpoint protocol)."""
+    console.print(__version__)
 
 
 def _print_model(model: object) -> None:
@@ -75,10 +85,46 @@ def review(
     run_id: str,
     claim_id: Annotated[str, typer.Option("--claim-id")],
     decision: Annotated[ReviewDecision, typer.Option("--decision")],
+    reviewer: Annotated[str | None, typer.Option("--reviewer")] = None,
+    comment: Annotated[str | None, typer.Option("--comment")] = None,
 ) -> None:
     """Record a human decision for one claim."""
-    state = asyncio.run(PrismKEService().review(run_id, claim_id, decision))
+    state = asyncio.run(PrismKEService().review(run_id, claim_id, decision, reviewer, comment))
     console.print(f"review recorded: run_id={state.run_id} claim_id={claim_id}")
+
+
+@app.command("review-entity")
+def review_entity_command(
+    run_id: str,
+    task_id: Annotated[str, typer.Option("--task-id")],
+    action: Annotated[str, typer.Option("--action")],
+    reviewer: Annotated[str, typer.Option("--reviewer")],
+    selected_entity_id: Annotated[str | None, typer.Option("--selected-entity-id")] = None,
+    comment: Annotated[str | None, typer.Option("--comment")] = None,
+) -> None:
+    """Record a single entity decision; real tasks have no bulk approval command."""
+    from typing import Literal, cast
+
+    if action not in {"link", "create", "reject"}:
+        raise typer.BadParameter("--action must be link/create/reject")
+    _print_model(
+        asyncio.run(
+            PrismKEService().review_entity(
+                run_id,
+                task_id,
+                cast(Literal["link", "create", "reject"], action),
+                selected_entity_id,
+                reviewer,
+                comment,
+            )
+        )
+    )
+
+
+@app.command("review-progress")
+def review_progress_command(run_id: str) -> None:
+    """Inspect pending tasks and the isolated graph submission summary."""
+    _print_model(PrismKEService().review_progress(run_id))
 
 
 @app.command()
@@ -87,6 +133,31 @@ def resume(run_id: str) -> None:
     state = asyncio.run(PrismKEService().resume(run_id))
     console.print(f"run_id={state.run_id} status={state.status}")
     _print_model(state)
+
+
+@app.command("import-review-run")
+def import_review_run_command(
+    source: Annotated[Path, typer.Option("--source", exists=True, file_okay=False)],
+    run_id: Annotated[str, typer.Option("--run-id")],
+    target: Annotated[Path, typer.Option("--target", file_okay=False)],
+) -> None:
+    """Copy a verified paused extraction into a new offline review workspace."""
+    from prismke.workflow.review_workspace import import_review_run
+
+    state = asyncio.run(import_review_run(source, run_id, target))
+    console.print(f"isolated review imported: run_id={state.run_id} target={target.resolve()}")
+
+
+@app.command("confirm-review-commit")
+def confirm_review_commit_command(
+    run_id: str,
+    reviewer: Annotated[str, typer.Option("--reviewer")],
+    confirm: Annotated[bool, typer.Option("--confirm")] = False,
+) -> None:
+    """Explicitly confirm an isolated graph commit after viewing its preview."""
+    if not confirm:
+        raise typer.BadParameter("--confirm is required after inspecting review-progress")
+    _print_model(asyncio.run(PrismKEService().confirm_review_commit(run_id, reviewer)))
 
 
 @app.command("show-evidence")
@@ -141,42 +212,98 @@ def evaluate(
 def evaluate_entities(
     manifest: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
     output: Annotated[Path, typer.Option("--output", dir_okay=False)],
-    embedding_provider: Annotated[
-        str | None, typer.Option("--embedding-provider")
-    ] = None,
+    embedding_provider: Annotated[str | None, typer.Option("--embedding-provider")] = None,
+    protocol: Annotated[str | None, typer.Option("--protocol")] = None,
 ) -> None:
     """Evaluate semantic linking, NIL decisions and cross-document clustering."""
     settings = Settings()
     if embedding_provider is not None:
         settings.embedding_provider = embedding_provider
-    service = PrismKEService(settings)
+    if protocol not in {None, "fixed", "sequential"}:
+        raise typer.BadParameter("protocol must be fixed or sequential")
+    provider_instance: EmbeddingProvider
+    if settings.embedding_provider == "mock":
+        provider_instance = MockEmbeddingProvider()
+    elif settings.embedding_provider == "bge-m3":
+        provider_instance = BGEM3EmbeddingProvider(
+            model_name=settings.embedding_model,
+            model_revision=settings.embedding_model_revision,
+            device=settings.embedding_device,
+            use_fp16=settings.embedding_use_fp16,
+            batch_size=settings.embedding_batch_size,
+            max_tokens=settings.embedding_max_tokens,
+            cache_dir=settings.embedding_cache_dir,
+            model_cache_dir=settings.embedding_model_cache_dir,
+            allow_download=False,
+        )
+    else:
+        raise typer.BadParameter("entity evaluation requires explicit mock or bge-m3")
 
     async def execute() -> EntityLinkingEvaluationReport:
-        try:
-            return await evaluate_entity_linking_manifest(
-                manifest,
-                service.embedding_provider(),
-                top_k=settings.entity_top_k,
-                auto_link_threshold=settings.entity_auto_link_threshold,
-                review_threshold=settings.entity_review_threshold,
-                min_margin=settings.entity_min_margin,
-            )
-        finally:
-            await service.close()
+        return await evaluate_entity_linking_manifest(
+            manifest,
+            provider_instance,
+            top_k=settings.entity_top_k,
+            auto_link_threshold=settings.entity_auto_link_threshold,
+            review_threshold=settings.entity_review_threshold,
+            min_margin=settings.entity_min_margin,
+            protocol=protocol,  # type: ignore[arg-type]
+        )
 
     report = asyncio.run(execute())
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_bytes(
-        orjson.dumps(report.model_dump(mode="json"), option=orjson.OPT_INDENT_2)
-    )
+    output.write_bytes(orjson.dumps(report.model_dump(mode="json"), option=orjson.OPT_INDENT_2))
     _print_model(report)
+
+
+@app.command("export-entity-annotations")
+def export_entity_annotations(
+    workbook: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    package: Annotated[Path, typer.Option("--package", exists=True, file_okay=False)],
+    output: Annotated[Path, typer.Option("--output", file_okay=False)],
+) -> None:
+    """Export human-confirmed entity answers without modifying the workbook."""
+    try:
+        _print_model(export_reviewed_annotations(workbook, package, output))
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
+@app.command("validate-documents")
+def validate_real_documents(
+    manifest: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    output: Annotated[Path, typer.Option("--output", file_okay=False)],
+    token_limit: Annotated[int, typer.Option("--token-limit")] = 100_000,
+    stop_at: Annotated[int, typer.Option("--stop-at")] = 90_000,
+    budget_ledger: Annotated[Path | None, typer.Option("--budget-ledger", exists=True)] = None,
+    extend_budget: Annotated[bool, typer.Option("--extend-budget")] = False,
+) -> None:
+    """Run budgeted real-model document validation on an isolated JSON graph."""
+    from prismke.evaluation.document_validation import validate_documents
+
+    if not 0 < stop_at < token_limit:
+        raise typer.BadParameter("budget must satisfy 0 < stop_at < token_limit")
+    report = asyncio.run(
+        validate_documents(
+            manifest,
+            Settings(),
+            output,
+            token_limit=token_limit,
+            stop_at=stop_at,
+            budget_ledger=budget_ledger,
+            extend_budget=extend_budget,
+        )
+    )
+    finished = sum(case["status"] in {"completed", "awaiting_review"} for case in report["cases"])
+    console.print(
+        f"Attempted {len(report['cases'])}; finished {finished}; tokens={report['total_tokens']}"
+    )
+    console.print(f"Report: {output / 'document-validation.json'}")
 
 
 @app.command("migrate-graph")
 def migrate_graph(
-    source: Annotated[
-        Path, typer.Option("--from-json", exists=True, dir_okay=False)
-    ],
+    source: Annotated[Path, typer.Option("--from-json", exists=True, dir_okay=False)],
     destination: Annotated[str, typer.Option("--to")] = "neo4j",
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
 ) -> None:
@@ -189,9 +316,7 @@ def migrate_graph(
         target = None
         if not dry_run:
             if not settings.neo4j_password:
-                raise ProviderConfigurationError(
-                    "migration requires PRISMKE_NEO4J_PASSWORD"
-                )
+                raise ProviderConfigurationError("migration requires PRISMKE_NEO4J_PASSWORD")
             target = Neo4jGraphStore(
                 settings.neo4j_uri,
                 settings.neo4j_user,

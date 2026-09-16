@@ -103,6 +103,7 @@ class WorkflowState(BaseModel):
     embedding_provider_fingerprint: str = "disabled"
     allow_remote_assets: bool = False
     pipeline_version: str = "0.4.0"
+    entity_resolution_policy_version: str | None = None
     current_node: str = "ingest"
     failed_node: str | None = None
     status: Literal["running", "awaiting_review", "completed", "failed"] = "running"
@@ -119,9 +120,12 @@ class WorkflowState(BaseModel):
     claims: list[Claim] = Field(default_factory=list)
     conflicts: list[ConflictSet] = Field(default_factory=list)
     review_tasks: list[ReviewTask] = Field(default_factory=list)
+    normalization_issues: dict[str, str] = Field(default_factory=dict)
     graph_commit: GraphCommit | None = None
     revision: GraphRevision | None = None
     warnings: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
     retry_count: int = 0
     provider_calls: list[ProviderCallRecord] = Field(default_factory=list)
+    review_workspace: bool = False
+    submission_confirmed: bool = False

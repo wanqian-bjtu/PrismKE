@@ -84,6 +84,9 @@ class MultimodalAlignmentService:
             primary.context_only_visual_claim = any(
                 item.context_only_visual_claim for item in members
             )
+            primary.uncalibrated_visual_confidence = any(
+                item.uncalibrated_visual_confidence for item in members
+            )
             aligned.append(primary)
             records.append(
                 AlignmentRecord(

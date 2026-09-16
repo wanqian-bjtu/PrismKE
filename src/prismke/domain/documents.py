@@ -132,6 +132,7 @@ class EvidenceRef(BaseModel):
 class DocumentIR(BaseModel):
     id: str
     source_path: str
+    source_filename: str | None = None
     source_hash: str
     media_type: str
     pages: list[DocumentPage] = Field(default_factory=list)

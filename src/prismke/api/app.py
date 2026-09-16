@@ -23,7 +23,9 @@ from fastapi import (
     status,
 )
 from fastapi.responses import Response
+from filelock import Timeout
 
+from prismke import __version__
 from prismke.api.models import (
     EntityReviewRequest,
     MergeProposalRequest,
@@ -75,7 +77,7 @@ def create_app(
         yield
         await service.close()
 
-    app = FastAPI(title="PrismKE API", version="0.4.0", lifespan=lifespan)
+    app = FastAPI(title="PrismKE API", version=__version__, lifespan=lifespan)
     app.state.prismke_service = service
 
     async def authorize(authorization: str | None = Header(default=None)) -> None:
@@ -107,6 +109,8 @@ def create_app(
         vlm_provider: Annotated[str, Form()] = "disabled",
         allow_remote_assets: Annotated[bool, Form()] = False,
     ) -> RunAccepted:
+        if service.review_metadata:
+            raise HTTPException(status_code=409, detail="review workspace forbids extraction")
         document_path = await _save_upload(document, settings.uploads_dir / "documents")
         schema_path = await _save_upload(schema_file, settings.uploads_dir / "schemas")
         state, created = service.create_run(
@@ -121,6 +125,47 @@ def create_app(
             background_tasks.add_task(execute_safely, state.run_id)
         return RunAccepted(run_id=state.run_id, status=state.status, created=created)
 
+    @api.get("/runs")
+    async def list_runs() -> object:
+        return [
+            {**service.review_progress(item.run_id), "filename": Path(item.input_path).name}
+            for item in service.runs.list(limit=1000)
+        ]
+
+    @api.get("/runs/{run_id}/review-progress")
+    async def review_progress(run_id: str) -> object:
+        try:
+            return service.review_progress(run_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="run not found") from exc
+
+    @api.get("/runs/{run_id}/entity-reviews/{task_id}")
+    async def entity_review_detail(run_id: str, task_id: str) -> object:
+        try:
+            return await service.entity_review_detail(run_id, task_id)
+        except (KeyError, FileNotFoundError) as exc:
+            raise HTTPException(status_code=404, detail="entity review task not found") from exc
+
+    @api.get("/runs/{run_id}/reviews/{task_id}")
+    async def claim_review_detail(run_id: str, task_id: str) -> object:
+        try:
+            return service.claim_review_detail(run_id, task_id)
+        except (KeyError, FileNotFoundError) as exc:
+            raise HTTPException(status_code=404, detail="claim review task not found") from exc
+
+    @api.post("/runs/{run_id}/confirm-commit")
+    async def confirm_commit(
+        run_id: str, request: RollbackRequest, reviewer: str = Query(min_length=1)
+    ) -> object:
+        try:
+            return await service.confirm_review_commit(run_id, reviewer)
+        except (ValueError, GraphIntegrityError, Timeout) as exc:
+            raise HTTPException(
+                status_code=409, detail="submission unavailable or graph changed"
+            ) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="run not found") from exc
+
     @api.get("/runs/{run_id}")
     async def get_run(run_id: str) -> object:
         try:
@@ -134,6 +179,12 @@ def create_app(
             state = service.show_run(run_id)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="run not found") from exc
+
+        if not service.review_progress(run_id)["can_resume"]:
+            raise HTTPException(
+                status_code=409,
+                detail="resolve pending reviews or confirm preview first",
+            )
 
         async def resume_safely() -> None:
             try:
@@ -173,10 +224,16 @@ def create_app(
     async def submit_review(task_id: str, request: ReviewRequest) -> object:
         try:
             state, claim_id = service.runs.find_review(task_id)
-            return await service.review(state.run_id, claim_id, request.decision)
+            return await service.review(
+                state.run_id,
+                claim_id,
+                request.decision,
+                request.reviewer,
+                request.comment,
+            )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except (LegacyCheckpointError, ProviderConfigurationError) as exc:
+        except (ValueError, LegacyCheckpointError, ProviderConfigurationError, Timeout) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @api.get("/entities/search")
@@ -214,10 +271,18 @@ def create_app(
                 task_id,
                 cast(Literal["link", "create", "reject"], request.action),
                 request.selected_entity_id,
+                request.reviewer,
+                request.comment,
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except (ValueError, GraphIntegrityError, ProviderConfigurationError) as exc:
+        except (
+            ValueError,
+            GraphIntegrityError,
+            ProviderConfigurationError,
+            LegacyCheckpointError,
+            Timeout,
+        ) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @api.post("/entities/merge-proposals", status_code=202)
@@ -232,9 +297,7 @@ def create_app(
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @api.post("/entities/{entity_id}/split-proposals", status_code=202)
-    async def propose_entity_split(
-        entity_id: str, request: SplitProposalRequest
-    ) -> object:
+    async def propose_entity_split(entity_id: str, request: SplitProposalRequest) -> object:
         try:
             return await service.propose_entity_split(
                 entity_id,
@@ -254,9 +317,7 @@ def create_app(
         return await service.entity_history(entity_id)
 
     @api.get("/entities/{entity_id}/neighborhood")
-    async def get_neighborhood(
-        entity_id: str, depth: int = Query(default=1, ge=1, le=3)
-    ) -> object:
+    async def get_neighborhood(entity_id: str, depth: int = Query(default=1, ge=1, le=3)) -> object:
         try:
             return await service.graph_store.get_neighborhood(entity_id, depth)
         except KeyError as exc:
@@ -285,9 +346,7 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except GraphIntegrityError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        service.audit.record(
-            "rollback", revision_id, {"compensation_revision_id": revision.id}
-        )
+        service.audit.record("rollback", revision_id, {"compensation_revision_id": revision.id})
         return revision
 
     @api.get("/health")

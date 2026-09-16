@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from prismke.core.ids import stable_id
@@ -13,6 +14,20 @@ from prismke.domain import (
     SchemaIndex,
     normalize_label,
 )
+
+
+def parse_json_object(content: str) -> dict[str, Any]:
+    if not isinstance(content, str):
+        raise TypeError("model JSON content must be text")
+    text = content.strip()
+    if text.startswith("```") and text.endswith("```"):
+        opening, _, remainder = text.partition("\n")
+        if opening.strip().casefold() in {"```", "```json"}:
+            text = remainder[:-3].strip()
+    payload = json.loads(text)
+    if not isinstance(payload, dict):
+        raise json.JSONDecodeError("model JSON root must be an object", text, 0)
+    return payload
 
 
 def _source_surface_name(
@@ -55,13 +70,9 @@ def candidate_from_payload(
     object_name = str(item["object"]).strip()
     subject_type = str(item.get("subject_type", "Unknown")).strip()
     object_type = item.get("object_type")
-    subject_name = _source_surface_name(
-        subject_name, subject_type, context, output_schema
-    )
+    subject_name = _source_surface_name(subject_name, subject_type, context, output_schema)
     if object_type:
-        object_name = _source_surface_name(
-            object_name, str(object_type), context, output_schema
-        )
+        object_name = _source_surface_name(object_name, str(object_type), context, output_schema)
     subject = EntityMention(
         id=stable_id("mention", subject_name, subject_type, evidence_id),
         name=subject_name,

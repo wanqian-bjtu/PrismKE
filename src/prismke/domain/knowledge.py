@@ -49,9 +49,16 @@ class CanonicalEntity(BaseModel):
     created_at: datetime = Field(default_factory=utc_now)
 
     def embedding_source(self) -> dict[str, Any]:
-        return self.model_dump(include={
-            "name", "aliases", "entity_type", "attributes", "context_summary", "active",
-        })
+        return self.model_dump(
+            include={
+                "name",
+                "aliases",
+                "entity_type",
+                "attributes",
+                "context_summary",
+                "active",
+            }
+        )
 
 
 class CandidateClaim(BaseModel):
@@ -68,6 +75,7 @@ class CandidateClaim(BaseModel):
     cross_modal_support: bool = False
     coarse_visual_evidence: bool = False
     context_only_visual_claim: bool = False
+    uncalibrated_visual_confidence: bool = False
 
 
 class AlignmentRecord(BaseModel):
@@ -94,6 +102,7 @@ class Claim(BaseModel):
     cross_modal_support: bool = False
     coarse_visual_evidence: bool = False
     context_only_visual_claim: bool = False
+    uncalibrated_visual_confidence: bool = False
     valid_from: datetime | None = None
     valid_to: datetime | None = None
     tx_from: datetime = Field(default_factory=utc_now)
@@ -124,12 +133,15 @@ class ReviewTask(BaseModel):
     decision: ReviewDecision | None = None
     created_at: datetime = Field(default_factory=utc_now)
     resolved_at: datetime | None = None
+    reviewer: str | None = None
+    review_comment: str | None = None
 
 
 class EntityCandidate(BaseModel):
     entity_id: str
     retrieval_score: float = Field(ge=-1.0, le=1.0)
     name_score: float = Field(ge=0.0, le=1.0)
+    semantic_name_score: float | None = Field(default=None, ge=-1.0, le=1.0)
     context_score: float = Field(ge=-1.0, le=1.0)
     neighborhood_score: float = Field(default=0.0, ge=0.0, le=1.0)
     final_score: float = Field(ge=0.0, le=1.0)
@@ -176,6 +188,8 @@ class EntityReviewTask(BaseModel):
     created_at: datetime = Field(default_factory=utc_now)
 
     resolved_at: datetime | None = None
+    reviewer: str | None = None
+    review_comment: str | None = None
 
 
 class EntityOperation(BaseModel):

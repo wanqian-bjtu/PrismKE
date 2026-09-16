@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 from prismke.core.errors import LegacyCheckpointError, ProviderConfigurationError
@@ -22,6 +22,7 @@ from prismke.domain import (
     utc_now,
 )
 from prismke.governance import EntityGovernanceService
+from prismke.governance.entity_resolution import ENTITY_RESOLUTION_POLICY_VERSION
 from prismke.parsing import ParserRegistry
 from prismke.persistence import (
     AuditLog,
@@ -47,11 +48,11 @@ from prismke.providers import (
 )
 from prismke.providers.base import EmbeddingProvider, LLMProvider, OCRProvider, VLMProvider
 from prismke.workflow.graph import PrismKEWorkflow
+from prismke.workflow.review_workspace import validate_workspace_run, workspace_metadata
 
 PIPELINE_VERSION = "0.4.0"
-ASSET_POLICY_VERSION = "assets-v2"
+ASSET_POLICY_VERSION = "assets-v3"
 ALIGNMENT_POLICY_VERSION = "alignment-v1"
-ENTITY_RESOLUTION_POLICY_VERSION = "entity-resolution-v1"
 
 
 class PrismKEService:
@@ -59,6 +60,9 @@ class PrismKEService:
         self, settings: Settings | None = None, graph_store: GraphStore | None = None
     ) -> None:
         self.settings = settings or Settings()
+        self.review_metadata = workspace_metadata(self.settings.runtime_dir)
+        if self.review_metadata and self.settings.graph_store != "json" and graph_store is None:
+            raise ValueError("imported review workspace must use its isolated JSON graph")
         self.runs = RunRepository(self.settings.runs_dir)
         self.graph_store = graph_store or self._create_graph_store()
         self.evidence_store = FileEvidenceStore(self.settings.evidence_dir)
@@ -338,6 +342,8 @@ class PrismKEService:
         allow_remote_assets: bool = False,
     ) -> tuple[WorkflowState, bool]:
         """Validate a request and persist its initial state without executing it."""
+        if self.review_metadata:
+            raise ValueError("isolated review workspace does not allow new extraction runs")
         input_path = input_path.resolve()
         schema_path = schema_path.resolve()
         provider = self.provider(provider_name)
@@ -381,12 +387,16 @@ class PrismKEService:
             embedding_provider_fingerprint=embedding_provider.fingerprint(),
             allow_remote_assets=allow_remote_assets,
             pipeline_version=PIPELINE_VERSION,
+            entity_resolution_policy_version=ENTITY_RESOLUTION_POLICY_VERSION,
         )
         self.runs.save(state)
         return state, True
 
     async def execute_run(self, run_id: str) -> WorkflowState:
+        if self.review_metadata:
+            raise ValueError("isolated review workspace cannot execute extraction")
         state = self.runs.load(run_id)
+        self._validate_entity_policy(state)
         provider = self.provider(state.provider_name)
         ocr_provider = self.ocr_provider(state.ocr_provider_name)
         vlm_provider = self.vlm_provider(state.vlm_provider_name)
@@ -397,9 +407,98 @@ class PrismKEService:
     def show_run(self, run_id: str) -> WorkflowState:
         return self.runs.load(run_id)
 
+    async def entity_review_detail(self, run_id: str, task_id: str) -> dict[str, Any]:
+        from prismke.workflow.review_details import entity_task_base
+
+        state = self.show_run(run_id)
+        detail = entity_task_base(state, task_id)
+        entities = {item.id: item for item in state.entities}
+        candidates = []
+        task = next(item for item in state.entity_review_tasks if item.id == task_id)
+        for score in task.candidates:
+            entity = entities.get(score.entity_id) or await self.graph_store.get_entity(
+                score.entity_id
+            )
+            candidates.append(
+                {
+                    **score.model_dump(mode="json"),
+                    "entity": entity.model_dump(mode="json") if entity else None,
+                }
+            )
+        detail["candidates"] = candidates
+        detail["margin"] = next(
+            (
+                item.margin
+                for item in state.entity_resolution_decisions
+                if item.mention_id == task.mention_id
+            ),
+            None,
+        )
+        return detail
+
+    def claim_review_detail(self, run_id: str, task_id: str) -> dict[str, Any]:
+        from prismke.workflow.review_details import claim_task_detail
+
+        return claim_task_detail(self.show_run(run_id), task_id)
+
+    def review_progress(self, run_id: str) -> dict[str, Any]:
+        state = self.show_run(run_id)
+        entity_pending = sum(item.status == "pending" for item in state.entity_review_tasks)
+        claim_pending = sum(item.status == "pending" for item in state.review_tasks)
+        retry_commit = state.status == "failed" and state.failed_node == "commit_graph"
+        return {
+            "run_id": run_id,
+            "status": state.status,
+            "node": state.current_node,
+            "entity_pending": entity_pending,
+            "claim_pending": claim_pending,
+            "isolated": state.review_workspace,
+            "can_resume": not entity_pending
+            and not claim_pending
+            and state.status != "completed"
+            and state.current_node != "prepare_graph_commit"
+            and not retry_commit,
+            "can_commit": state.review_workspace
+            and (state.current_node == "prepare_graph_commit" or retry_commit)
+            and not entity_pending
+            and not claim_pending
+            and (not state.submission_confirmed or retry_commit),
+            "submission": {
+                "entities": len(state.graph_commit.entities),
+                "claims": len(state.graph_commit.claims),
+                "conflicts": len(state.graph_commit.conflicts),
+                "evidence": len(state.graph_commit.evidence),
+                "revision_id": state.graph_commit.revision.id,
+                "parent_id": state.graph_commit.revision.parent_id,
+            }
+            if state.graph_commit
+            else None,
+        }
+
+    def review_workflow(self, state: WorkflowState) -> PrismKEWorkflow:
+        if self.review_metadata:
+            validate_workspace_run(self.settings.runtime_dir, state)
+        if not state.review_workspace:
+            provider, ocr, vlm = self._validated_run_providers(state)
+            return self._workflow(provider, ocr, vlm, state.allow_remote_assets)
+        validate_workspace_run(self.settings.runtime_dir, state)
+        self._validate_entity_policy(state)
+        return PrismKEWorkflow(
+            MockLLMProvider(),
+            DisabledOCRProvider(),
+            DisabledVLMProvider(),
+            self.graph_store,
+            self.evidence_store,
+            self.settings.checkpoint_path,
+            self.runs,
+            embedding_provider=DisabledEmbeddingProvider(),
+            review_only=True,
+        )
+
     def _validated_run_providers(
         self, state: WorkflowState
     ) -> tuple[LLMProvider, OCRProvider, VLMProvider]:
+        self._validate_entity_policy(state)
         provider = self.provider(state.provider_name)
         ocr_provider = self.ocr_provider(state.ocr_provider_name)
         vlm_provider = self.vlm_provider(state.vlm_provider_name)
@@ -424,41 +523,79 @@ class PrismKEService:
             )
         return provider, ocr_provider, vlm_provider
 
-    async def review(self, run_id: str, claim_id: str, decision: ReviewDecision) -> WorkflowState:
+    @staticmethod
+    def _validate_entity_policy(state: WorkflowState) -> None:
+        if state.entity_resolution_policy_version != ENTITY_RESOLUTION_POLICY_VERSION:
+            raise LegacyCheckpointError(
+                "entity resolution policy changed; old runs are read-only, rerun the input"
+            )
+
+    async def review(
+        self,
+        run_id: str,
+        claim_id: str,
+        decision: ReviewDecision,
+        reviewer: str | None = None,
+        comment: str | None = None,
+    ) -> WorkflowState:
+        with self.runs.mutation_lock(run_id):
+            return await self._review(run_id, claim_id, decision, reviewer, comment)
+
+    async def _review(
+        self,
+        run_id: str,
+        claim_id: str,
+        decision: ReviewDecision,
+        reviewer: str | None,
+        comment: str | None,
+    ) -> WorkflowState:
         state = self.runs.load(run_id)
         if state.pipeline_version != PIPELINE_VERSION:
             raise LegacyCheckpointError(
                 "this run was created by an older pipeline and cannot be resumed with v0.4"
             )
-        provider, ocr_provider, vlm_provider = self._validated_run_providers(state)
+        workflow = self.review_workflow(state)
         claim = next((item for item in state.claims if item.id == claim_id), None)
-        if claim is None:
+        schema_blocked = claim_id in state.normalization_issues
+        if claim is None and not schema_blocked:
             raise KeyError(f"claim not found: {claim_id}")
         task = next((item for item in state.review_tasks if item.claim_id == claim_id), None)
         if task is None:
             raise KeyError(f"review task not found for claim: {claim_id}")
+        if task.status != "pending":
+            raise ValueError("review task has already been resolved")
+        if state.review_workspace and not (reviewer or "").strip():
+            raise ValueError("reviewer is required in an isolated review workspace")
+        if schema_blocked and decision != ReviewDecision.REJECT:
+            raise ValueError("Schema硬约束不满足的候选仅可拒绝，不能批准写图")
         task.status = "resolved"
         task.decision = decision
         task.resolved_at = utc_now()
-        self.audit.record(
-            "review",
-            task.id,
-            {"run_id": run_id, "claim_id": claim_id, "decision": decision.value},
-        )
-        claim.status = (
-            ClaimStatus.APPROVED if decision == ReviewDecision.APPROVE else ClaimStatus.REJECTED
-        )
+        task.reviewer, task.review_comment = reviewer, comment
+        if claim is not None:
+            claim.status = (
+                ClaimStatus.APPROVED if decision == ReviewDecision.APPROVE else ClaimStatus.REJECTED
+            )
         state.status = (
             "awaiting_review"
             if any(item.status == "pending" for item in state.review_tasks)
             else "running"
         )
-        if not await self._workflow(
-            provider, ocr_provider, vlm_provider, state.allow_remote_assets
-        ).record_review(state):
+        if not await workflow.record_review(state):
             raise LegacyCheckpointError(
                 "this run uses the v0.1 checkpoint format; rerun the input with v0.1.1"
             )
+        self.audit.record(
+            "review",
+            task.id,
+            {
+                "run_id": run_id,
+                "claim_id": claim_id,
+                "decision": decision.value,
+                "reviewer": reviewer,
+                "comment": comment,
+            },
+        )
         return state
 
     async def review_entity(
@@ -467,16 +604,41 @@ class PrismKEService:
         task_id: str,
         decision: Literal["link", "create", "reject"],
         selected_entity_id: str | None = None,
+        reviewer: str | None = None,
+        comment: str | None = None,
+    ) -> WorkflowState:
+        with self.runs.mutation_lock(run_id):
+            return await self._review_entity(
+                run_id,
+                task_id,
+                decision,
+                selected_entity_id,
+                reviewer,
+                comment,
+            )
+
+    async def _review_entity(
+        self,
+        run_id: str,
+        task_id: str,
+        decision: Literal["link", "create", "reject"],
+        selected_entity_id: str | None,
+        reviewer: str | None,
+        comment: str | None,
     ) -> WorkflowState:
         state = self.runs.load(run_id)
         if state.pipeline_version != PIPELINE_VERSION:
             raise LegacyCheckpointError(
                 "this run was created by an older pipeline and cannot be resumed with v0.4"
             )
-        provider, ocr_provider, vlm_provider = self._validated_run_providers(state)
+        workflow = self.review_workflow(state)
         task = next((item for item in state.entity_review_tasks if item.id == task_id), None)
         if task is None or task.mention_id is None:
             raise KeyError(f"entity review task not found: {task_id}")
+        if task.status != "pending":
+            raise ValueError("entity review task has already been resolved")
+        if state.review_workspace and not (reviewer or "").strip():
+            raise ValueError("reviewer is required in an isolated review workspace")
         if decision not in {"link", "create", "reject"}:
             raise ValueError(f"unsupported entity review decision: {decision}")
         target_id: str | None = None
@@ -503,13 +665,27 @@ class PrismKEService:
         task.decision = decision
         task.selected_entity_id = target_id
         task.resolved_at = utc_now()
+        task.reviewer, task.review_comment = reviewer, comment
         if target_id is not None:
+            selected = next((item for item in state.entities if item.id == target_id), None)
+            if selected is None:
+                selected = await self.graph_store.get_entity(target_id)
+                if selected is None:
+                    raise ValueError("selected canonical entity is unavailable")
+                state.entities.append(selected)
             state.mention_to_entity[task.mention_id] = target_id
+            for resolution in state.entity_resolution_decisions:
+                if resolution.mention_id == task.mention_id:
+                    resolution.selected_entity_id = target_id
+                    resolution.requires_review = False
+                    resolution.reasons.append(f"human_review:{decision}")
         state.status = (
             "awaiting_review"
             if any(item.status == "pending" for item in state.entity_review_tasks)
             else "running"
         )
+        if not await workflow.record_entity_review(state):
+            raise LegacyCheckpointError("entity review checkpoint is unavailable; rerun the input")
         self.audit.record(
             "entity_review",
             task.id,
@@ -518,30 +694,58 @@ class PrismKEService:
                 "mention_id": task.mention_id,
                 "decision": decision,
                 "selected_entity_id": target_id,
+                "reviewer": reviewer,
+                "comment": comment,
             },
         )
-        if not await self._workflow(
-            provider,
-            ocr_provider,
-            vlm_provider,
-            state.allow_remote_assets,
-        ).record_entity_review(state):
-            raise LegacyCheckpointError("entity review checkpoint is unavailable; rerun the input")
         return state
 
     async def resume(self, run_id: str) -> WorkflowState:
+        with self.runs.mutation_lock(run_id):
+            return await self._resume(run_id)
+
+    async def _resume(self, run_id: str) -> WorkflowState:
         state = self.runs.load(run_id)
         if state.pipeline_version != PIPELINE_VERSION:
             raise LegacyCheckpointError(
                 "this run was created by an older pipeline and cannot be resumed with v0.4"
             )
-        provider, ocr_provider, vlm_provider = self._validated_run_providers(state)
+        if any(task.status == "pending" for task in state.entity_review_tasks) or any(
+            task.status == "pending" for task in state.review_tasks
+        ):
+            raise ValueError("pending reviews must be resolved before continuation")
+        workflow = self.review_workflow(state)
         state.status = "running"
-        result = await self._workflow(
-            provider, ocr_provider, vlm_provider, state.allow_remote_assets
-        ).resume(run_id)
+        result = await workflow.resume(run_id)
         if result is None:
             raise LegacyCheckpointError(
                 "this run uses the v0.1 checkpoint format; rerun the input with v0.1.1"
             )
         return result
+
+    async def confirm_review_commit(self, run_id: str, reviewer: str) -> WorkflowState:
+        with self.runs.mutation_lock(run_id):
+            state = self.show_run(run_id)
+            if not reviewer.strip():
+                raise ValueError("reviewer is required")
+            retry_commit = state.status == "failed" and state.failed_node == "commit_graph"
+            if not state.review_workspace or (
+                state.current_node != "prepare_graph_commit" and not retry_commit
+            ):
+                raise ValueError("run is not at an isolated submission preview")
+            if any(task.status == "pending" for task in state.entity_review_tasks) or any(
+                task.status == "pending" for task in state.review_tasks
+            ):
+                raise ValueError("pending reviews prevent graph submission")
+            if state.graph_commit is None or (state.submission_confirmed and not retry_commit):
+                raise ValueError("missing preview or submission already confirmed")
+            result = await self.review_workflow(state).confirm_submission(state)
+            self.audit.record(
+                "confirm_graph_commit",
+                run_id,
+                {
+                    "reviewer": reviewer,
+                    "revision_id": result.revision.id if result.revision else None,
+                },
+            )
+            return result

@@ -21,6 +21,8 @@ def route_by_risk(
             reasons.append("coarse_visual_evidence")
         if claim.context_only_visual_claim:
             reasons.append("context_only_visual_claim")
+        if claim.uncalibrated_visual_confidence:
+            reasons.append("uncalibrated_visual_confidence")
         if claim.confidence < 0.55:
             claim.status = ClaimStatus.REJECTED
         elif claim.confidence < 0.85:

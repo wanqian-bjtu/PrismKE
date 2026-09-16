@@ -17,6 +17,8 @@ class RunAccepted(BaseModel):
 
 class ReviewRequest(BaseModel):
     decision: ReviewDecision
+    reviewer: str | None = None
+    comment: str | None = None
 
 
 class RollbackRequest(BaseModel):
@@ -28,6 +30,7 @@ class EntityReviewRequest(BaseModel):
     run_id: str | None = None
     selected_entity_id: str | None = None
     reviewer: str | None = None
+    comment: str | None = None
 
 
 class MergeProposalRequest(BaseModel):
