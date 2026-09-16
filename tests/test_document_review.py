@@ -33,8 +33,10 @@ def test_normalized_bbox_coverage_uses_unit_canvas_not_pixel_dimensions():
         },
     }
     assert document_coverage(state)["invalid_bbox_ids"] == ["ev"]
+    assert document_coverage(state)["processing_complete"] is False
     state["document"]["evidence"][0]["bbox"]["x1"] = 1
     assert document_coverage(state)["invalid_bbox_ids"] == []
+    assert document_coverage(state)["processing_complete"] is True
 
 
 def test_failed_document_is_never_reported_as_fully_processed():

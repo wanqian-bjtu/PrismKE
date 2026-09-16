@@ -62,7 +62,8 @@ def document_coverage(state: dict[str, Any]) -> dict[str, Any]:
         "batch_provenance": [w for w in warnings if w.startswith("evaluation_")],
         "processing_complete": state.get("status") in {"completed", "awaiting_review"}
         and not missing
-        and not failures,
+        and not failures
+        and not invalid,
     }
 
 
