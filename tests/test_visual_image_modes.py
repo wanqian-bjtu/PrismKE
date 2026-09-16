@@ -6,8 +6,17 @@ import httpx
 import pytest
 from PIL import Image
 
-from prismke.domain import Claim, DocumentIR, MediaAsset, OutputSchema, VisualExtractionRequest
+from prismke.domain import (
+    BBox,
+    Claim,
+    DocumentIR,
+    EvidenceRef,
+    MediaAsset,
+    OutputSchema,
+    VisualExtractionRequest,
+)
 from prismke.governance.risk import route_by_risk
+from prismke.persistence.file_evidence import FileEvidenceStore
 from prismke.providers.vlm import OpenAICompatibleVLMProvider
 
 
@@ -21,6 +30,33 @@ def test_cmyk_request_copy_preserves_original(tmp_path):
         assert image.mode == "RGB"
         assert image.size == (80, 120)
     assert path.read_bytes() == original
+
+
+@pytest.mark.asyncio
+async def test_cmyk_evidence_crop_returns_png_without_changing_blob(tmp_path):
+    path = tmp_path / "source.jpg"
+    Image.new("CMYK", (80, 120)).save(path)
+    original = path.read_bytes()
+    store = FileEvidenceStore(tmp_path / "evidence")
+    source_hash = await store.put_blob(original, "image/jpeg")
+    await store.put_ref(
+        EvidenceRef(
+            id="ev",
+            kind="visual_region",
+            document_id="doc",
+            source_hash=source_hash,
+            modality="image",
+            bbox=BBox(x0=0, y0=0, x1=0.5, y1=0.5),
+            coordinate_space="normalized",
+            canvas_width=80,
+            canvas_height=120,
+        )
+    )
+    with Image.open(BytesIO(await store.crop("ev"))) as crop:
+        assert crop.mode == "RGB"
+        assert crop.size == (40, 60)
+    assert await store.get_blob(source_hash) == original
+    assert await store.verify("ev")
 
 
 @pytest.mark.asyncio

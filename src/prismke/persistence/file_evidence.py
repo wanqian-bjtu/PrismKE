@@ -177,6 +177,8 @@ class FileEvidenceStore:
                     int(box.y1),
                 )
             cropped = image.crop(coordinates)
+            if cropped.mode not in {"RGB", "RGBA", "L", "LA", "P", "1"}:
+                cropped = cropped.convert("RGB")
             output = BytesIO()
             cropped.save(output, format="PNG")
             return output.getvalue()
