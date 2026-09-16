@@ -49,9 +49,16 @@ class CanonicalEntity(BaseModel):
     created_at: datetime = Field(default_factory=utc_now)
 
     def embedding_source(self) -> dict[str, Any]:
-        return self.model_dump(include={
-            "name", "aliases", "entity_type", "attributes", "context_summary", "active",
-        })
+        return self.model_dump(
+            include={
+                "name",
+                "aliases",
+                "entity_type",
+                "attributes",
+                "context_summary",
+                "active",
+            }
+        )
 
 
 class CandidateClaim(BaseModel):
@@ -130,6 +137,7 @@ class EntityCandidate(BaseModel):
     entity_id: str
     retrieval_score: float = Field(ge=-1.0, le=1.0)
     name_score: float = Field(ge=0.0, le=1.0)
+    semantic_name_score: float | None = Field(default=None, ge=-1.0, le=1.0)
     context_score: float = Field(ge=-1.0, le=1.0)
     neighborhood_score: float = Field(default=0.0, ge=0.0, le=1.0)
     final_score: float = Field(ge=0.0, le=1.0)

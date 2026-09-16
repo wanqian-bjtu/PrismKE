@@ -23,7 +23,10 @@ from prismke.domain import (
     SchemaIndex,
 )
 from prismke.governance.entity_index import rebuild_entity_index
-from prismke.governance.entity_resolution import SemanticEntityResolver
+from prismke.governance.entity_resolution import (
+    ENTITY_RESOLUTION_POLICY_VERSION,
+    SemanticEntityResolver,
+)
 from prismke.persistence.json_graph import JSONGraphStore
 from prismke.providers.base import EmbeddingProvider
 
@@ -303,6 +306,7 @@ async def evaluate_entity_linking_manifest(
         provenance={
             **manifest.get("provenance", {}),
             "model_fingerprint": provider.fingerprint(),
+            "entity_resolution_policy_version": ENTITY_RESOLUTION_POLICY_VERSION,
             "code_commit": code_commit,
             "top_k": top_k,
             "auto_link_threshold": auto_link_threshold,

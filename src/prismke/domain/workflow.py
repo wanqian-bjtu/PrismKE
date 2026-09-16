@@ -103,6 +103,7 @@ class WorkflowState(BaseModel):
     embedding_provider_fingerprint: str = "disabled"
     allow_remote_assets: bool = False
     pipeline_version: str = "0.4.0"
+    entity_resolution_policy_version: str | None = None
     current_node: str = "ingest"
     failed_node: str | None = None
     status: Literal["running", "awaiting_review", "completed", "failed"] = "running"

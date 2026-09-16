@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
@@ -19,6 +20,26 @@ from prismke.domain import (
 )
 from prismke.persistence.base import GraphStore
 from prismke.providers.base import EmbeddingProvider
+
+ENTITY_RESOLUTION_POLICY_VERSION = "entity-resolution-v2"
+
+
+def _cosine(left: list[float], right: list[float]) -> float:
+    left_norm = math.sqrt(sum(value * value for value in left)) or 1.0
+    right_norm = math.sqrt(sum(value * value for value in right)) or 1.0
+    return max(
+        -1.0,
+        min(1.0, sum(a * b for a, b in zip(left, right, strict=True)) / (left_norm * right_norm)),
+    )
+
+
+def _cross_script(left: str, right: str) -> bool:
+    def script(value: str) -> str:
+        if re.search(r"[\u3400-\u9fff]", value):
+            return "han"
+        return "latin" if re.search(r"[a-zA-Z]", value) else "other"
+
+    return {script(left), script(right)} == {"han", "latin"}
 
 
 @dataclass(frozen=True)
@@ -77,9 +98,7 @@ class EntityResolver:
 
 
 def entity_embedding_text(entity: CanonicalEntity) -> str:
-    attributes = " ".join(
-        f"{key}: {value}" for key, value in sorted(entity.attributes.items())
-    )
+    attributes = " ".join(f"{key}: {value}" for key, value in sorted(entity.attributes.items()))
     return "\n".join(
         item
         for item in (
@@ -152,21 +171,50 @@ class SemanticEntityResolver:
         entity: CanonicalEntity,
         retrieval_score: float,
         context_score: float | None = None,
+        semantic_name_score: float | None = None,
     ) -> EntityCandidate:
         retrieval = max(0.0, min(1.0, (retrieval_score + 1.0) / 2.0))
         name = SemanticEntityResolver._name_score(mention, entity)
         context = retrieval if context_score is None else context_score
         neighborhood = 0.0
-        final = 0.4 * retrieval + 0.3 * name + 0.2 * context + 0.1 * neighborhood
+        cross_script = any(
+            _cross_script(mention.name, value) for value in [entity.name, *entity.aliases]
+        )
+        effective_name = name
+        if cross_script and semantic_name_score is not None:
+            effective_name = max(name, (semantic_name_score + 1.0) / 2.0)
+        final = 0.4 * retrieval + 0.3 * effective_name + 0.2 * context + 0.1 * neighborhood
         return EntityCandidate(
             entity_id=entity.id,
             retrieval_score=retrieval_score,
             name_score=name,
+            semantic_name_score=semantic_name_score,
             context_score=context,
             neighborhood_score=neighborhood,
             final_score=max(0.0, min(1.0, final)),
-            reasons=["dense_retrieval", "type_match", "name_rerank", "context_rerank"],
+            reasons=[
+                "dense_retrieval",
+                "name_retrieval",
+                "type_match",
+                "name_rerank",
+                "context_rerank",
+                *(["cross_script_name_rerank"] if cross_script else []),
+            ],
         )
+
+    async def _semantic_name_scores(
+        self, mention: EntityMention, entities: list[CanonicalEntity]
+    ) -> dict[str, float]:
+        names = [
+            (entity.id, name) for entity in entities for name in [entity.name, *entity.aliases]
+        ]
+        if not names:
+            return {}
+        vectors = await self.embedding_provider.encode([mention.name, *(name for _, name in names)])
+        scores: dict[str, float] = {}
+        for (entity_id, _), vector in zip(names, vectors[1:], strict=True):
+            scores[entity_id] = max(scores.get(entity_id, -1.0), _cosine(vectors[0], vector))
+        return scores
 
     async def _context_scores(
         self, mention: EntityMention, entities: list[CanonicalEntity]
@@ -182,9 +230,9 @@ class SemanticEntityResolver:
         scores: dict[str, float] = {}
         for entity, vector in zip(with_context, vectors[1:], strict=True):
             norm = math.sqrt(sum(value * value for value in vector)) or 1.0
-            cosine = sum(
-                left * right for left, right in zip(query, vector, strict=True)
-            ) / (query_norm * norm)
+            cosine = sum(left * right for left, right in zip(query, vector, strict=True)) / (
+                query_norm * norm
+            )
             scores[entity.id] = max(0.0, min(1.0, (cosine + 1.0) / 2.0))
         return scores
 
@@ -295,18 +343,25 @@ class SemanticEntityResolver:
                 if not exact_matches
                 else []
             )
-            vector: list[float] | None = None
             candidates: list[EntityCandidate] = []
             if provider_enabled and not cross_type:
                 try:
-                    vector = (await self.embedding_provider.encode(
-                        [mention_embedding_text(mention, entity_type)]
-                    ))[0]
-                    retrieved = await self.graph_store.search_entities(
-                        vector,
-                        entity_type,
-                        self.top_k,
-                        self.embedding_provider.fingerprint(),
+                    queries = [
+                        mention_embedding_text(mention, entity_type),
+                        f"name: {mention.name.strip()}\ntype: {entity_type}",
+                    ]
+                    vectors = await self.embedding_provider.encode(queries)
+                    merged: dict[str, tuple[CanonicalEntity, float]] = {}
+                    for vector in vectors:
+                        for entity, score in await self.graph_store.search_entities(
+                            vector, entity_type, self.top_k, self.embedding_provider.fingerprint()
+                        ):
+                            previous = merged.get(entity.id)
+                            if previous is None or score > previous[1]:
+                                merged[entity.id] = (entity, score)
+                    retrieved = list(merged.values())
+                    semantic_scores = await self._semantic_name_scores(
+                        mention, [entity for entity, _ in retrieved]
                     )
                     context_scores = await self._context_scores(
                         mention, [entity for entity, _ in retrieved]
@@ -315,15 +370,18 @@ class SemanticEntityResolver:
                         await self._apply_neighborhood_score(
                             mention,
                             self._candidate(
-                                mention, entity, score, context_scores.get(entity.id)
+                                mention,
+                                entity,
+                                score,
+                                context_scores.get(entity.id),
+                                semantic_scores.get(entity.id),
                             ),
                         )
                         for entity, score in retrieved
                     ]
                     candidates = sorted(
                         candidates,
-                        key=lambda item: item.final_score,
-                        reverse=True,
+                        key=lambda item: (-round(item.final_score, 12), item.entity_id),
                     )
                 except Exception:  # Provider and backend failures must route to review.
                     reasons.append("embedding_retrieval_unavailable")
@@ -356,12 +414,14 @@ class SemanticEntityResolver:
                 nil_entity = nil_entity.model_copy(
                     update={
                         "id": stable_id(
-                            "entity", entity_type, normalized,
-                            normalize_label(mention.context), "disambiguated-nil",
+                            "entity",
+                            entity_type,
+                            normalized,
+                            normalize_label(mention.context),
+                            "disambiguated-nil",
                         )
                     }
                 )
-            entities.setdefault(nil_entity.id, nil_entity)
             if cross_type:
                 candidates = [
                     EntityCandidate(
@@ -387,6 +447,22 @@ class SemanticEntityResolver:
                 best = candidates[0]
                 runner_up = candidates[1].final_score if len(candidates) > 1 else 0.0
                 margin = best.final_score - runner_up
+                candidate_entity = entities[best.entity_id]
+                cross_script = any(
+                    _cross_script(mention.name, name)
+                    for name in [candidate_entity.name, *candidate_entity.aliases]
+                )
+                if cross_script and best.final_score >= self.review_threshold:
+                    reasons.append("cross_script_identity_requires_review")
+                if best.final_score < self.review_threshold and any(
+                    "cross_script_name_rerank" in candidate.reasons
+                    and candidate.semantic_name_score is not None
+                    and candidate.semantic_name_score >= 0.65
+                    or candidate.retrieval_score >= 0.85
+                    and candidate.context_score >= 0.85
+                    for candidate in candidates
+                ):
+                    reasons.append("possible_duplicate_nil_protection")
                 if (
                     best.final_score >= self.auto_link_threshold
                     and margin >= self.min_margin
@@ -443,6 +519,7 @@ class SemanticEntityResolver:
                 )
             decisions.append(decision)
             if decision.requires_review:
+                entities.setdefault(nil_entity.id, nil_entity)
                 review_reasons[mention.id] = decision.reasons
                 review_tasks.append(
                     EntityReviewTask(
@@ -455,9 +532,15 @@ class SemanticEntityResolver:
                         proposed_entity_id=nil_entity.id,
                     )
                 )
-            values = exact.setdefault((normalized, entity_type), [])
-            if all(item.id != nil_entity.id for item in values):
-                values.append(nil_entity)
+            else:
+                assert decision.selected_entity_id is not None
+                if decision.method == "nil":
+                    entities.setdefault(nil_entity.id, nil_entity)
+                selected = entities[decision.selected_entity_id]
+                values = exact.setdefault((normalized, entity_type), [])
+                if all(item.id != selected.id for item in values):
+                    values.append(selected)
+                names_any_type.setdefault(normalized, []).append(selected)
 
         return ResolutionBundle(
             entities=list(entities.values()),

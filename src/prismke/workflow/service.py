@@ -22,6 +22,7 @@ from prismke.domain import (
     utc_now,
 )
 from prismke.governance import EntityGovernanceService
+from prismke.governance.entity_resolution import ENTITY_RESOLUTION_POLICY_VERSION
 from prismke.parsing import ParserRegistry
 from prismke.persistence import (
     AuditLog,
@@ -51,7 +52,6 @@ from prismke.workflow.graph import PrismKEWorkflow
 PIPELINE_VERSION = "0.4.0"
 ASSET_POLICY_VERSION = "assets-v2"
 ALIGNMENT_POLICY_VERSION = "alignment-v1"
-ENTITY_RESOLUTION_POLICY_VERSION = "entity-resolution-v1"
 
 
 class PrismKEService:
@@ -381,12 +381,14 @@ class PrismKEService:
             embedding_provider_fingerprint=embedding_provider.fingerprint(),
             allow_remote_assets=allow_remote_assets,
             pipeline_version=PIPELINE_VERSION,
+            entity_resolution_policy_version=ENTITY_RESOLUTION_POLICY_VERSION,
         )
         self.runs.save(state)
         return state, True
 
     async def execute_run(self, run_id: str) -> WorkflowState:
         state = self.runs.load(run_id)
+        self._validate_entity_policy(state)
         provider = self.provider(state.provider_name)
         ocr_provider = self.ocr_provider(state.ocr_provider_name)
         vlm_provider = self.vlm_provider(state.vlm_provider_name)
@@ -400,6 +402,7 @@ class PrismKEService:
     def _validated_run_providers(
         self, state: WorkflowState
     ) -> tuple[LLMProvider, OCRProvider, VLMProvider]:
+        self._validate_entity_policy(state)
         provider = self.provider(state.provider_name)
         ocr_provider = self.ocr_provider(state.ocr_provider_name)
         vlm_provider = self.vlm_provider(state.vlm_provider_name)
@@ -423,6 +426,13 @@ class PrismKEService:
                 "embedding provider configuration changed since run creation"
             )
         return provider, ocr_provider, vlm_provider
+
+    @staticmethod
+    def _validate_entity_policy(state: WorkflowState) -> None:
+        if state.entity_resolution_policy_version != ENTITY_RESOLUTION_POLICY_VERSION:
+            raise LegacyCheckpointError(
+                "entity resolution policy changed; old runs are read-only, rerun the input"
+            )
 
     async def review(self, run_id: str, claim_id: str, decision: ReviewDecision) -> WorkflowState:
         state = self.runs.load(run_id)
