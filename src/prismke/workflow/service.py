@@ -641,6 +641,9 @@ class PrismKEService:
                 "evidence": len(state.graph_commit.evidence),
                 "revision_id": state.graph_commit.revision.id,
                 "parent_id": state.graph_commit.revision.parent_id,
+                "changes": [c.model_dump(mode="json") for c in state.graph_commit.revision.changes]
+                if state.pending_correction_id
+                else [],
             }
             if state.graph_commit
             else None,

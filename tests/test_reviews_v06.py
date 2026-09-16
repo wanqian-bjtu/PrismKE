@@ -160,6 +160,12 @@ async def test_committed_fact_correction_and_restore(
     state = await service.resume(state.run_id)
     assert state.current_node == "prepare_graph_commit" and state.pending_correction_id
     assert (await service.graph_store.get_claim(claim_id)).tx_to is None
+    preview = service.review_progress(state.run_id)["submission"]
+    assert preview["changes"] == [
+        change.model_dump(mode="json") for change in state.graph_commit.revision.changes
+    ]
+    assert preview["changes"][0]["before"]["tx_to"] is None
+    assert preview["changes"][0]["after"]["tx_to"] is not None
     state = await service.confirm_review_commit(state.run_id, "tester")
     assert state.status == "completed"
     assert (await service.graph_store.get_claim(claim_id)).tx_to is not None
