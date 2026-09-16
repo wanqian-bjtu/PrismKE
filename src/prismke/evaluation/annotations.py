@@ -231,6 +231,7 @@ def export_reviewed_annotations(workbook: Path, package: Path, output: Path) -> 
         (output / name).write_text(
             json.dumps(value, ensure_ascii=False, indent=2),
             encoding="utf-8",
+            newline="\n",
         )
     summary = {
         "confirmed": len(confirmed),
@@ -243,5 +244,6 @@ def export_reviewed_annotations(workbook: Path, package: Path, output: Path) -> 
     (output / "export_summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2),
         encoding="utf-8",
+        newline="\n",
     )
     return summary
