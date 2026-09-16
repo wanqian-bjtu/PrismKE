@@ -110,6 +110,9 @@ async def test_json_vector_search_and_semantic_resolution(
             )
         ]
     )
+    assert await store.search_entities(
+        vector, "Software", 10, "embedding:outdated"
+    ) == []
     resolver = SemanticEntityResolver(
         SchemaIndex(load_schema(schema_path)),
         store,

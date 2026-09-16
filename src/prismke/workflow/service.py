@@ -206,7 +206,9 @@ class PrismKEService:
                 and normalized in {item.name.casefold(), *(a.casefold() for a in item.aliases)}
             ][:limit]
         vector = (await provider.encode([f"name: {query}\ntype: {entity_type}"]))[0]
-        matches = await self.graph_store.search_entities(vector, entity_type, limit)
+        matches = await self.graph_store.search_entities(
+            vector, entity_type, limit, provider.fingerprint()
+        )
         return [
             EntityCandidate(
                 entity_id=entity.id,

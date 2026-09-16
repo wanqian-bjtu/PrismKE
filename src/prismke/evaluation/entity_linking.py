@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections import defaultdict
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -38,6 +39,11 @@ class EntityLinkingEvaluationReport(BaseModel):
     b_cubed_f1: float
     review_rate: float
     false_auto_link_rate: float
+    index_build_seconds: float
+    resolution_seconds: float
+    total_seconds: float
+    indexed_entities_per_second: float
+    mean_resolution_ms: float
     details: list[dict[str, Any]]
 
 
@@ -69,6 +75,7 @@ async def evaluate_entity_linking_manifest(
     review_threshold: float = 0.65,
     min_margin: float = 0.08,
 ) -> EntityLinkingEvaluationReport:
+    total_started = time.perf_counter()
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     entities = [CanonicalEntity.model_validate(item) for item in manifest["entities"]]
     types = sorted({item.entity_type for item in entities})
@@ -93,6 +100,7 @@ async def evaluate_entity_linking_manifest(
                 ),
             )
         )
+        index_started = time.perf_counter()
         await rebuild_entity_index(
             store,
             provider,
@@ -100,6 +108,7 @@ async def evaluate_entity_linking_manifest(
             batch_size=32,
             dry_run=False,
         )
+        index_build_seconds = time.perf_counter() - index_started
         details: list[dict[str, Any]] = []
         actual_clusters: list[str] = []
         predicted_clusters: list[str] = []
@@ -107,6 +116,7 @@ async def evaluate_entity_linking_manifest(
         top_1_hits = 0
         true_nil = predicted_nil = correct_nil = 0
         reviews = false_auto_links = 0
+        resolution_started = time.perf_counter()
         for payload in manifest["mentions"]:
             expected = payload.get("expected_entity_id")
             mention = EntityMention(
@@ -162,6 +172,7 @@ async def evaluate_entity_linking_manifest(
                     "ranked_entity_ids": ranked,
                 }
             )
+        resolution_seconds = time.perf_counter() - resolution_started
     count = len(details)
     nil_precision = correct_nil / predicted_nil if predicted_nil else 0.0
     nil_recall = correct_nil / true_nil if true_nil else 0.0
@@ -185,5 +196,12 @@ async def evaluate_entity_linking_manifest(
         b_cubed_f1=bc_f1,
         review_rate=reviews / count if count else 0.0,
         false_auto_link_rate=false_auto_links / link_cases if link_cases else 0.0,
+        index_build_seconds=index_build_seconds,
+        resolution_seconds=resolution_seconds,
+        total_seconds=time.perf_counter() - total_started,
+        indexed_entities_per_second=(
+            len(entities) / index_build_seconds if index_build_seconds else 0.0
+        ),
+        mean_resolution_ms=(resolution_seconds * 1000 / count if count else 0.0),
         details=details,
     )

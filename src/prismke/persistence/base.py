@@ -30,6 +30,7 @@ class GraphStore(Protocol):
         vector: list[float],
         entity_type: str,
         top_k: int,
+        model_fingerprint: str | None = None,
     ) -> list[tuple[CanonicalEntity, float]]: ...
 
     async def list_entity_embeddings(self) -> list[EntityEmbedding]: ...

@@ -95,7 +95,11 @@ class JSONGraphStore:
         return CanonicalEntity.model_validate(payload) if payload is not None else None
 
     async def search_entities(
-        self, vector: list[float], entity_type: str, top_k: int
+        self,
+        vector: list[float],
+        entity_type: str,
+        top_k: int,
+        model_fingerprint: str | None = None,
     ) -> list[tuple[CanonicalEntity, float]]:
         if not vector or top_k < 1:
             return []
@@ -113,7 +117,11 @@ class JSONGraphStore:
             ):
                 continue
             embedding = EntityEmbedding.model_validate(embedding_payload)
-            if len(embedding.vector) != len(vector):
+            if (
+                len(embedding.vector) != len(vector)
+                or model_fingerprint is not None
+                and embedding.model_fingerprint != model_fingerprint
+            ):
                 continue
             candidate_norm = math.sqrt(
                 sum(value * value for value in embedding.vector)

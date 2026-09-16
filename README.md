@@ -264,6 +264,8 @@ PRISMKE_API_PORT=8000
 
 ## BGE-M3 与实体向量索引
 
+Embedding 依赖固定为官方 `torch 2.6.0 + CUDA 12.4`，与当前 AutoDL 驱动及 Transformers 权重加载要求兼容。普通 Python 包使用阿里云 HTTPS 镜像，Torch 使用 PyTorch 官方 CUDA 12.4 索引。
+
 在服务器 `.env` 中启用本地 Embedding：
 
 ```text

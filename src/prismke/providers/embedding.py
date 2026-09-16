@@ -112,6 +112,20 @@ class BGEM3EmbeddingProvider:
                         repo_id=self.model_name,
                         cache_dir=self.model_cache_dir / "hub",
                         local_files_only=not self.allow_download,
+                        allow_patterns=[
+                            "config.json",
+                            "config_sentence_transformers.json",
+                            "modules.json",
+                            "sentence_bert_config.json",
+                            "sentencepiece.bpe.model",
+                            "special_tokens_map.json",
+                            "tokenizer.json",
+                            "tokenizer_config.json",
+                            "pytorch_model.bin",
+                            "colbert_linear.pt",
+                            "sparse_linear.pt",
+                            "1_Pooling/config.json",
+                        ],
                     )
                 )
             except LocalEntryNotFoundError as exc:

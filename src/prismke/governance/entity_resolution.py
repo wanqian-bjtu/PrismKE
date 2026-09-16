@@ -267,7 +267,10 @@ class SemanticEntityResolver:
                         [mention_embedding_text(mention, entity_type)]
                     ))[0]
                     retrieved = await self.graph_store.search_entities(
-                        vector, entity_type, self.top_k
+                        vector,
+                        entity_type,
+                        self.top_k,
+                        self.embedding_provider.fingerprint(),
                     )
                     candidates = [
                         await self._apply_neighborhood_score(

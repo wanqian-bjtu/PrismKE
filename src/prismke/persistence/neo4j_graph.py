@@ -369,7 +369,11 @@ class Neo4jGraphStore:
         return await self._get("Entity", entity_id, CanonicalEntity)
 
     async def search_entities(
-        self, vector: list[float], entity_type: str, top_k: int
+        self,
+        vector: list[float],
+        entity_type: str,
+        top_k: int,
+        model_fingerprint: str | None = None,
     ) -> list[tuple[CanonicalEntity, float]]:
         if not vector or top_k < 1:
             return []
@@ -381,11 +385,13 @@ class Neo4jGraphStore:
                     "'entity_embedding_bge_m3', $candidate_limit, $vector) "
                     "YIELD node, score "
                     "WHERE node.entity_type = $entity_type AND coalesce(node.active, true) "
+                    "AND ($model IS NULL OR node.embedding_model = $model) "
                     "RETURN node.payload AS payload, score ORDER BY score DESC LIMIT $top_k",
                     candidate_limit=max(top_k * 5, top_k),
                     vector=vector,
                     entity_type=entity_type,
                     top_k=top_k,
+                    model=model_fingerprint,
                 )
                 records = await result.data()
             return [
@@ -396,8 +402,10 @@ class Neo4jGraphStore:
             result = await session.run(
                 "MATCH (n:Entity {entity_type: $entity_type}) "
                 "WHERE coalesce(n.active, true) AND n.embedding IS NOT NULL "
+                "AND ($model IS NULL OR n.embedding_model = $model) "
                 "RETURN n.payload AS payload, n.embedding AS embedding",
                 entity_type=entity_type,
+                model=model_fingerprint,
             )
             records = await result.data()
         query_norm = math.sqrt(sum(value * value for value in vector)) or 1.0
