@@ -10,7 +10,7 @@ def build_validation_tab(gr: Any, service: PrismKEService) -> None:
     controller = ReviewController(service)
     with gr.Tab("校验问题"):
         with gr.Row():
-            run = gr.Dropdown(label="校验运行", choices=controller.runs())
+            run = gr.Dropdown(label="校验运行", choices=controller.runs(), value=None)
             stage = gr.Dropdown(
                 label="校验阶段",
                 choices=["全部", "structure", "schema", "reference", "evidence"],

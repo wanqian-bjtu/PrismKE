@@ -14,9 +14,20 @@ from prismke.domain import (
 
 def bind_commit_provenance(transaction: GraphCommit) -> None:
     transaction.revision.validation_context = transaction.validation_context
-    transaction.revision.commit_fingerprint = canonical_hash(
-        transaction.model_dump(mode="json", exclude={"revision": {"commit_fingerprint"}})
-    )
+    payload = transaction.model_dump(mode="json", exclude={"revision": {"commit_fingerprint"}})
+    for field in (
+        "documents",
+        "evidence",
+        "entities",
+        "claims",
+        "conflicts",
+        "entity_operations",
+        "entity_embeddings",
+    ):
+        payload[field] = sorted(
+            payload[field], key=lambda item: item.get("id", item.get("entity_id", ""))
+        )
+    transaction.revision.commit_fingerprint = canonical_hash(payload)
 
 
 def final_state_commit(

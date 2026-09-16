@@ -8,6 +8,7 @@ from typing import Any
 import orjson
 from pydantic import BaseModel, Field
 
+from prismke.core.errors import GraphIntegrityError
 from prismke.domain import (
     CanonicalEntity,
     Claim,
@@ -31,6 +32,7 @@ class MigrationReport(BaseModel):
     revisions: int
     committed_revisions: int = 0
     warnings: list[str] = Field(default_factory=list)
+    blocked_claim_ids: list[str] = Field(default_factory=list)
 
 
 async def migrate_json_graph(
@@ -84,6 +86,18 @@ async def migrate_json_graph(
                     ),
                 )
 
+    blocked = {
+        cid
+        for revision in revisions
+        for cid in revision.claim_ids
+        if cid in claims
+        and claims[cid].tx_to is None
+        and (
+            revision.validation_context is None
+            or cid not in revision.validation_context.claim_schema_ids
+        )
+    }
+    warnings.extend(f"missing_schema_context:{cid}" for cid in sorted(blocked))
     report = MigrationReport(
         source=str(source.resolve()),
         dry_run=dry_run,
@@ -94,11 +108,14 @@ async def migrate_json_graph(
         conflicts=len(conflicts),
         revisions=len(revisions),
         warnings=sorted(set(warnings)),
+        blocked_claim_ids=sorted(blocked),
     )
     if dry_run:
         return report
     if target is None:
         raise ValueError("target graph store is required unless dry_run is enabled")
+    if blocked:
+        raise GraphIntegrityError(f"MISSING_SCHEMA_CONTEXT: {len(blocked)} 个活动事实不能迁移")
 
     for index, revision in enumerate(revisions):
         revision_entities = [entities[item] for item in revision.entity_ids if item in entities]
@@ -106,6 +123,20 @@ async def migrate_json_graph(
         revision_conflicts = [
             conflicts[item] for item in revision.conflict_ids if item in conflicts
         ]
+        # Replay recorded post-change snapshots rather than copying the final state
+        # into every historical revision.
+        for change in revision.changes:
+            if change.after is None:
+                continue
+            if change.resource_type == "claim":
+                revision_claims = [c for c in revision_claims if c.id != change.resource_id]
+                revision_claims.append(Claim.model_validate(change.after))
+            elif change.resource_type == "entity":
+                revision_entities = [e for e in revision_entities if e.id != change.resource_id]
+                revision_entities.append(CanonicalEntity.model_validate(change.after))
+            elif change.resource_type == "conflict":
+                revision_conflicts = [c for c in revision_conflicts if c.id != change.resource_id]
+                revision_conflicts.append(ConflictSet.model_validate(change.after))
         evidence_ids = {
             evidence_id for claim in revision_claims for evidence_id in claim.evidence_ids
         }
