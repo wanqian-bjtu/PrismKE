@@ -157,7 +157,8 @@ class PrismKEService:
                     issue.allowed_actions = []
                     issues.append(issue)
         claim_ids = {c.id for c in state.claims}
-        for conflict in state.conflicts:
+        # Conflict members are transient until normalization has materialized Claims.
+        for conflict in state.conflicts if state.claims or state.status == "completed" else []:
             if not set(conflict.claim_ids) <= claim_ids:
                 issue = ValidationService.issue(
                     "MISSING_CONFLICT_MEMBER",
