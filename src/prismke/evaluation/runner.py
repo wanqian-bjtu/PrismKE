@@ -136,8 +136,9 @@ def _case_result(case: EvaluationCase, state: WorkflowState) -> EvaluationCaseRe
         alignment_passed=set(case.expected_alignment_decisions) <= decisions,
         localization_passed=set(case.expected_localization_levels) <= localization,
         provider_calls=len(calls),
-        input_tokens=sum(item.input_tokens for item in calls),
-        output_tokens=sum(item.output_tokens for item in calls),
+        input_tokens=sum(item.input_tokens for item in calls if item.input_tokens is not None),
+        output_tokens=sum(item.output_tokens for item in calls if item.output_tokens is not None),
+        unknown_usage_calls=sum(item.total_tokens is None for item in calls),
         latency_ms=round(sum(item.latency_ms for item in calls), 3),
         estimated_cost_cny=round(sum(item.estimated_cost_cny or 0.0 for item in calls), 8),
     )
@@ -216,6 +217,7 @@ async def evaluate_manifest(
         provider_calls=sum(item.provider_calls for item in results),
         input_tokens=sum(item.input_tokens for item in results),
         output_tokens=sum(item.output_tokens for item in results),
+        unknown_usage_calls=sum(item.unknown_usage_calls for item in results),
         latency_ms=round(sum(item.latency_ms for item in results), 3),
         estimated_cost_cny=round(sum(item.estimated_cost_cny for item in results), 8),
     )

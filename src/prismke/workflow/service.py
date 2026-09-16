@@ -56,7 +56,7 @@ from prismke.providers.base import EmbeddingProvider, LLMProvider, OCRProvider, 
 from prismke.workflow.graph import PrismKEWorkflow
 from prismke.workflow.review_workspace import validate_workspace_run, workspace_metadata
 
-PIPELINE_VERSION = "0.6.0"
+PIPELINE_VERSION = "0.7.0"
 ASSET_POLICY_VERSION = "assets-v3"
 ALIGNMENT_POLICY_VERSION = "alignment-v1"
 
@@ -90,6 +90,9 @@ class PrismKEService:
         from prismke.workflow.corrections import CorrectionService
 
         self.corrections = CorrectionService(self)
+        from prismke.workflow.execution import ExecutionManager
+
+        self.executions = ExecutionManager(self)
 
     def _create_graph_store(self) -> GraphStore:
         if self.settings.graph_store == "json":
@@ -106,6 +109,7 @@ class PrismKEService:
         )
 
     async def close(self) -> None:
+        await self.executions.stop()
         await self.graph_store.close()
 
     async def validate_run(self, run_id: str) -> ValidationResult:
@@ -489,6 +493,7 @@ class PrismKEService:
         allow_remote_assets: bool = False,
     ) -> tuple[WorkflowState, bool]:
         """Validate a request and persist its initial state without executing it."""
+        self.executions.ensure_accepting()
         if self.review_metadata:
             raise ValueError("isolated review workspace does not allow new extraction runs")
         input_path = input_path.resolve()
@@ -537,10 +542,17 @@ class PrismKEService:
             pipeline_version=PIPELINE_VERSION,
             entity_resolution_policy_version=ENTITY_RESOLUTION_POLICY_VERSION,
         )
-        self.runs.save(state)
-        return state, True
+        with self.runs.creation_lock(run_id):
+            if self.runs.exists(run_id):
+                return self.runs.load(run_id), False
+            self.executions.register(state)
+            self.runs.save(state)
+            return state, True
 
     async def execute_run(self, run_id: str) -> WorkflowState:
+        return await self.executions.run_wait(run_id, "execute")
+
+    async def _execute_run(self, run_id: str) -> WorkflowState:
         if self.review_metadata:
             raise ValueError("isolated review workspace cannot execute extraction")
         state = self.runs.load(run_id)
@@ -611,23 +623,29 @@ class PrismKEService:
         claim_pending = sum(item.status == "pending" for item in state.review_tasks)
         retry_commit = state.status == "failed" and state.failed_node == "commit_graph"
         sync_pending = bool(self.reviews.repository.pending(run_id))
+        execution = self.executions.view(run_id)
         return {
             "run_id": run_id,
             "status": state.status,
             "node": state.current_node,
+            "execution": execution,
             "entity_pending": entity_pending,
             "claim_pending": claim_pending,
             "validation_pending": state.validation.blocking_count,
             "isolated": state.review_workspace,
             "review_sync_pending": sync_pending,
-            "can_resume": not sync_pending
+            "can_resume": not execution["active"]
+            and not execution["blocked"]
+            and not sync_pending
             and not entity_pending
             and not claim_pending
             and not state.validation.blocking_count
             and state.status != "completed"
             and state.current_node != "prepare_graph_commit"
             and not retry_commit,
-            "can_commit": not sync_pending
+            "can_commit": not execution["active"]
+            and not execution["blocked"]
+            and not sync_pending
             and (state.review_workspace or bool(state.pending_correction_id))
             and (state.current_node == "prepare_graph_commit" or retry_commit)
             and not entity_pending
@@ -793,14 +811,13 @@ class PrismKEService:
             )
 
     async def resume(self, run_id: str) -> WorkflowState:
-        with self.runs.mutation_lock(run_id):
-            return await self._resume(run_id)
+        return await self.executions.run_wait(run_id, "resume")
 
     async def _resume(self, run_id: str) -> WorkflowState:
         await self.reviews.recover(run_id)
         state = self.runs.load(run_id)
         if state.pipeline_version != PIPELINE_VERSION:
-            raise LegacyCheckpointError("旧流程不能由 v0.6 恢复；请使用对应发布版本接续")
+            raise LegacyCheckpointError("旧流程不能由 v0.7 恢复；请使用对应发布版本接续")
         if (
             state.validation.blocking_count
             or any(task.status == "pending" for task in state.entity_review_tasks)
@@ -817,33 +834,35 @@ class PrismKEService:
         return result
 
     async def confirm_review_commit(self, run_id: str, reviewer: str) -> WorkflowState:
-        with self.runs.mutation_lock(run_id):
-            await self.reviews.recover(run_id)
-            state = self.show_run(run_id)
-            if not reviewer.strip():
-                raise ValueError("reviewer is required")
-            retry_commit = state.status == "failed" and state.failed_node == "commit_graph"
-            if not (state.review_workspace or state.pending_correction_id) or (
-                state.current_node != "prepare_graph_commit" and not retry_commit
-            ):
-                raise ValueError("run is not at an isolated submission preview")
-            if (
-                state.validation.blocking_count
-                or any(task.status == "pending" for task in state.entity_review_tasks)
-                or any(task.status == "pending" for task in state.review_tasks)
-            ):
-                raise ValueError("pending reviews prevent graph submission")
-            if state.graph_commit is None or (state.submission_confirmed and not retry_commit):
-                raise ValueError("missing preview or submission already confirmed")
-            if state.pending_correction_id:
-                return await self.corrections.confirm(state, reviewer)
-            result = await self.review_workflow(state).confirm_submission(state)
-            self.audit.record(
-                "confirm_graph_commit",
-                run_id,
-                {
-                    "reviewer": reviewer,
-                    "revision_id": result.revision.id if result.revision else None,
-                },
-            )
-            return result
+        return await self.executions.run_wait(run_id, "confirm", reviewer)
+
+    async def _confirm_review_commit(self, run_id: str, reviewer: str) -> WorkflowState:
+        await self.reviews.recover(run_id)
+        state = self.show_run(run_id)
+        if not reviewer.strip():
+            raise ValueError("reviewer is required")
+        retry_commit = state.status == "failed" and state.failed_node == "commit_graph"
+        if not (state.review_workspace or state.pending_correction_id) or (
+            state.current_node != "prepare_graph_commit" and not retry_commit
+        ):
+            raise ValueError("run is not at an isolated submission preview")
+        if (
+            state.validation.blocking_count
+            or any(task.status == "pending" for task in state.entity_review_tasks)
+            or any(task.status == "pending" for task in state.review_tasks)
+        ):
+            raise ValueError("pending reviews prevent graph submission")
+        if state.graph_commit is None or (state.submission_confirmed and not retry_commit):
+            raise ValueError("missing preview or submission already confirmed")
+        if state.pending_correction_id:
+            return await self.corrections.confirm(state, reviewer)
+        result = await self.review_workflow(state).confirm_submission(state)
+        self.audit.record(
+            "confirm_graph_commit",
+            run_id,
+            {
+                "reviewer": reviewer,
+                "revision_id": result.revision.id if result.revision else None,
+            },
+        )
+        return result

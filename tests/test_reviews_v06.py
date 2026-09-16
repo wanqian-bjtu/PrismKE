@@ -31,7 +31,7 @@ async def test_defer_version_and_idempotency(tmp_path: Path, schema_path: Path) 
     )
     assert state.entity_review_tasks[0].version == 1
     assert state.entity_review_tasks[0].status == "pending"
-    with pytest.raises(ValueError, match="pending reviews"):
+    with pytest.raises(ValueError, match="AWAITING_REVIEW"):
         await service.resume(state.run_id)
     with pytest.raises(ValueError, match="stale"):
         await service.review_entity(

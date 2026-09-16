@@ -157,6 +157,7 @@ class OpenAICompatibleVLMProvider:
             provider="vlm",
             operation_id=operation_id,
             prompt_version=PROMPT_VERSION,
+            provider_fingerprint=self.fingerprint(),
             transport=self.transport,
         )
 

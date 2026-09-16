@@ -8,6 +8,7 @@ from typing import Any, TypedDict, cast
 
 from langgraph.graph import END, START, StateGraph
 
+from prismke.core.execution_control import ExecutionPaused, current_execution
 from prismke.domain import WorkflowState
 from prismke.governance.validation import ValidationService
 from prismke.parsing import ParserRegistry
@@ -92,7 +93,12 @@ class PrismKEWorkflow:
         async def wrapped(graph_state: GraphState) -> GraphState:
             state = self._state(graph_state)
             try:
+                control = current_execution.get()
+                if control:
+                    control.node(name)
                 state = await handler(state)
+            except ExecutionPaused:
+                raise
             except Exception as exc:
                 self._record_provider_failure(state, exc)
                 state.status = "failed"
@@ -118,7 +124,12 @@ class PrismKEWorkflow:
         async def wrapped(graph_state: GraphState) -> GraphState:
             state = self._state(graph_state).model_copy(deep=True)
             try:
+                control = current_execution.get()
+                if control:
+                    control.node(name)
                 state = await handler(state)
+            except ExecutionPaused:
+                raise
             except Exception as exc:
                 self._record_provider_failure(state, exc)
                 state.status = "failed"
@@ -152,7 +163,12 @@ class PrismKEWorkflow:
             dict.fromkeys([*state.warnings, *text_state.warnings, *visual_state.warnings])
         )
         try:
+            control = current_execution.get()
+            if control:
+                control.node("align_modalities")
             state = await self.nodes.align_modalities(state)
+        except ExecutionPaused:
+            raise
         except Exception as exc:
             state.status = "failed"
             state.failed_node = "align_modalities"
@@ -328,6 +344,12 @@ class PrismKEWorkflow:
                 {"payload": state.model_dump(mode="json")}, self._config(state.run_id)
             )
         return self._state(cast(GraphState, result))
+
+    async def execution_snapshot(self, run_id: str) -> dict[str, Any]:
+        async with open_checkpointer(self.checkpoint_path) as saver:
+            graph = self._build_graph(saver)
+            snapshot = await graph.aget_state(self._config(run_id))
+            return {"exists": bool(snapshot.values), "next": list(snapshot.next)}
 
     async def resume(self, run_id: str) -> WorkflowState | None:
         failed_summary = self.runs.load(run_id)

@@ -53,13 +53,15 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         ocr_provider: str,
         vlm_provider: str,
     ) -> tuple[dict[str, Any], list[list[Any]], str]:
-        state = await service.run(
+        state, created = service.create_run(
             Path(document),
             Path(schema),
             provider,
             ocr_provider,
             vlm_provider,
         )
+        if created:
+            service.executions.enqueue(state.run_id, "execute")
         return _state_summary(state), _claim_rows(state), state.run_id
 
     def load_run(run_id: str) -> tuple[dict[str, Any], list[list[Any]]]:
@@ -248,6 +250,9 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         if service.review_metadata:
             gr.Markdown("**隔离审核工作区 · 原评测只读 · 抽取调用禁用**")
         build_review_tabs(service)
+        from prismke.web.execution import build_execution_tab
+
+        build_execution_tab(service)
         with gr.Tab("构建与运行"):
             with gr.Row():
                 document_input = gr.File(label="文档", type="filepath")

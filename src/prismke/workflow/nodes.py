@@ -5,18 +5,21 @@ from __future__ import annotations
 from pathlib import Path
 
 from prismke.core.errors import EvidenceIntegrityError, GraphIntegrityError
+from prismke.core.execution_control import cached_operation, check_execution, current_execution
 from prismke.core.ids import canonical_hash, stable_id
 from prismke.domain import (
     ClaimStatus,
     CommitValidationContext,
     EntityEmbedding,
     ExtractionRequest,
+    ExtractionResult,
     GraphChange,
     GraphCommit,
     GraphDocument,
     GraphRevision,
     LocalizationLevel,
     OCRRequest,
+    OCRResult,
     SchemaIndex,
     SourceDocument,
     VisualExtractionRequest,
@@ -91,7 +94,12 @@ class WorkflowNodes:
 
     async def run_ocr(self, state: WorkflowState) -> WorkflowState:
         assert state.document is not None
-        result = await self.ocr_provider.recognize(OCRRequest(document=state.document))
+        request = OCRRequest(document=state.document)
+        result = await cached_operation(
+            stable_id("ocr-result", self.ocr_provider.fingerprint(), state.document.id),
+            OCRResult,
+            lambda: self.ocr_provider.recognize(request),
+        )
         existing = {block.id for block in state.document.text_blocks}
         state.document.text_blocks.extend(
             block for block in result.text_blocks if block.id not in existing
@@ -118,8 +126,11 @@ class WorkflowNodes:
             state.text_candidates = []
             state.warnings.append("text_extraction_skipped:no_text_blocks")
             return state
-        result = await self.provider.extract(
-            ExtractionRequest(document=state.document, output_schema=state.output_schema)
+        request = ExtractionRequest(document=state.document, output_schema=state.output_schema)
+        result = await cached_operation(
+            stable_id("text-result", self.provider.fingerprint(), state.document.id),
+            ExtractionResult,
+            lambda: self.provider.extract(request),
         )
         state.text_candidates = result.candidates
         state.warnings.extend(result.warnings)
@@ -131,18 +142,26 @@ class WorkflowNodes:
         assert state.document is not None and state.output_schema is not None
         state.visual_candidates = []
         for asset in select_analysis_assets(state.document):
+            check_execution()
             ocr_blocks = [
                 block
                 for block in state.document.text_blocks
                 if block.source_media_asset_id == asset.id
             ]
-            result = await self.vlm_provider.extract(
-                VisualExtractionRequest(
-                    document=state.document,
-                    output_schema=state.output_schema,
-                    asset=asset,
-                    ocr_blocks=ocr_blocks,
-                )
+            request = VisualExtractionRequest(
+                document=state.document,
+                output_schema=state.output_schema,
+                asset=asset,
+                ocr_blocks=ocr_blocks,
+            )
+
+            async def visual_call(req: VisualExtractionRequest = request) -> ExtractionResult:
+                return await self.vlm_provider.extract(req)
+
+            result = await cached_operation(
+                stable_id("visual-result", self.vlm_provider.fingerprint(), asset.id),
+                ExtractionResult,
+                visual_call,
             )
             for candidate in result.candidates:
                 evidence_by_id = {
@@ -439,7 +458,12 @@ class WorkflowNodes:
                     raise EvidenceIntegrityError(
                         f"claim {claim.id} references invalid evidence {evidence_id}"
                     )
+        control = current_execution.get()
+        if control:
+            control.commit_started(state.graph_commit.revision.id)
         await self.graph_store.commit(state.graph_commit)
+        if control:
+            control.commit_finished()
         if (
             self.embedding_provider.fingerprint() != "embedding:disabled"
             and state.graph_commit.entities

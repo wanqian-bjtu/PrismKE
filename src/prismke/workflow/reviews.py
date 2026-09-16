@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import uuid4
 
 from prismke.core.errors import LegacyCheckpointError
+from prismke.core.execution_control import current_execution
 from prismke.core.ids import stable_id
 from prismke.domain import CandidateClaim, ClaimStatus, EntityMention, WorkflowState, utc_now
 from prismke.domain.reviews import ReviewEvent
@@ -20,8 +21,10 @@ class ReviewService:
 
     @staticmethod
     def compatible(state: WorkflowState) -> None:
-        if state.pipeline_version != "0.6.0":
-            raise LegacyCheckpointError("旧运行只读，请使用对应发布版本接续；v0.6 不迁移旧审核")
+        from prismke.workflow.service import PIPELINE_VERSION
+
+        if state.pipeline_version != PIPELINE_VERSION:
+            raise LegacyCheckpointError("旧运行只读，请使用对应发布版本接续；不迁移旧审核")
 
     @staticmethod
     def update_status(state: WorkflowState) -> None:
@@ -59,7 +62,12 @@ class ReviewService:
             workflow = self.service.review_tail_workflow(state)
             if event.correction_id and state.status == "completed":
                 assert state.graph_commit is not None
+                control = current_execution.get()
+                if control:
+                    control.commit_started(state.graph_commit.revision.id)
                 await self.service.graph_store.commit(state.graph_commit)
+                if control:
+                    control.commit_finished()
                 recorded = await workflow.record_completed_review(state)
             elif event.kind == "entity":
                 recorded = await workflow.record_entity_review(state)
