@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hmac
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Annotated, Literal, cast
 from uuid import uuid4
@@ -28,6 +28,8 @@ from filelock import Timeout
 from prismke import __version__
 from prismke.api.models import (
     CancelRequest,
+    CaseDisableRequest,
+    CaseIndexRequest,
     CorrectionRequest,
     EntityReviewRequest,
     MergeProposalRequest,
@@ -88,6 +90,8 @@ def create_app(
             except Exception:
                 # Keep the pending outbox visible; never resume extraction on startup.
                 continue
+        with suppress(Exception):
+            await service.replay_case_projections()
         await service.executions.start()
         try:
             yield
@@ -125,6 +129,12 @@ def create_app(
         ocr_provider: Annotated[str, Form()] = "disabled",
         vlm_provider: Annotated[str, Form()] = "disabled",
         allow_remote_assets: Annotated[bool, Form()] = False,
+        case_mode: Annotated[Literal["none", "good", "good_bad"], Form()] = "none",
+        reflection_enabled: Annotated[bool, Form()] = False,
+        reflection_provider: Annotated[str, Form()] = "disabled",
+        reflection_max_attempts: Annotated[int, Form(ge=0, le=2)] = 2,
+        reflection_token_budget: Annotated[int, Form(gt=0)] = 20_000,
+        reflection_time_budget_seconds: Annotated[int, Form(gt=0)] = 180,
     ) -> RunAccepted:
         service.executions.ensure_accepting()
         if service.review_metadata:
@@ -138,6 +148,12 @@ def create_app(
             ocr_provider,
             vlm_provider,
             allow_remote_assets,
+            case_mode,
+            reflection_enabled,
+            reflection_provider,
+            reflection_max_attempts,
+            reflection_token_budget,
+            reflection_time_budget_seconds,
         )
         if created:
             service.executions.enqueue(state.run_id, "execute")
@@ -263,6 +279,58 @@ def create_app(
     @api.get("/workspace/summary")
     async def workspace_summary() -> object:
         return await service.workspace_summary()
+
+    @api.get("/cases")
+    async def list_cases(
+        case_type: str | None = Query(default=None),
+        task_type: str | None = Query(default=None),
+        language: str | None = Query(default=None),
+        active_only: bool = Query(default=True),
+        limit: int = Query(default=200, ge=1, le=1000),
+    ) -> object:
+        return service.list_cases(
+            case_type=case_type,
+            task_type=task_type,
+            language=language,
+            active_only=active_only,
+            limit=limit,
+        )
+
+    @api.post("/cases/rebuild-index")
+    async def rebuild_case_index(request: CaseIndexRequest) -> object:
+        try:
+            return await service.rebuild_case_index(dry_run=request.dry_run)
+        except ProviderConfigurationError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @api.get("/cases/{case_id}")
+    async def get_case(case_id: str) -> object:
+        try:
+            return service.get_case(case_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="case not found") from exc
+
+    @api.post("/cases/{case_id}/disable")
+    async def disable_case(case_id: str, request: CaseDisableRequest) -> object:
+        try:
+            return service.disable_case(
+                case_id,
+                operator=request.operator,
+                reason=request.reason,
+                request_id=request.request_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="case not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @api.get("/runs/{run_id}/retrieved-cases")
+    async def retrieved_cases(run_id: str) -> object:
+        try:
+            state = service.show_run(run_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="run not found") from exc
+        return state.retrieved_cases
 
     @api.get("/settings")
     async def runtime_settings() -> object:

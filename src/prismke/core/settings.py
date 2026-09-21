@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     entity_auto_link_threshold: float = 0.88
     entity_review_threshold: float = 0.65
     entity_min_margin: float = 0.08
+    case_top_k: int = 5
+    reflection_provider: str = "disabled"
+    reflection_max_attempts: int = 2
+    reflection_token_budget: int = 20_000
+    reflection_time_budget_seconds: float = 180.0
 
     @property
     def runs_dir(self) -> Path:
@@ -85,3 +90,7 @@ class Settings(BaseSettings):
     @property
     def entity_governance_path(self) -> Path:
         return self.runtime_dir / "entity-governance.json"
+
+    @property
+    def cases_path(self) -> Path:
+        return self.runtime_dir / "cases.sqlite"

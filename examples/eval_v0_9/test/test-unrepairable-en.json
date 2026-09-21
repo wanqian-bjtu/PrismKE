@@ -1,0 +1,42 @@
+{
+  "id": "test-unrepairable-en",
+  "split": "test",
+  "language": "en",
+  "category": "unrepairable",
+  "text": "The document does not identify a developer.",
+  "candidate": {
+    "id": "candidate:test-unrepairable-en",
+    "subject": {
+      "id": "mention:test-unrepairable-en:subject",
+      "name": "AtlasFlow",
+      "entity_type": "Software",
+      "context": "The document does not identify a developer.",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:test-unrepairable-en"
+      ]
+    },
+    "relation": "invented_fact_about",
+    "object": {
+      "id": "mention:test-unrepairable-en:object",
+      "name": "Northstar Labs",
+      "entity_type": "Organization",
+      "context": "The document does not identify a developer.",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:test-unrepairable-en"
+      ]
+    },
+    "confidence": 0.84,
+    "evidence_ids": [
+      "evidence:test-unrepairable-en"
+    ],
+    "modalities": [
+      "text"
+    ],
+    "source_tool": "reflection_eval"
+  },
+  "expected_candidate": null,
+  "repairable": false,
+  "relevant_case_key": null
+}

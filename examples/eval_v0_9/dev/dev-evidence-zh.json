@@ -1,0 +1,73 @@
+{
+  "id": "dev-evidence-zh",
+  "split": "dev",
+  "language": "zh",
+  "category": "evidence",
+  "text": "新星图谱由兰庭系统开发。",
+  "candidate": {
+    "id": "candidate:dev-evidence-zh",
+    "subject": {
+      "id": "mention:dev-evidence-zh:subject",
+      "name": "新星图谱",
+      "entity_type": "Software",
+      "context": "新星图谱由兰庭系统开发。",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:missing"
+      ]
+    },
+    "relation": "developed_by",
+    "object": {
+      "id": "mention:dev-evidence-zh:object",
+      "name": "兰庭系统",
+      "entity_type": "Organization",
+      "context": "新星图谱由兰庭系统开发。",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:missing"
+      ]
+    },
+    "confidence": 0.84,
+    "evidence_ids": [
+      "evidence:missing"
+    ],
+    "modalities": [
+      "text"
+    ],
+    "source_tool": "reflection_eval"
+  },
+  "expected_candidate": {
+    "id": "candidate:dev-evidence-zh",
+    "subject": {
+      "id": "mention:dev-evidence-zh:subject",
+      "name": "新星图谱",
+      "entity_type": "Software",
+      "context": "新星图谱由兰庭系统开发。",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:dev-evidence-zh"
+      ]
+    },
+    "relation": "developed_by",
+    "object": {
+      "id": "mention:dev-evidence-zh:object",
+      "name": "兰庭系统",
+      "entity_type": "Organization",
+      "context": "新星图谱由兰庭系统开发。",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:dev-evidence-zh"
+      ]
+    },
+    "confidence": 0.84,
+    "evidence_ids": [
+      "evidence:dev-evidence-zh"
+    ],
+    "modalities": [
+      "text"
+    ],
+    "source_tool": "reflection_eval"
+  },
+  "repairable": true,
+  "relevant_case_key": "evidence:zh"
+}

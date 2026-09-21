@@ -1,0 +1,73 @@
+{
+  "id": "dev-relation-en",
+  "split": "dev",
+  "language": "en",
+  "category": "relation",
+  "text": "AtlasFlow was developed by Northstar Labs.",
+  "candidate": {
+    "id": "candidate:dev-relation-en",
+    "subject": {
+      "id": "mention:dev-relation-en:subject",
+      "name": "AtlasFlow",
+      "entity_type": "Software",
+      "context": "AtlasFlow was developed by Northstar Labs.",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:dev-relation-en"
+      ]
+    },
+    "relation": "built_by",
+    "object": {
+      "id": "mention:dev-relation-en:object",
+      "name": "Northstar Labs",
+      "entity_type": "Organization",
+      "context": "AtlasFlow was developed by Northstar Labs.",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:dev-relation-en"
+      ]
+    },
+    "confidence": 0.84,
+    "evidence_ids": [
+      "evidence:dev-relation-en"
+    ],
+    "modalities": [
+      "text"
+    ],
+    "source_tool": "reflection_eval"
+  },
+  "expected_candidate": {
+    "id": "candidate:dev-relation-en",
+    "subject": {
+      "id": "mention:dev-relation-en:subject",
+      "name": "AtlasFlow",
+      "entity_type": "Software",
+      "context": "AtlasFlow was developed by Northstar Labs.",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:dev-relation-en"
+      ]
+    },
+    "relation": "developed_by",
+    "object": {
+      "id": "mention:dev-relation-en:object",
+      "name": "Northstar Labs",
+      "entity_type": "Organization",
+      "context": "AtlasFlow was developed by Northstar Labs.",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:dev-relation-en"
+      ]
+    },
+    "confidence": 0.84,
+    "evidence_ids": [
+      "evidence:dev-relation-en"
+    ],
+    "modalities": [
+      "text"
+    ],
+    "source_tool": "reflection_eval"
+  },
+  "repairable": true,
+  "relevant_case_key": "relation:en"
+}

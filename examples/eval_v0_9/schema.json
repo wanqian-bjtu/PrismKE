@@ -1,0 +1,36 @@
+{
+  "schema_id": "reflection-eval-v1",
+  "version": "1",
+  "strict": true,
+  "entity_types": [
+    {
+      "id": "Software"
+    },
+    {
+      "id": "Organization"
+    },
+    {
+      "id": "Person"
+    }
+  ],
+  "relations": [
+    {
+      "id": "developed_by",
+      "domain": [
+        "Software"
+      ],
+      "range": [
+        "Organization"
+      ]
+    },
+    {
+      "id": "authored_by",
+      "domain": [
+        "Software"
+      ],
+      "range": [
+        "Person"
+      ]
+    }
+  ]
+}

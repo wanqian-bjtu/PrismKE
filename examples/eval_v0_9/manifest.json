@@ -1,0 +1,26 @@
+{
+  "version": "reflection-eval-v1",
+  "schema": "schema.json",
+  "development": [
+    "dev/dev-relation-en.json",
+    "dev/dev-relation-zh.json",
+    "dev/dev-domain-en.json",
+    "dev/dev-domain-zh.json",
+    "dev/dev-evidence-en.json",
+    "dev/dev-evidence-zh.json"
+  ],
+  "test": [
+    "test/test-relation-en.json",
+    "test/test-relation-zh.json",
+    "test/test-domain-en.json",
+    "test/test-domain-zh.json",
+    "test/test-evidence-en.json",
+    "test/test-evidence-zh.json",
+    "test/test-relation-en-2.json",
+    "test/test-domain-zh-2.json",
+    "test/test-evidence-en-2.json",
+    "test/test-valid-en.json",
+    "test/test-valid-zh.json",
+    "test/test-unrepairable-en.json"
+  ]
+}

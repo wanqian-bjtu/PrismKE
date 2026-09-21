@@ -1,0 +1,73 @@
+{
+  "id": "test-evidence-en",
+  "split": "test",
+  "language": "en",
+  "category": "evidence",
+  "text": "NovaGraph was developed by Orchid Systems.",
+  "candidate": {
+    "id": "candidate:test-evidence-en",
+    "subject": {
+      "id": "mention:test-evidence-en:subject",
+      "name": "NovaGraph",
+      "entity_type": "Software",
+      "context": "NovaGraph was developed by Orchid Systems.",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:missing"
+      ]
+    },
+    "relation": "developed_by",
+    "object": {
+      "id": "mention:test-evidence-en:object",
+      "name": "Orchid Systems",
+      "entity_type": "Organization",
+      "context": "NovaGraph was developed by Orchid Systems.",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:missing"
+      ]
+    },
+    "confidence": 0.84,
+    "evidence_ids": [
+      "evidence:missing"
+    ],
+    "modalities": [
+      "text"
+    ],
+    "source_tool": "reflection_eval"
+  },
+  "expected_candidate": {
+    "id": "candidate:test-evidence-en",
+    "subject": {
+      "id": "mention:test-evidence-en:subject",
+      "name": "NovaGraph",
+      "entity_type": "Software",
+      "context": "NovaGraph was developed by Orchid Systems.",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:test-evidence-en"
+      ]
+    },
+    "relation": "developed_by",
+    "object": {
+      "id": "mention:test-evidence-en:object",
+      "name": "Orchid Systems",
+      "entity_type": "Organization",
+      "context": "NovaGraph was developed by Orchid Systems.",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:test-evidence-en"
+      ]
+    },
+    "confidence": 0.84,
+    "evidence_ids": [
+      "evidence:test-evidence-en"
+    ],
+    "modalities": [
+      "text"
+    ],
+    "source_tool": "reflection_eval"
+  },
+  "repairable": true,
+  "relevant_case_key": "evidence:en"
+}

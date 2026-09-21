@@ -53,6 +53,12 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         ocr_provider: str,
         vlm_provider: str,
         allow_remote_assets: bool,
+        case_mode: str,
+        reflection_enabled: bool,
+        reflection_provider: str,
+        reflection_max_attempts: int,
+        reflection_token_budget: int,
+        reflection_time_budget: int,
     ) -> tuple[dict[str, Any], list[list[Any]], str]:
         state, created = service.create_run(
             Path(document),
@@ -61,6 +67,12 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             ocr_provider,
             vlm_provider,
             allow_remote_assets,
+            cast(Literal["none", "good", "good_bad"], case_mode),
+            reflection_enabled,
+            reflection_provider,
+            int(reflection_max_attempts),
+            int(reflection_token_budget),
+            int(reflection_time_budget),
         )
         if created:
             service.executions.enqueue(state.run_id, "execute")
@@ -180,6 +192,74 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         )
         return result.model_dump(mode="json")
 
+    def case_rows(
+        case_type: str, task_type: str, language: str, include_disabled: bool
+    ) -> tuple[list[list[Any]], Any]:
+        records = service.list_cases(
+            case_type=None if case_type == "全部" else case_type,
+            task_type=None if task_type == "全部" else task_type,
+            language=None if language == "全部" else language,
+            active_only=not include_disabled,
+        )
+        rows = [
+            [
+                item["id"],
+                item["case_type"],
+                item["task_type"],
+                item["language"],
+                item["decision"],
+                item["active"],
+                item["input_summary"],
+            ]
+            for item in records
+        ]
+        choices = [
+            (f"{item['case_type']} · {item['input_summary'][:48]}", item["id"]) for item in records
+        ]
+        return rows, gr.update(choices=choices, value=choices[0][1] if choices else None)
+
+    def case_detail(case_id: str | None) -> dict[str, Any]:
+        return service.get_case(case_id) if case_id else {}
+
+    def disable_case_ui(
+        case_id: str | None,
+        operator: str,
+        reason: str,
+        confirmed: bool,
+    ) -> dict[str, Any]:
+        if not confirmed:
+            raise gr.Error("请先确认停用案例")
+        if not case_id:
+            raise gr.Error("请选择案例")
+        from uuid import uuid4
+
+        return service.disable_case(
+            case_id,
+            operator=operator,
+            reason=reason,
+            request_id=uuid4().hex,
+        )
+
+    async def rebuild_cases(dry_run: bool) -> dict[str, Any]:
+        return await service.rebuild_case_index(dry_run=dry_run)
+
+    def reflection_report(run_id: str | None) -> dict[str, Any]:
+        if not run_id:
+            return {}
+        state = service.show_run(run_id)
+        return {
+            "enabled": state.reflection_enabled,
+            "provider": state.reflection_provider_name,
+            "policy": state.reflection_policy_version,
+            "case_mode": state.case_mode,
+            "case_snapshot": state.case_snapshot_fingerprint,
+            "retrieved_cases": [item.model_dump(mode="json") for item in state.retrieved_cases],
+            "attempts": [item.model_dump(mode="json") for item in state.reflection_attempts],
+            "repaired_issue_ids": state.repaired_issue_ids,
+            "token_usage": state.reflection_token_usage,
+            "elapsed_ms": state.reflection_elapsed_ms,
+        }
+
     async def health() -> dict[str, Any]:
         result = await service.graph_store.healthcheck()
         return result.model_dump(mode="json")
@@ -219,9 +299,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         choices = claim.evidence_ids if claim else []
         return gr.update(choices=choices, value=choices[0] if choices else None)
 
-    async def graph_search(
-        query: str, entity_type: str, limit: int
-    ) -> tuple[list[list[Any]], Any]:
+    async def graph_search(query: str, entity_type: str, limit: int) -> tuple[list[list[Any]], Any]:
         candidates = await service.search_entities(query, entity_type, limit)
         entities = {item.id: item for item in await service.graph_store.list_entities()}
         rows = []
@@ -230,12 +308,8 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             entity = entities.get(candidate.entity_id)
             name = entity.name if entity else candidate.entity_id
             kind = entity.entity_type if entity else entity_type
-            rows.append(
-                [candidate.entity_id, name, kind, round(candidate.final_score, 4)]
-            )
-            choices.append(
-                (f"{name} · {kind} · {candidate.final_score:.3f}", candidate.entity_id)
-            )
+            rows.append([candidate.entity_id, name, kind, round(candidate.final_score, 4)])
+            choices.append((f"{name} · {kind} · {candidate.final_score:.3f}", candidate.entity_id))
         return rows, gr.update(choices=choices, value=choices[0][1] if choices else None)
 
     def entity_reviews(status: str) -> list[dict[str, Any]]:
@@ -388,9 +462,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
       .gradio-container { padding: 10px !important; }
     }
     """
-    with gr.Blocks(
-        title="PrismKE 研究工作台", fill_height=True, analytics_enabled=False
-    ) as demo:
+    with gr.Blocks(title="PrismKE 研究工作台", fill_height=True, analytics_enabled=False) as demo:
         with gr.Sidebar(open=True, elem_id="workspace-sidebar"):
             gr.Markdown(f"## PrismKE\n`{__version__}`")
             if service.review_metadata:
@@ -407,6 +479,8 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     ("证据", "evidence"),
                     ("图谱", "graph"),
                     ("实体治理", "governance"),
+                    ("案例库", "cases"),
+                    ("Reflection", "reflection"),
                     ("版本管理", "revisions"),
                     ("系统状态", "health"),
                 ],
@@ -431,6 +505,24 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 )
                 allow_remote = gr.Checkbox(
                     label="允许远程资源", value=service.settings.allow_remote_assets
+                )
+                case_mode_input = gr.Dropdown(
+                    ["none", "good", "good_bad"], value="none", label="案例检索"
+                )
+                reflection_enabled_input = gr.Checkbox(label="启用 Reflection", value=False)
+                reflection_provider_input = gr.Dropdown(
+                    ["disabled", "mock", "openai-compatible"],
+                    value="disabled",
+                    label="Reflection Provider",
+                )
+                reflection_attempts_input = gr.Slider(
+                    0, 2, value=2, step=1, label="单候选最大修复次数"
+                )
+                reflection_tokens_input = gr.Number(
+                    value=20_000, precision=0, label="单运行 Token 预算"
+                )
+                reflection_time_input = gr.Number(
+                    value=180, precision=0, label="单运行时间预算（秒）"
                 )
             with gr.Accordion("模型与后端设置", open=False):
                 llm_base = gr.Textbox(label="LLM Base URL", value=public_settings["llm_base_url"])
@@ -539,9 +631,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 graph_button = gr.Button("查询邻域")
                 graph_plot = gr.Plot(label="实体邻域图")
                 graph_output = gr.JSON(label="实体邻域")
-                graph_button.click(
-                    neighborhood, [entity_id, depth], [graph_plot, graph_output]
-                )
+                graph_button.click(neighborhood, [entity_id, depth], [graph_plot, graph_output])
 
             with gr.Tab("实体治理", id="governance"):
                 gr.Markdown("## 实体治理")
@@ -562,16 +652,12 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                             mention_evidence_id = gr.Textbox(label="提及 Evidence ID")
                             mention_evidence_button = gr.Button("查看提及证据")
                             mention_evidence_metadata = gr.JSON(label="提及证据")
-                            mention_evidence_preview = gr.Image(
-                                label="证据区域", type="filepath"
-                            )
+                            mention_evidence_preview = gr.Image(label="证据区域", type="filepath")
                         with gr.Column(min_width=280):
                             candidate_entity_id = gr.Textbox(label="候选 Entity ID")
                             candidate_neighborhood_button = gr.Button("查看候选邻域")
                             candidate_neighborhood_plot = gr.Plot(label="候选邻域")
-                            candidate_neighborhood_output = gr.JSON(
-                                label="邻域事实与证据引用"
-                            )
+                            candidate_neighborhood_output = gr.JSON(label="邻域事实与证据引用")
                     mention_evidence_button.click(
                         show_evidence,
                         [mention_evidence_id],
@@ -620,9 +706,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 )
                 gr.Markdown("### 实体拆分建议")
                 split_source = gr.Textbox(label="原 Entity ID")
-                split_targets = gr.Code(
-                    label="新实体 JSON 数组", language="json", value="[]"
-                )
+                split_targets = gr.Code(label="新实体 JSON 数组", language="json", value="[]")
                 split_assignments = gr.Code(
                     label="Claim 到新 Entity 的映射 JSON", language="json", value="{}"
                 )
@@ -638,9 +722,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     history_entity_id = gr.Textbox(label="实体 Entity ID")
                     history_button = gr.Button("查询治理与回滚历史")
                     history_output = gr.JSON(label="实体 Revision 历史")
-                    history_button.click(
-                        entity_history, [history_entity_id], [history_output]
-                    )
+                    history_button.click(entity_history, [history_entity_id], [history_output])
 
             build_validation_tab(gr, service)
 
@@ -657,9 +739,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     to_revision = gr.Textbox(label="目标 Revision")
                 diff_button = gr.Button("比较版本")
                 diff_output = gr.JSON(label="版本差异")
-                diff_button.click(
-                    revision_diff, [from_revision, to_revision], [diff_output]
-                )
+                diff_button.click(revision_diff, [from_revision, to_revision], [diff_output])
                 rollback_revision_id = gr.Textbox(label="要回滚的 Revision")
                 rollback_confirm = gr.Checkbox(label="我确认创建补偿 Revision")
                 rollback_button = gr.Button("执行回滚", variant="stop")
@@ -669,6 +749,75 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     [rollback_revision_id, rollback_confirm],
                     [rollback_output],
                 )
+
+            with gr.Tab("案例库", id="cases"):
+                gr.Markdown("## 审核案例库")
+                with gr.Row():
+                    case_type_filter = gr.Dropdown(
+                        ["全部", "good", "bad"], value="全部", label="案例类型"
+                    )
+                    case_task_filter = gr.Dropdown(
+                        ["全部", "entity", "claim"], value="全部", label="任务类型"
+                    )
+                    case_language_filter = gr.Dropdown(
+                        ["全部", "zh", "en"], value="全部", label="语言"
+                    )
+                    case_include_disabled = gr.Checkbox(label="包含已停用", value=False)
+                case_refresh = gr.Button("刷新案例")
+                case_table = gr.Dataframe(
+                    headers=["ID", "类型", "任务", "语言", "决定", "启用", "输入摘要"],
+                    interactive=False,
+                    wrap=True,
+                )
+                case_selector = gr.Dropdown(label="选择案例", choices=[])
+                case_detail_output = gr.JSON(label="案例、证据与停用历史")
+                with gr.Accordion("停用案例", open=False):
+                    case_operator = gr.Textbox(label="操作者")
+                    case_reason = gr.Textbox(label="停用原因")
+                    case_confirm = gr.Checkbox(label="我确认停用该案例")
+                    case_disable_button = gr.Button("停用案例", variant="stop")
+                    case_disable_output = gr.JSON(label="操作结果")
+                with gr.Accordion("索引维护", open=False):
+                    case_dry_run = gr.Checkbox(label="仅检查", value=True)
+                    case_rebuild_button = gr.Button("检查或重建索引")
+                    case_rebuild_output = gr.JSON(label="索引状态")
+                case_refresh.click(
+                    case_rows,
+                    [
+                        case_type_filter,
+                        case_task_filter,
+                        case_language_filter,
+                        case_include_disabled,
+                    ],
+                    [case_table, case_selector],
+                )
+                case_selector.change(case_detail, case_selector, case_detail_output)
+                case_disable_button.click(
+                    disable_case_ui,
+                    [case_selector, case_operator, case_reason, case_confirm],
+                    case_disable_output,
+                ).then(
+                    case_rows,
+                    [
+                        case_type_filter,
+                        case_task_filter,
+                        case_language_filter,
+                        case_include_disabled,
+                    ],
+                    [case_table, case_selector],
+                )
+                case_rebuild_button.click(rebuild_cases, case_dry_run, case_rebuild_output)
+
+            with gr.Tab("Reflection", id="reflection"):
+                gr.Markdown("## Reflection 记录")
+                reflection_run = gr.Dropdown(label="运行", choices=[])
+                reflection_refresh = gr.Button("查看检索与修复记录")
+                gr.Markdown(
+                    "这里只展示触发问题、使用案例、前后候选、校验结果和预算；"
+                    "完整模型请求与向量不会进入页面。"
+                )
+                reflection_output = gr.JSON(label="Reflection 摘要")
+                reflection_refresh.click(reflection_report, reflection_run, reflection_output)
 
             with gr.Tab("健康状态", id="health"):
                 gr.Markdown("## 系统状态")
@@ -683,6 +832,17 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         demo.load(evidence_runs, outputs=evidence_run).then(
             run_claims, evidence_run, evidence_claim
         ).then(claim_evidence, [evidence_run, evidence_claim], evidence_id)
+        demo.load(evidence_runs, outputs=reflection_run)
+        demo.load(
+            case_rows,
+            [
+                case_type_filter,
+                case_task_filter,
+                case_language_filter,
+                case_include_disabled,
+            ],
+            [case_table, case_selector],
+        )
         demo.load(dashboard, outputs=[overview, recent_runs, graph_health])
         refresh_overview.click(dashboard, outputs=[overview, recent_runs, graph_health])
         run_button.click(
@@ -694,6 +854,12 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 ocr_input,
                 vlm_input,
                 allow_remote,
+                case_mode_input,
+                reflection_enabled_input,
+                reflection_provider_input,
+                reflection_attempts_input,
+                reflection_tokens_input,
+                reflection_time_input,
             ],
             [run_summary, claim_table, run_id_output],
         ).then(sidebar_run, [run_id_output], [current_run, run_context])

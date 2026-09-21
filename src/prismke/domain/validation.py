@@ -22,7 +22,7 @@ class ValidationIssue(BaseModel):
     evidence_ids: list[str] = Field(default_factory=list)
     allowed_actions: list[Literal["exclude"]] = Field(default=["exclude"])
     candidate_summary: dict[str, Any] = Field(default_factory=dict)
-    status: Literal["open", "excluded"] = "open"
+    status: Literal["open", "excluded", "repaired"] = "open"
 
 
 class ValidationReviewDecision(BaseModel):

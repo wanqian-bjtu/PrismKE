@@ -1,0 +1,73 @@
+{
+  "id": "dev-domain-zh",
+  "split": "dev",
+  "language": "zh",
+  "category": "domain",
+  "text": "流云数据库由乾元科技开发。",
+  "candidate": {
+    "id": "candidate:dev-domain-zh",
+    "subject": {
+      "id": "mention:dev-domain-zh:subject",
+      "name": "流云数据库",
+      "entity_type": "Organization",
+      "context": "流云数据库由乾元科技开发。",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:dev-domain-zh"
+      ]
+    },
+    "relation": "developed_by",
+    "object": {
+      "id": "mention:dev-domain-zh:object",
+      "name": "乾元科技",
+      "entity_type": "Organization",
+      "context": "流云数据库由乾元科技开发。",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:dev-domain-zh"
+      ]
+    },
+    "confidence": 0.84,
+    "evidence_ids": [
+      "evidence:dev-domain-zh"
+    ],
+    "modalities": [
+      "text"
+    ],
+    "source_tool": "reflection_eval"
+  },
+  "expected_candidate": {
+    "id": "candidate:dev-domain-zh",
+    "subject": {
+      "id": "mention:dev-domain-zh:subject",
+      "name": "流云数据库",
+      "entity_type": "Software",
+      "context": "流云数据库由乾元科技开发。",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:dev-domain-zh"
+      ]
+    },
+    "relation": "developed_by",
+    "object": {
+      "id": "mention:dev-domain-zh:object",
+      "name": "乾元科技",
+      "entity_type": "Organization",
+      "context": "流云数据库由乾元科技开发。",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:dev-domain-zh"
+      ]
+    },
+    "confidence": 0.84,
+    "evidence_ids": [
+      "evidence:dev-domain-zh"
+    ],
+    "modalities": [
+      "text"
+    ],
+    "source_tool": "reflection_eval"
+  },
+  "repairable": true,
+  "relevant_case_key": "domain:zh"
+}

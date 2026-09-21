@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import uuid4
 
 import orjson
@@ -20,6 +20,7 @@ from prismke.evaluation import (
     EntityLinkingEvaluationReport,
     evaluate_entity_linking_manifest,
     evaluate_manifest,
+    evaluate_reflection_manifest,
 )
 from prismke.evaluation.annotations import export_reviewed_annotations
 from prismke.governance import rebuild_entity_index
@@ -81,11 +82,28 @@ def run(
     ocr_provider: Annotated[str, typer.Option("--ocr-provider")] = "disabled",
     vlm_provider: Annotated[str, typer.Option("--vlm-provider")] = "disabled",
     allow_remote_assets: Annotated[bool, typer.Option("--allow-remote-assets")] = False,
+    case_mode: Annotated[Literal["none", "good", "good_bad"], typer.Option("--cases")] = "none",
+    reflection: Annotated[bool, typer.Option("--reflection/--no-reflection")] = False,
+    reflection_provider: Annotated[str, typer.Option("--reflection-provider")] = "disabled",
+    reflection_max_attempts: Annotated[int, typer.Option("--reflection-max-attempts")] = 2,
+    reflection_token_budget: Annotated[int, typer.Option("--reflection-token-budget")] = 20_000,
+    reflection_time_budget: Annotated[int, typer.Option("--reflection-time-budget")] = 180,
 ) -> None:
     """Run the complete PrismKE workflow for one document."""
     state = asyncio.run(
         PrismKEService().run(
-            input_path, schema, provider, ocr_provider, vlm_provider, allow_remote_assets
+            input_path,
+            schema,
+            provider,
+            ocr_provider,
+            vlm_provider,
+            allow_remote_assets,
+            case_mode,
+            reflection,
+            reflection_provider,
+            reflection_max_attempts,
+            reflection_token_budget,
+            reflection_time_budget,
         )
     )
     console.print(f"run_id={state.run_id} status={state.status}")
@@ -96,6 +114,59 @@ def run(
 def show_run(run_id: str) -> None:
     """Print the latest serialized state of a run."""
     _print_model(PrismKEService().show_run(run_id))
+
+
+@app.command("list-cases")
+def list_cases_command(
+    case_type: Annotated[str | None, typer.Option("--type")] = None,
+    task_type: Annotated[str | None, typer.Option("--task-type")] = None,
+    language: Annotated[str | None, typer.Option("--language")] = None,
+    include_disabled: Annotated[bool, typer.Option("--include-disabled")] = False,
+    limit: Annotated[int, typer.Option("--limit", min=1, max=1000)] = 200,
+) -> None:
+    """List immutable review cases without exposing embedding vectors."""
+    _print_model(
+        PrismKEService().list_cases(
+            case_type=case_type,
+            task_type=task_type,
+            language=language,
+            active_only=not include_disabled,
+            limit=limit,
+        )
+    )
+
+
+@app.command("disable-case")
+def disable_case_command(
+    case_id: str,
+    operator: Annotated[str, typer.Option("--operator")],
+    reason: Annotated[str, typer.Option("--reason")],
+) -> None:
+    """Append a disabling event; the historical case remains immutable."""
+    _print_model(
+        PrismKEService().disable_case(
+            case_id,
+            operator=operator,
+            reason=reason,
+            request_id=uuid4().hex,
+        )
+    )
+
+
+@app.command("rebuild-case-index")
+def rebuild_case_index_command(
+    dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
+) -> None:
+    """Rebuild missing or stale case embeddings."""
+    service = PrismKEService()
+
+    async def execute() -> object:
+        try:
+            return await service.rebuild_case_index(dry_run=dry_run)
+        finally:
+            await service.close()
+
+    _print_model(asyncio.run(execute()))
 
 
 @app.command("execution-status")
@@ -334,7 +405,39 @@ def validate_real_documents(
     console.print(
         f"Attempted {len(report['cases'])}; finished {finished}; tokens={report['total_tokens']}"
     )
-    console.print(f"Report: {output / 'document-validation.json'}")
+
+
+@app.command("evaluate-reflection")
+def evaluate_reflection_command(
+    manifest: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    output: Annotated[Path, typer.Option("--output", file_okay=False)],
+    reflection_provider: Annotated[str, typer.Option("--reflection-provider")] = "mock",
+    embedding_provider: Annotated[str, typer.Option("--embedding-provider")] = "mock",
+    token_limit: Annotated[int, typer.Option("--token-limit")] = 200_000,
+    stop_at: Annotated[int, typer.Option("--stop-at")] = 180_000,
+) -> None:
+    """Run the isolated nine-cell case retrieval and Reflection evaluation."""
+    if not 0 < stop_at < token_limit:
+        raise typer.BadParameter("budget must satisfy 0 < stop_at < token_limit")
+    report = asyncio.run(
+        evaluate_reflection_manifest(
+            manifest,
+            output,
+            reflection_provider_name=reflection_provider,
+            embedding_provider_name=embedding_provider,
+            token_limit=token_limit,
+            stop_at=stop_at,
+        )
+    )
+    _print_model(
+        {
+            "publish_ready": report["publish_ready"],
+            "metrics": report["metrics"],
+            "stopped_reason": report["stopped_reason"],
+            "report": str(output / "report.json"),
+        }
+    )
+    console.print(f"Report: {output / 'report.json'}")
 
 
 @app.command("migrate-graph")

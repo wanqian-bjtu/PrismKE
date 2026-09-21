@@ -1,0 +1,73 @@
+{
+  "id": "test-relation-en-2",
+  "split": "test",
+  "language": "en",
+  "category": "relation",
+  "text": "The developer of AtlasFlow is Northstar Labs.",
+  "candidate": {
+    "id": "candidate:test-relation-en-2",
+    "subject": {
+      "id": "mention:test-relation-en-2:subject",
+      "name": "AtlasFlow",
+      "entity_type": "Software",
+      "context": "The developer of AtlasFlow is Northstar Labs.",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:test-relation-en-2"
+      ]
+    },
+    "relation": "built_by",
+    "object": {
+      "id": "mention:test-relation-en-2:object",
+      "name": "Northstar Labs",
+      "entity_type": "Organization",
+      "context": "The developer of AtlasFlow is Northstar Labs.",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:test-relation-en-2"
+      ]
+    },
+    "confidence": 0.84,
+    "evidence_ids": [
+      "evidence:test-relation-en-2"
+    ],
+    "modalities": [
+      "text"
+    ],
+    "source_tool": "reflection_eval"
+  },
+  "expected_candidate": {
+    "id": "candidate:test-relation-en-2",
+    "subject": {
+      "id": "mention:test-relation-en-2:subject",
+      "name": "AtlasFlow",
+      "entity_type": "Software",
+      "context": "The developer of AtlasFlow is Northstar Labs.",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:test-relation-en-2"
+      ]
+    },
+    "relation": "developed_by",
+    "object": {
+      "id": "mention:test-relation-en-2:object",
+      "name": "Northstar Labs",
+      "entity_type": "Organization",
+      "context": "The developer of AtlasFlow is Northstar Labs.",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:test-relation-en-2"
+      ]
+    },
+    "confidence": 0.84,
+    "evidence_ids": [
+      "evidence:test-relation-en-2"
+    ],
+    "modalities": [
+      "text"
+    ],
+    "source_tool": "reflection_eval"
+  },
+  "repairable": true,
+  "relevant_case_key": "relation:en"
+}
