@@ -41,6 +41,7 @@ def fake_runtime(tmp_path: Path) -> FakeRuntime:
     for directory in (
         project / ".venv" / "bin",
         project / "runtime" / "neo4j" / "current" / "bin",
+        project / "runtime" / "neo4j" / "current" / "conf",
         project / "runtime" / "neo4j" / "logs",
         project / "runtime" / "logs",
         project / "scripts",
@@ -78,14 +79,17 @@ exit 2
 #!/usr/bin/env bash
 case "$1" in
   status)
-    if [[ -f "${FAKE_STATE}/neo4j" ]]; then
+    if [[ -f "${FAKE_STATE}/neo4j-${PRISMKE_NEO4J_BOLT_PORT:-7687}" ]]; then
       echo "Neo4j is running at pid 1111"
       exit 0
     fi
     exit 3
     ;;
   stop)
-    rm -f "${FAKE_STATE}/neo4j" "${FAKE_STATE}/port-7474" "${FAKE_STATE}/port-7687"
+    rm -f \
+      "${FAKE_STATE}/neo4j-${PRISMKE_NEO4J_BOLT_PORT:-7687}" \
+      "${FAKE_STATE}/port-${PRISMKE_NEO4J_HTTP_PORT:-7474}" \
+      "${FAKE_STATE}/port-${PRISMKE_NEO4J_BOLT_PORT:-7687}"
     echo "Neo4j stopped"
     ;;
   *) exit 2 ;;
@@ -99,7 +103,10 @@ esac
 if [[ "${FAKE_NEO4J_FAIL:-0}" == "1" ]]; then
   exit 1
 fi
-touch "${FAKE_STATE}/neo4j" "${FAKE_STATE}/port-7474" "${FAKE_STATE}/port-7687"
+touch \
+  "${FAKE_STATE}/neo4j-${PRISMKE_NEO4J_BOLT_PORT:-7687}" \
+  "${FAKE_STATE}/port-${PRISMKE_NEO4J_HTTP_PORT:-7474}" \
+  "${FAKE_STATE}/port-${PRISMKE_NEO4J_BOLT_PORT:-7687}"
 echo "Neo4j started"
 """,
     )
@@ -142,7 +149,8 @@ if [[ "${FAKE_HEALTH:-ok}" == "degraded" ]]; then
   echo '{"status":"degraded","graph":{"healthy":false}}'
   exit 0
 fi
-if [[ -f "${FAKE_STATE}/neo4j" ]] && compgen -G "${FAKE_STATE}/session-*" >/dev/null; then
+if [[ -f "${FAKE_STATE}/neo4j-${PRISMKE_NEO4J_BOLT_PORT:-7687}" ]] \
+  && [[ -f "${FAKE_STATE}/session-${PRISMKE_TMUX_SESSION:-prismke-web}" ]]; then
   echo '{"status":"ok","graph":{"backend":"neo4j","healthy":true}}'
   exit 0
 fi
@@ -223,7 +231,7 @@ def test_port_conflict_is_detected_before_starting_neo4j(
     result = fake_runtime.run("start")
     assert result.returncode == 1
     assert "Port 18000 is already in use" in result.stderr
-    assert not (fake_runtime.state / "neo4j").exists()
+    assert not (fake_runtime.state / "neo4j-7687").exists()
 
 
 @pytest.mark.parametrize("failure", ["health", "tmux"])
@@ -236,7 +244,7 @@ def test_failed_web_start_rolls_back_new_neo4j(
         fake_runtime.env["FAKE_TMUX_FAIL"] = "1"
     result = fake_runtime.run("start")
     assert result.returncode == 1
-    assert not (fake_runtime.state / "neo4j").exists()
+    assert not (fake_runtime.state / "neo4j-7687").exists()
     assert not (fake_runtime.state / "session-prismke-web").exists()
 
 
@@ -251,3 +259,78 @@ def test_web_log_rotates_and_logs_validate_arguments(fake_runtime: FakeRuntime) 
     assert web_log.with_suffix(".log.1").exists()
     assert invalid.returncode == 1
     assert "positive integer" in invalid.stderr
+
+
+def test_two_instances_have_isolated_ports_locks_logs_and_processes(
+    fake_runtime: FakeRuntime,
+) -> None:
+    first = fake_runtime
+    second_runtime = fake_runtime.project / "runtime-canary"
+    second_conf = second_runtime / "neo4j" / "conf"
+    second_conf.mkdir(parents=True)
+    second_env = first.env.copy()
+    second_env.update(
+        {
+            "FAKE_API_PORT": "18001",
+            "PRISMKE_RUNTIME_DIR": str(second_runtime),
+            "PRISMKE_NEO4J_HOME": str(
+                fake_runtime.project / "runtime" / "neo4j" / "current"
+            ),
+            "PRISMKE_NEO4J_CONF": str(second_conf),
+            "PRISMKE_NEO4J_HTTP_PORT": "17474",
+            "PRISMKE_NEO4J_BOLT_PORT": "17687",
+            "PRISMKE_TMUX_SESSION": "prismke-v091-canary",
+            "PRISMKE_HEALTH_URL": "http://127.0.0.1:18001/api/v1/health",
+        }
+    )
+    second = FakeRuntime(project=first.project, state=first.state, env=second_env)
+
+    assert first.run("start").returncode == 0
+    assert second.run("start").returncode == 0
+    assert (first.state / "neo4j-7687").exists()
+    assert (first.state / "neo4j-17687").exists()
+    assert (first.state / "session-prismke-web").exists()
+    assert (first.state / "session-prismke-v091-canary").exists()
+    assert (first.project / "runtime" / "prismke-autodl.lock").exists()
+    assert (second_runtime / "prismke-autodl.lock").exists()
+
+    default_log = first.project / "runtime" / "logs" / "prismke-web.log"
+    canary_log = second_runtime / "logs" / "prismke-web.log"
+    default_log.write_text("default\n", encoding="utf-8")
+    canary_log.write_text("canary\n", encoding="utf-8")
+    assert first.run("logs", "web").stdout == "default\n"
+    assert second.run("logs", "web").stdout == "canary\n"
+
+    assert second.run("stop").returncode == 0
+    assert first.run("status").returncode == 0
+    assert not (first.state / "neo4j-17687").exists()
+    assert not (first.state / "session-prismke-v091-canary").exists()
+    assert (first.state / "neo4j-7687").exists()
+    assert (first.state / "session-prismke-web").exists()
+
+
+def test_custom_instance_reports_its_neo4j_port_conflict(
+    fake_runtime: FakeRuntime,
+) -> None:
+    runtime_dir = fake_runtime.project / "runtime-canary"
+    conf_dir = runtime_dir / "neo4j" / "conf"
+    conf_dir.mkdir(parents=True)
+    fake_runtime.env.update(
+        {
+            "PRISMKE_RUNTIME_DIR": str(runtime_dir),
+            "PRISMKE_NEO4J_HOME": str(
+                fake_runtime.project / "runtime" / "neo4j" / "current"
+            ),
+            "PRISMKE_NEO4J_CONF": str(conf_dir),
+            "PRISMKE_NEO4J_HTTP_PORT": "17474",
+            "PRISMKE_NEO4J_BOLT_PORT": "17687",
+            "PRISMKE_TMUX_SESSION": "prismke-v091-canary",
+        }
+    )
+    (fake_runtime.state / "port-17474").touch()
+
+    result = fake_runtime.run("start")
+
+    assert result.returncode == 1
+    assert "Port 17474 is already in use" in result.stderr
+    assert "sk-private-do-not-print" not in result.stdout + result.stderr

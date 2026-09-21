@@ -8,14 +8,29 @@ TMUX_SESSION="${PRISMKE_TMUX_SESSION:-prismke-web}"
 LEGACY_TMUX_SESSION="prismke-v03"
 START_TIMEOUT="${PRISMKE_START_TIMEOUT:-30}"
 
-RUNTIME_DIR="${PROJECT_DIR}/runtime"
-NEO4J_HOME="${RUNTIME_DIR}/neo4j/current"
+RUNTIME_DIR="${PRISMKE_RUNTIME_DIR:-${PROJECT_DIR}/runtime}"
+if [[ "${RUNTIME_DIR}" != /* ]]; then
+  RUNTIME_DIR="${PROJECT_DIR}/${RUNTIME_DIR}"
+fi
+NEO4J_HOME="${PRISMKE_NEO4J_HOME:-${RUNTIME_DIR}/neo4j/current}"
+NEO4J_CONF="${PRISMKE_NEO4J_CONF:-${NEO4J_HOME}/conf}"
+NEO4J_HTTP_PORT="${PRISMKE_NEO4J_HTTP_PORT:-7474}"
+NEO4J_BOLT_PORT="${PRISMKE_NEO4J_BOLT_PORT:-7687}"
 NEO4J_BIN="${NEO4J_HOME}/bin/neo4j"
 LOG_DIR="${RUNTIME_DIR}/logs"
 WEB_LOG="${LOG_DIR}/prismke-web.log"
 NEO4J_LOG="${RUNTIME_DIR}/neo4j/logs/neo4j.log"
 LOCK_FILE="${RUNTIME_DIR}/prismke-autodl.lock"
 MAX_WEB_LOG_BYTES=$((10 * 1024 * 1024))
+MANAGE_LEGACY_SESSION=0
+if [[ "${TMUX_SESSION}" == "prismke-web" && "${RUNTIME_DIR}" == "${PROJECT_DIR}/runtime" ]]; then
+  MANAGE_LEGACY_SESSION=1
+fi
+export PRISMKE_RUNTIME_DIR="${RUNTIME_DIR}"
+export PRISMKE_NEO4J_HOME="${NEO4J_HOME}"
+export PRISMKE_NEO4J_CONF="${NEO4J_CONF}"
+export PRISMKE_NEO4J_HTTP_PORT="${NEO4J_HTTP_PORT}"
+export PRISMKE_NEO4J_BOLT_PORT="${NEO4J_BOLT_PORT}"
 
 usage() {
   cat <<'EOF'
@@ -27,6 +42,11 @@ Usage:
   bash scripts/prismke_autodl.sh health
   bash scripts/prismke_autodl.sh logs web [--lines N] [--follow]
   bash scripts/prismke_autodl.sh logs neo4j [--lines N] [--follow]
+
+Instance overrides:
+  PRISMKE_RUNTIME_DIR, PRISMKE_NEO4J_HOME, PRISMKE_NEO4J_CONF,
+  PRISMKE_NEO4J_HTTP_PORT, PRISMKE_NEO4J_BOLT_PORT,
+  PRISMKE_TMUX_SESSION, PRISMKE_HEALTH_URL
 EOF
 }
 
@@ -53,7 +73,11 @@ preflight() {
   [[ -x "${UV_BIN}" ]] || die "uv executable not found: ${UV_BIN}"
   [[ -x "${PYTHON_BIN}" ]] || die "project Python not found: ${PYTHON_BIN}"
   [[ -x "${NEO4J_BIN}" ]] || die "Neo4j is not installed: ${NEO4J_BIN}"
+  [[ -d "${NEO4J_CONF}" ]] || die "Neo4j configuration directory not found: ${NEO4J_CONF}"
   [[ "${START_TIMEOUT}" =~ ^[1-9][0-9]*$ ]] || die "PRISMKE_START_TIMEOUT must be a positive integer"
+  [[ "${NEO4J_HTTP_PORT}" =~ ^[1-9][0-9]*$ ]] || die "PRISMKE_NEO4J_HTTP_PORT must be a positive integer"
+  [[ "${NEO4J_BOLT_PORT}" =~ ^[1-9][0-9]*$ ]] || die "PRISMKE_NEO4J_BOLT_PORT must be a positive integer"
+  [[ "${NEO4J_HTTP_PORT}" != "${NEO4J_BOLT_PORT}" ]] || die "Neo4j HTTP and Bolt ports must differ"
   require_command curl
   require_command flock
   require_command tmux
@@ -61,7 +85,11 @@ preflight() {
 }
 
 neo4j_running() {
-  "${NEO4J_BIN}" status >/dev/null 2>&1
+  NEO4J_CONF="${NEO4J_CONF}" "${NEO4J_BIN}" status >/dev/null 2>&1
+}
+
+neo4j_command() {
+  NEO4J_CONF="${NEO4J_CONF}" "${NEO4J_BIN}" "$@"
 }
 
 tmux_running() {
@@ -144,8 +172,8 @@ stop_tmux_session() {
 start_web() {
   local command
   rotate_web_log
-  printf -v command 'cd %q && exec %q run prismke serve >>%q 2>&1' \
-    "${PROJECT_DIR}" "${UV_BIN}" "${WEB_LOG}"
+  printf -v command 'cd %q && exec env PRISMKE_RUNTIME_DIR=%q %q run prismke serve >>%q 2>&1' \
+    "${PROJECT_DIR}" "${RUNTIME_DIR}" "${UV_BIN}" "${WEB_LOG}"
   tmux new-session -d -s "${TMUX_SESSION}" "${command}" 9>&-
 }
 
@@ -178,7 +206,7 @@ start_all() {
     echo "Restarting unhealthy Web session ${TMUX_SESSION}."
     stop_tmux_session "${TMUX_SESSION}"
   fi
-  if tmux_running "${LEGACY_TMUX_SESSION}"; then
+  if (( MANAGE_LEGACY_SESSION )) && tmux_running "${LEGACY_TMUX_SESSION}"; then
     echo "Stopping legacy tmux session ${LEGACY_TMUX_SESSION}."
     stop_tmux_session "${LEGACY_TMUX_SESSION}"
   fi
@@ -189,16 +217,22 @@ start_all() {
   fi
 
   if ! neo4j_running; then
-    assert_port_free 7474 "Neo4j"
-    assert_port_free 7687 "Neo4j"
-    bash "${PROJECT_DIR}/scripts/start_neo4j_autodl.sh" 9>&-
+    assert_port_free "${NEO4J_HTTP_PORT}" "Neo4j"
+    assert_port_free "${NEO4J_BOLT_PORT}" "Neo4j"
+    PRISMKE_PROJECT_DIR="${PROJECT_DIR}" \
+      PRISMKE_RUNTIME_DIR="${RUNTIME_DIR}" \
+      PRISMKE_NEO4J_HOME="${NEO4J_HOME}" \
+      PRISMKE_NEO4J_CONF="${NEO4J_CONF}" \
+      PRISMKE_NEO4J_HTTP_PORT="${NEO4J_HTTP_PORT}" \
+      PRISMKE_NEO4J_BOLT_PORT="${NEO4J_BOLT_PORT}" \
+      bash "${PROJECT_DIR}/scripts/start_neo4j_autodl.sh" 9>&-
     started_neo4j=1
   fi
 
   if ! tmux_running "${TMUX_SESSION}"; then
     if ! start_web; then
       if (( started_neo4j )); then
-        "${NEO4J_BIN}" stop >/dev/null 2>&1 || true
+        neo4j_command stop >/dev/null 2>&1 || true
       fi
       die "failed to create tmux session ${TMUX_SESSION}"
     fi
@@ -215,7 +249,7 @@ start_all() {
       stop_tmux_session "${TMUX_SESSION}"
     fi
     if (( started_neo4j )); then
-      "${NEO4J_BIN}" stop >/dev/null 2>&1 || true
+      neo4j_command stop >/dev/null 2>&1 || true
     fi
     return 1
   fi
@@ -231,14 +265,14 @@ stop_all() {
     stop_tmux_session "${TMUX_SESSION}"
     stopped=1
   fi
-  if tmux_running "${LEGACY_TMUX_SESSION}"; then
+  if (( MANAGE_LEGACY_SESSION )) && tmux_running "${LEGACY_TMUX_SESSION}"; then
     echo "Stopping legacy Web session ${LEGACY_TMUX_SESSION}."
     stop_tmux_session "${LEGACY_TMUX_SESSION}"
     stopped=1
   fi
   if neo4j_running; then
     echo "Stopping Neo4j."
-    "${NEO4J_BIN}" stop
+    neo4j_command stop
     stopped=1
   fi
   if (( ! stopped )); then
@@ -258,14 +292,14 @@ status_all() {
 
   if neo4j_running; then
     neo4j_status="running"
-    neo4j_pid="$("${NEO4J_BIN}" status 2>/dev/null | sed -n 's/.*pid \([0-9][0-9]*\).*/\1/p' | head -1)"
+    neo4j_pid="$(neo4j_command status 2>/dev/null | sed -n 's/.*pid \([0-9][0-9]*\).*/\1/p' | head -1)"
     neo4j_pid="${neo4j_pid:--}"
   fi
   if tmux_running "${TMUX_SESSION}"; then
     web_status="running"
     web_pid="$(tmux list-panes -t "${TMUX_SESSION}" -F '#{pane_pid}' 2>/dev/null | head -1)"
     web_pid="${web_pid:--}"
-  elif tmux_running "${LEGACY_TMUX_SESSION}"; then
+  elif (( MANAGE_LEGACY_SESSION )) && tmux_running "${LEGACY_TMUX_SESSION}"; then
     web_status="legacy-session"
     web_pid="$(tmux list-panes -t "${LEGACY_TMUX_SESSION}" -F '#{pane_pid}' 2>/dev/null | head -1)"
     web_pid="${web_pid:--}"
@@ -282,7 +316,7 @@ status_all() {
   printf '%-12s %-16s %s\n' "Neo4j log" "path" "${NEO4J_LOG}"
   echo "Listeners:"
   local port
-  for port in 7474 7687 "$(api_port)"; do
+  for port in "${NEO4J_HTTP_PORT}" "${NEO4J_BOLT_PORT}" "$(api_port)"; do
     if port_in_use "${port}"; then
       printf '  127.0.0.1:%s listening\n' "${port}"
     else
