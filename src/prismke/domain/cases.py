@@ -98,6 +98,8 @@ class ReflectionAttempt(BaseModel):
     output_candidate: dict[str, Any] | None = None
     model_fingerprint: str
     prompt_version: str
+    request_id: str | None = None
+    response_model: str | None = None
     token_usage: int | None = Field(default=None, ge=0)
     latency_ms: float = Field(default=0.0, ge=0.0)
     status: Literal[

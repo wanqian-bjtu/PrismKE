@@ -437,7 +437,7 @@ def evaluate_reflection_command(
             "report": str(output / "report.json"),
         }
     )
-    console.print(f"Report: {output / 'document-validation.json'}")
+    console.print(f"Report: {output / 'report.json'}")
 
 
 @app.command("migrate-graph")

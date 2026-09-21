@@ -248,7 +248,9 @@ async def test_reflection_unknown_usage_stops_without_replacing_candidate() -> N
         async def reflect(self, request: ReflectionRequest) -> ReflectionResult:
             original = request.candidate
             return ReflectionResult(
-                candidate=original.model_copy(update={"relation": "related_to"})
+                candidate=original.model_copy(update={"relation": "related_to"}),
+                raw_response_model="qwen-test-alias",
+                request_id="request:test-reflection",
             )
 
     result = await BoundedReflectionService(
@@ -260,6 +262,8 @@ async def test_reflection_unknown_usage_stops_without_replacing_candidate() -> N
     assert result.candidates[0].relation == "unknown_relation"
     assert len(result.reflection_attempts) == 1
     assert result.reflection_attempts[0].status == "unknown_usage"
+    assert result.reflection_attempts[0].request_id == "request:test-reflection"
+    assert result.reflection_attempts[0].response_model == "qwen-test-alias"
     assert "reflection_unknown_usage:candidate:one" in result.warnings
 
 
