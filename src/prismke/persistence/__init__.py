@@ -7,6 +7,7 @@ from prismke.persistence.json_graph import JSONGraphStore
 from prismke.persistence.migration import MigrationReport, migrate_json_graph
 from prismke.persistence.neo4j_graph import Neo4jGraphStore
 from prismke.persistence.runs import RunRepository
+from prismke.persistence.runtime_config import RuntimeConfigRepository
 
 __all__ = [
     "AuditLog",
@@ -16,5 +17,6 @@ __all__ = [
     "MigrationReport",
     "Neo4jGraphStore",
     "RunRepository",
+    "RuntimeConfigRepository",
     "migrate_json_graph",
 ]

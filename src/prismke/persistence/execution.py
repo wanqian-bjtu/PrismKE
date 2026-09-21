@@ -9,7 +9,12 @@ from typing import Any
 
 import orjson
 
-from prismke.domain.execution import ExecutionEvent, ExecutionTask
+from prismke.domain.execution import (
+    ExecutionEvent,
+    ExecutionTask,
+    RequestReconciliation,
+    RequestReconciliationEvent,
+)
 
 
 class ExecutionConflict(ValueError):
@@ -41,6 +46,16 @@ class ExecutionRepository:
                 CREATE TABLE IF NOT EXISTS results (
                     run_id TEXT NOT NULL, key TEXT NOT NULL, payload BLOB NOT NULL,
                     PRIMARY KEY(run_id,key));
+                CREATE TABLE IF NOT EXISTS request_reconciliations (
+                    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT NOT NULL, request_key TEXT NOT NULL,
+                    payload BLOB NOT NULL);
+                CREATE TRIGGER IF NOT EXISTS immutable_request_reconciliations_update
+                    BEFORE UPDATE ON request_reconciliations
+                    BEGIN SELECT RAISE(ABORT, 'immutable reconciliation'); END;
+                CREATE TRIGGER IF NOT EXISTS immutable_request_reconciliations_delete
+                    BEFORE DELETE ON request_reconciliations
+                    BEGIN SELECT RAISE(ABORT, 'immutable reconciliation'); END;
             """)
 
     @contextmanager
@@ -212,6 +227,88 @@ class ExecutionRepository:
                     (run_id, int(include_sent)),
                 ).fetchone()[0]
             )
+
+    def requests(self, run_id: str) -> list[dict[str, Any]]:
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT key,status,metadata,usage_known FROM requests "
+                "WHERE run_id=? ORDER BY rowid",
+                (run_id,),
+            ).fetchall()
+        return [
+            {
+                "request_id": key,
+                "status": status,
+                "metadata": dict(orjson.loads(metadata)),
+                "usage_known": bool(usage_known),
+            }
+            for key, status, metadata, usage_known in rows
+        ]
+
+    def reconcile_request(
+        self, run_id: str, decision: RequestReconciliation
+    ) -> RequestReconciliationEvent:
+        now = datetime.now(UTC)
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            task_row = db.execute(
+                "SELECT payload FROM tasks WHERE run_id=?", (run_id,)
+            ).fetchone()
+            if task_row is None:
+                raise ExecutionConflict("EXECUTION_NOT_REGISTERED")
+            task = ExecutionTask.model_validate(orjson.loads(task_row[0]))
+            if task.version != decision.expected_execution_version:
+                raise ExecutionConflict("STALE_EXECUTION_VERSION")
+            if task.status in {"queued", "running", "cancelling"}:
+                raise ExecutionConflict("EXECUTION_BUSY")
+            request_row = db.execute(
+                "SELECT status,usage_known FROM requests WHERE run_id=? AND key=?",
+                (run_id, decision.request_id),
+            ).fetchone()
+            if request_row is None:
+                raise ExecutionConflict("REQUEST_JOURNAL_MISSING")
+            status, usage_known = request_row
+            if status not in {"sent", "unknown"} and not (
+                status == "completed" and not usage_known
+            ):
+                raise ExecutionConflict("REQUEST_ALREADY_SETTLED")
+            next_status = (
+                "retryable"
+                if decision.outcome in {"confirmed_not_sent", "confirmed_not_billed"}
+                else "unknown"
+            )
+            db.execute(
+                "UPDATE requests SET status=?,usage_known=? WHERE run_id=? AND key=?",
+                (next_status, int(next_status == "retryable"), run_id, decision.request_id),
+            )
+            payload = {
+                **decision.model_dump(mode="json"),
+                "run_id": run_id,
+                "created_at": now.isoformat(),
+            }
+            cursor = db.execute(
+                "INSERT INTO request_reconciliations(run_id,request_key,payload) VALUES (?,?,?)",
+                (run_id, decision.request_id, orjson.dumps(payload)),
+            )
+            task.version += 1
+            task.reason = f"REQUEST_RECONCILED:{decision.outcome}"
+            self._write(db, task)
+            if cursor.lastrowid is None:
+                raise ExecutionConflict("RECONCILIATION_EVENT_NOT_SAVED")
+            sequence = cursor.lastrowid
+        return RequestReconciliationEvent(sequence=sequence, **payload)
+
+    def reconciliations(self, run_id: str) -> list[RequestReconciliationEvent]:
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT seq,payload FROM request_reconciliations "
+                "WHERE run_id=? ORDER BY seq",
+                (run_id,),
+            ).fetchall()
+        return [
+            RequestReconciliationEvent(sequence=sequence, **orjson.loads(payload))
+            for sequence, payload in rows
+        ]
 
     def result(self, run_id: str, key: str) -> dict[str, Any] | None:
         with self.connect() as db:

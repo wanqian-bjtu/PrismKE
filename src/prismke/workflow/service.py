@@ -37,6 +37,7 @@ from prismke.persistence import (
     JSONGraphStore,
     Neo4jGraphStore,
     RunRepository,
+    RuntimeConfigRepository,
 )
 from prismke.persistence.base import GraphStore
 from prismke.providers import (
@@ -56,7 +57,7 @@ from prismke.providers.base import EmbeddingProvider, LLMProvider, OCRProvider, 
 from prismke.workflow.graph import PrismKEWorkflow
 from prismke.workflow.review_workspace import validate_workspace_run, workspace_metadata
 
-PIPELINE_VERSION = "0.7.0"
+PIPELINE_VERSION = "0.8.0"
 ASSET_POLICY_VERSION = "assets-v3"
 ALIGNMENT_POLICY_VERSION = "alignment-v1"
 
@@ -66,6 +67,10 @@ class PrismKEService:
         self, settings: Settings | None = None, graph_store: GraphStore | None = None
     ) -> None:
         self.settings = settings or Settings()
+        self.runtime_config = RuntimeConfigRepository(
+            self.settings.runtime_dir / "config" / "overrides.json"
+        )
+        self.runtime_config.apply(self.settings)
         self.review_metadata = workspace_metadata(self.settings.runtime_dir)
         if self.review_metadata and self.settings.graph_store != "json" and graph_store is None:
             raise ValueError("imported review workspace must use its isolated JSON graph")
@@ -94,6 +99,72 @@ class PrismKEService:
 
         self.executions = ExecutionManager(self)
 
+    def settings_view(self) -> dict[str, Any]:
+        return self.runtime_config.public_view(self.settings)
+
+    def update_settings(
+        self,
+        values: dict[str, Any],
+        clear_secrets: list[str],
+        operator: str,
+    ) -> dict[str, Any]:
+        from prismke.persistence.runtime_config import RESTART_FIELDS, SECRET_FIELDS
+
+        if not operator.strip():
+            raise ValueError("operator is required")
+        invalid_clear = set(clear_secrets) - SECRET_FIELDS
+        if invalid_clear:
+            raise ValueError("only secret fields can be cleared")
+        clean = {key: value for key, value in values.items() if value is not None}
+        for field in SECRET_FIELDS:
+            if field in clean and not str(clean[field]).strip():
+                clean.pop(field)
+        for field in clear_secrets:
+            clean[field] = None
+        for field in {"llm_base_url", "vlm_base_url"} & clean.keys():
+            parsed = urlparse(str(clean[field]))
+            if parsed.username or parsed.password or parsed.query or parsed.fragment:
+                raise ValueError(f"{field} must not contain credentials, query or fragment")
+            self._validate_endpoint(str(clean[field]), field)
+        if "neo4j_uri" in clean:
+            parsed = urlparse(str(clean["neo4j_uri"]))
+            if parsed.username or parsed.password or parsed.query or parsed.fragment:
+                raise ValueError("neo4j_uri must not contain credentials, query or fragment")
+            if parsed.scheme not in {"bolt", "neo4j", "bolt+s", "neo4j+s"} or not parsed.netloc:
+                raise ValueError("invalid neo4j_uri")
+        if clean.get("graph_store", self.settings.graph_store) not in {"json", "neo4j"}:
+            raise ValueError("graph_store must be json or neo4j")
+        if clean.get("embedding_provider", self.settings.embedding_provider) not in {
+            "disabled",
+            "mock",
+            "bge-m3",
+        }:
+            raise ValueError("unsupported embedding_provider")
+        candidate = Settings.model_validate({**self.settings.model_dump(), **clean})
+        clean = {key: getattr(candidate, key) for key in clean}
+        self.runtime_config.update(clean)
+        for key, value in clean.items():
+            setattr(self.settings, key, value)
+        if {"ocr_device", "ocr_lang", "ocr_model"} & clean.keys():
+            self._ocr_providers.clear()
+        if any(key.startswith("embedding_") for key in clean):
+            self._embedding_provider = None
+        changed = sorted(clean)
+        self.audit.record(
+            "update_runtime_settings",
+            "workspace",
+            {
+                "operator": operator.strip(),
+                "changed_fields": changed,
+                "cleared_secrets": sorted(clear_secrets),
+            },
+        )
+        return {
+            "settings": self.settings_view(),
+            "changed_fields": changed,
+            "restart_required": bool(RESTART_FIELDS & clean.keys()),
+        }
+
     def _create_graph_store(self) -> GraphStore:
         if self.settings.graph_store == "json":
             return JSONGraphStore(self.settings.graph_dir)
@@ -111,6 +182,25 @@ class PrismKEService:
     async def close(self) -> None:
         await self.executions.stop()
         await self.graph_store.close()
+
+    async def workspace_summary(self) -> dict[str, Any]:
+        states = self.runs.list(limit=1000)
+        run_counts: dict[str, int] = {}
+        pending_reviews = 0
+        blocking_issues = 0
+        for state in states:
+            execution_status = self.executions.view(state.run_id)["status"]
+            run_counts[execution_status] = run_counts.get(execution_status, 0) + 1
+            pending_reviews += sum(t.status == "pending" for t in state.entity_review_tasks)
+            pending_reviews += sum(t.status == "pending" for t in state.review_tasks)
+            blocking_issues += state.validation.blocking_count
+        return {
+            "run_counts": run_counts,
+            "pending_reviews": pending_reviews,
+            "blocking_issues": blocking_issues,
+            "worker_status": self.executions.health()["worker"],
+            "graph_health": (await self.graph_store.healthcheck()).model_dump(mode="json"),
+        }
 
     async def validate_run(self, run_id: str) -> ValidationResult:
         state = self.show_run(run_id)
@@ -817,7 +907,7 @@ class PrismKEService:
         await self.reviews.recover(run_id)
         state = self.runs.load(run_id)
         if state.pipeline_version != PIPELINE_VERSION:
-            raise LegacyCheckpointError("旧流程不能由 v0.7 恢复；请使用对应发布版本接续")
+            raise LegacyCheckpointError("旧流程不能由 v0.8 恢复；请使用对应发布版本接续")
         if (
             state.validation.blocking_count
             or any(task.status == "pending" for task in state.entity_review_tasks)

@@ -39,8 +39,8 @@ async function main() {
     await settle(value => value.status === 'running');
     assert.equal((await (await page.request.get(`${base}/offline-test/calls`)).json()).calls, 1);
     await page.goto(`${base}/ui/`, { waitUntil: 'domcontentloaded' });
-    await page.getByRole('tab', { name: '执行任务', exact: true }).click();
-    await page.getByRole('button', { name: '刷新任务', exact: true }).click();
+    await page.getByRole('radio', { name: '执行任务', exact: true }).click();
+    await page.getByRole('button', { name: '刷新', exact: true }).click();
     await page.getByRole('button', { name: '安全取消', exact: true }).waitFor();
     await page.waitForFunction(() => [...document.querySelectorAll('button')]
       .some(b => b.textContent.trim() === '安全取消' && !b.disabled));
@@ -51,18 +51,25 @@ async function main() {
     await settle(value => value.status === 'cancelling');
     await page.request.post(`${base}/offline-test/release`);
     await settle(value => value.status === 'cancelled' && value.can_resume);
-    await page.getByRole('button', { name: '刷新任务', exact: true }).click();
+    await page.getByRole('button', { name: '刷新', exact: true }).click();
     await page.waitForFunction(() => [...document.querySelectorAll('button')]
       .some(b => b.textContent.trim() === '恢复运行' && !b.disabled));
     await page.setViewportSize({ width: 390, height: 844 });
     await page.screenshot({ path: path.join(output, 'execution-cancelled-mobile.png'), fullPage: true });
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2);
     assert.equal(overflow, false, 'mobile execution page must not overflow');
+    await page.setViewportSize({ width: 820, height: 1180 });
+    await page.screenshot({ path: path.join(output, 'execution-cancelled-tablet.png'), fullPage: true });
+    const tabletOverflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2);
+    assert.equal(tabletOverflow, false, 'tablet execution page must not overflow');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole('button', { name: 'Toggle Sidebar', exact: true }).click();
+    await page.screenshot({ path: path.join(output, 'execution-cancelled-mobile-closed.png'), fullPage: true });
     await page.getByRole('button', { name: '恢复运行', exact: true }).click();
     const finished = await settle(value => value.status === 'completed');
     assert.equal(finished.attempt, 2);
     assert.equal((await (await page.request.get(`${base}/offline-test/calls`)).json()).calls, 1);
-    await page.getByRole('button', { name: '刷新任务', exact: true }).click();
+    await page.getByRole('button', { name: '刷新', exact: true }).click();
     await page.waitForFunction(() => [...document.querySelectorAll('button')]
       .some(b => b.textContent.trim() === '安全取消' && b.disabled)
       && [...document.querySelectorAll('button')]
@@ -72,7 +79,7 @@ async function main() {
     assert.deepEqual(errors, []);
     fs.writeFileSync(path.join(output, 'browser-result.json'), JSON.stringify({ passed: true,
       runId, status: finished.status, attempt: finished.attempt, providerCalls: 1,
-      pageErrors: errors, mobileOverflow: overflow }, null, 2));
+      pageErrors: errors, mobileOverflow: overflow, tabletOverflow }, null, 2));
   } finally { await browser.close(); }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

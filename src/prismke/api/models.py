@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 from prismke.domain import CanonicalEntity, ReviewDecision
+from prismke.domain.execution import RequestReconciliation
 
 
 class RunAccepted(BaseModel):
@@ -74,3 +75,15 @@ class SplitProposalRequest(BaseModel):
     target_entities: list[CanonicalEntity]
     claim_assignments: dict[str, str]
     reasons: list[str] = Field(default_factory=list)
+
+
+class RequestReconciliationRequest(RequestReconciliation):
+    pass
+
+
+class RuntimeSettingsUpdate(BaseModel):
+    values: dict[str, Any] = Field(default_factory=dict)
+    clear_secrets: list[Literal["llm_api_key", "vlm_api_key", "neo4j_password"]] = Field(
+        default_factory=list
+    )
+    operator: str = Field(min_length=1)

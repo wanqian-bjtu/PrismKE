@@ -14,6 +14,12 @@ from prismke.domain.documents import (
     TextBlock,
     VisualObservation,
 )
+from prismke.domain.execution import (
+    BranchProgress,
+    RequestReconciliation,
+    RequestReconciliationEvent,
+    WorkspaceSummary,
+)
 from prismke.domain.knowledge import (
     AlignmentRecord,
     CandidateClaim,
@@ -119,6 +125,10 @@ __all__ = [
     "TextBlock",
     "VisualExtractionRequest",
     "WorkflowState",
+    "BranchProgress",
+    "RequestReconciliation",
+    "RequestReconciliationEvent",
+    "WorkspaceSummary",
     "load_schema",
     "normalize_label",
     "utc_now",

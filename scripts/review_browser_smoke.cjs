@@ -5,9 +5,18 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 async function dropdown(page, label, index = 0) {
-  const input = page.getByRole('combobox', { name: label, exact: true });
-  await input.click();
-  await page.locator('[role="option"]').nth(index).click();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await page.getByRole('combobox', { name: label, exact: true }).click();
+      const option = page.getByRole('option').nth(index);
+      await option.waitFor({ state: 'visible' });
+      await option.click({ force: true });
+      return;
+    } catch (error) {
+      if (attempt === 2) throw error;
+      await page.waitForTimeout(250);
+    }
+  }
 }
 
 async function main() {
@@ -23,7 +32,7 @@ async function main() {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  await page.getByRole('tab', { name: '实体审核', exact: true }).click();
+  await page.getByRole('radio', { name: '实体审核', exact: true }).click();
   await dropdown(page, '运行');
   await page.getByRole('textbox', { name: '审核进度', exact: true }).waitFor();
   await page.waitForFunction(() => [...document.querySelectorAll('textarea')]
@@ -48,7 +57,7 @@ async function main() {
     await page.waitForFunction(() => [...document.querySelectorAll('textarea')]
       .some(e => e.value.includes('事实待审核 2')));
     if (process.env.PRISMKE_REVIEW_BROWSER_VALIDATION === '1') {
-      await page.getByRole('tab', { name: '校验问题', exact: true }).click();
+      await page.getByRole('radio', { name: '校验问题', exact: true }).click();
       await dropdown(page, '校验运行');
       await page.waitForFunction(() => [...document.querySelectorAll('textarea')]
         .some(e => e.value.includes('阻断问题 1')));
@@ -68,7 +77,7 @@ async function main() {
       await page.waitForFunction(() => [...document.querySelectorAll('textarea')]
         .some(e => e.value.includes('阻断问题 0')));
     }
-    await page.getByRole('tab', { name: '事实审核', exact: true }).click();
+    await page.getByRole('radio', { name: '事实审核', exact: true }).click();
     await dropdown(page, '运行');
     await page.waitForFunction(() => [...document.querySelectorAll('textarea')]
       .some(e => e.value.includes('OpenAI') && e.value.includes('developed_by')));
@@ -102,7 +111,7 @@ async function main() {
     let expectedRevisions = 2;
     if (process.env.PRISMKE_REVIEW_BROWSER_CORRECTIONS === '1') {
       const runId = runs[0].run_id;
-      await page.getByRole('tab', { name: '审核历史与纠正', exact: true }).click();
+      await page.getByRole('radio', { name: '审核历史与纠正', exact: true }).click();
       await dropdown(page, '纠正运行');
       await dropdown(page, '历史任务', 1);
       await dropdown(page, '原审核事件');
@@ -127,7 +136,7 @@ async function main() {
       await page.getByRole('checkbox', { name: '确认应用纠正并保留历史', exact: true }).check();
       await page.getByRole('button', { name: '确认应用纠正', exact: true }).click();
       await page.waitForFunction(async rid => (await (await fetch(`/api/v1/runs/${rid}`)).json()).pending_correction_id !== null, runId);
-      await page.getByRole('tab', { name: '事实审核', exact: true }).click();
+      await page.getByRole('radio', { name: '事实审核', exact: true }).click();
       await page.getByRole('button', { name: '刷新', exact: true }).click();
       await page.getByRole('button', { name: '继续处理', exact: true }).click();
       await page.waitForFunction(() => [...document.querySelectorAll('textarea')]
@@ -140,7 +149,7 @@ async function main() {
       assert.notEqual(revision, runs[0].submission.revision_id);
       expectedRevisions = 3;
     }
-    await page.getByRole('tab', { name: '版本', exact: true }).click();
+    await page.getByRole('radio', { name: '版本管理', exact: true }).click();
     await page.getByRole('textbox', { name: '要回滚的 Revision', exact: true }).fill(revision);
     await page.getByRole('checkbox', { name: '我确认创建补偿 Revision', exact: true }).check();
     await page.getByRole('button', { name: '执行回滚', exact: true }).click();

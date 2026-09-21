@@ -31,10 +31,12 @@ from prismke.api.models import (
     CorrectionRequest,
     EntityReviewRequest,
     MergeProposalRequest,
+    RequestReconciliationRequest,
     ResumeRequest,
     ReviewRequest,
     RollbackRequest,
     RunAccepted,
+    RuntimeSettingsUpdate,
     SplitProposalRequest,
     ValidationExcludeRequest,
 )
@@ -257,6 +259,59 @@ def create_app(
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="run not found") from exc
         return service.executions.repository.events(run_id)
+
+    @api.get("/workspace/summary")
+    async def workspace_summary() -> object:
+        return await service.workspace_summary()
+
+    @api.get("/settings")
+    async def runtime_settings() -> object:
+        return service.settings_view()
+
+    @api.patch("/settings")
+    async def update_runtime_settings(request: RuntimeSettingsUpdate) -> object:
+        try:
+            return service.update_settings(
+                request.values,
+                [str(item) for item in request.clear_secrets],
+                request.operator,
+            )
+        except (ValueError, ProviderConfigurationError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @api.get("/runs/{run_id}/branch-progress")
+    async def branch_progress(run_id: str) -> object:
+        try:
+            return service.executions.branch_progress(run_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="run not found") from exc
+
+    @api.get("/runs/{run_id}/provider-requests")
+    async def provider_requests(run_id: str) -> object:
+        try:
+            service.show_run(run_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="run not found") from exc
+        return {
+            "requests": service.executions.repository.requests(run_id),
+            "reconciliations": [
+                item.model_dump(mode="json")
+                for item in service.executions.repository.reconciliations(run_id)
+            ],
+        }
+
+    @api.post("/runs/{run_id}/requests/{request_id}/reconcile")
+    async def reconcile_provider_request(
+        run_id: str, request_id: str, request: RequestReconciliationRequest
+    ) -> object:
+        if request.request_id != request_id:
+            raise HTTPException(status_code=422, detail="request id does not match path")
+        try:
+            return service.executions.reconcile_request(run_id, request)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="run not found") from exc
+        except (ExecutionConflict, LegacyCheckpointError) as exc:
+            raise HTTPException(status_code=409, detail={"code": str(exc)}) from exc
 
     @api.post("/runs/{run_id}/cancel")
     async def cancel_run(run_id: str, request: CancelRequest) -> object:
