@@ -353,7 +353,9 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
       .gradio-container { padding: 10px !important; }
     }
     """
-    with gr.Blocks(title="PrismKE 研究工作台", css=css, fill_height=True) as demo:
+    with gr.Blocks(
+        title="PrismKE 研究工作台", fill_height=True, analytics_enabled=False
+    ) as demo:
         with gr.Sidebar(open=True, elem_id="workspace-sidebar"):
             gr.Markdown(f"## PrismKE\n`{__version__}`")
             if service.review_metadata:
@@ -661,4 +663,4 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             config_outcome,
         )
 
-    return gr.mount_gradio_app(app, demo, path="/ui")
+    return gr.mount_gradio_app(app, demo, path="/ui", css=css)
