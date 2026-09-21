@@ -190,6 +190,54 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             for item in await service.search_entities(query, entity_type, limit)
         ]
 
+    def evidence_runs() -> Any:
+        choices = [
+            (f"{Path(state.input_path).name} · {state.status}", state.run_id)
+            for state in service.runs.list(limit=1000)
+        ]
+        return gr.update(choices=choices, value=choices[0][1] if choices else None)
+
+    def run_claims(run_id: str | None) -> Any:
+        if not run_id:
+            return gr.update(choices=[], value=None)
+        state = service.show_run(run_id)
+        choices = [
+            (
+                f"{claim.subject_id} · {claim.relation_id} · "
+                f"{claim.object_entity_id or claim.object_literal}",
+                claim.id,
+            )
+            for claim in state.claims
+        ]
+        return gr.update(choices=choices, value=choices[0][1] if choices else None)
+
+    def claim_evidence(run_id: str | None, claim_id: str | None) -> Any:
+        if not run_id or not claim_id:
+            return gr.update(choices=[], value=None)
+        state = service.show_run(run_id)
+        claim = next((item for item in state.claims if item.id == claim_id), None)
+        choices = claim.evidence_ids if claim else []
+        return gr.update(choices=choices, value=choices[0] if choices else None)
+
+    async def graph_search(
+        query: str, entity_type: str, limit: int
+    ) -> tuple[list[list[Any]], Any]:
+        candidates = await service.search_entities(query, entity_type, limit)
+        entities = {item.id: item for item in await service.graph_store.list_entities()}
+        rows = []
+        choices = []
+        for candidate in candidates:
+            entity = entities.get(candidate.entity_id)
+            name = entity.name if entity else candidate.entity_id
+            kind = entity.entity_type if entity else entity_type
+            rows.append(
+                [candidate.entity_id, name, kind, round(candidate.final_score, 4)]
+            )
+            choices.append(
+                (f"{name} · {kind} · {candidate.final_score:.3f}", candidate.entity_id)
+            )
+        return rows, gr.update(choices=choices, value=choices[0][1] if choices else None)
+
     def entity_reviews(status: str) -> list[dict[str, Any]]:
         return [
             item.model_dump(mode="json")
@@ -447,18 +495,47 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
 
             with gr.Tab("证据", id="evidence"):
                 gr.Markdown("## 证据查看")
-                evidence_id = gr.Textbox(label="Evidence ID")
+                with gr.Row():
+                    evidence_run = gr.Dropdown(label="运行", choices=[])
+                    evidence_claim = gr.Dropdown(label="Claim", choices=[])
+                evidence_id = gr.Dropdown(label="证据", choices=[])
                 evidence_button = gr.Button("读取证据")
                 evidence_metadata = gr.JSON(label="证据元数据")
                 evidence_preview = gr.Image(label="证据定位", type="filepath")
+                evidence_run.change(run_claims, evidence_run, evidence_claim).then(
+                    claim_evidence,
+                    [evidence_run, evidence_claim],
+                    evidence_id,
+                )
+                evidence_claim.change(
+                    claim_evidence,
+                    [evidence_run, evidence_claim],
+                    evidence_id,
+                )
                 evidence_button.click(
                     show_evidence, [evidence_id], [evidence_metadata, evidence_preview]
                 )
 
             with gr.Tab("图谱", id="graph"):
                 gr.Markdown("## 图谱浏览")
-                entity_id = gr.Textbox(label="Entity ID")
+                with gr.Row():
+                    graph_query = gr.Textbox(label="实体名称或别名")
+                    graph_entity_type = gr.Textbox(label="实体类型")
+                    graph_limit = gr.Slider(1, 20, value=10, step=1, label="候选数")
+                graph_search_button = gr.Button("搜索实体")
+                graph_candidates = gr.Dataframe(
+                    headers=["Entity ID", "名称", "类型", "得分"],
+                    interactive=False,
+                    wrap=True,
+                    label="搜索结果",
+                )
+                entity_id = gr.Dropdown(label="选择实体", choices=[])
                 depth = gr.Slider(1, 3, value=1, step=1, label="邻域深度")
+                graph_search_button.click(
+                    graph_search,
+                    [graph_query, graph_entity_type, graph_limit],
+                    [graph_candidates, entity_id],
+                )
                 graph_button = gr.Button("查询邻域")
                 graph_plot = gr.Plot(label="实体邻域图")
                 graph_output = gr.JSON(label="实体邻域")
@@ -603,6 +680,9 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         refresh_context.click(sidebar_run, [current_run], [current_run, run_context])
         current_run.change(sidebar_run, [current_run], [current_run, run_context])
         demo.load(sidebar_run, [current_run], [current_run, run_context])
+        demo.load(evidence_runs, outputs=evidence_run).then(
+            run_claims, evidence_run, evidence_claim
+        ).then(claim_evidence, [evidence_run, evidence_claim], evidence_id)
         demo.load(dashboard, outputs=[overview, recent_runs, graph_health])
         refresh_overview.click(dashboard, outputs=[overview, recent_runs, graph_health])
         run_button.click(
