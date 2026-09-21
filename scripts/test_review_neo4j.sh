@@ -13,6 +13,10 @@ if "$HOME_DIR/bin/neo4j" status >/dev/null 2>&1; then
     echo "Dedicated review test instance already running; refusing shared use" >&2
     exit 1
 fi
+# Stable test IDs make stale data look like a concurrent graph update. Start every
+# isolated run from an empty database after confirming that no test instance owns it.
+rm -rf "$WORKSPACE/data" "$WORKSPACE/run" "$WORKSPACE/logs"
+mkdir -p "$WORKSPACE/run" "$WORKSPACE/logs" "$WORKSPACE/data"
 "$HOME_DIR/bin/neo4j" start
 trap '"$HOME_DIR/bin/neo4j" stop >/dev/null 2>&1 || true' EXIT
 export PRISMKE_TEST_NEO4J=1
