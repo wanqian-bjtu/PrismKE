@@ -172,6 +172,7 @@ class BoundedReflectionService:
                             latency_ms=result.latency_ms,
                             status="unknown_usage",
                             error_code="missing_token_usage",
+                            warnings=result.warnings,
                         )
                     )
                     state.warnings.append(f"reflection_unknown_usage:{original.id}")
@@ -222,6 +223,7 @@ class BoundedReflectionService:
                         token_usage=result.total_tokens,
                         latency_ms=result.latency_ms,
                         status=status,
+                        warnings=result.warnings,
                     )
                 )
                 if status == "succeeded" and replacement is not None:

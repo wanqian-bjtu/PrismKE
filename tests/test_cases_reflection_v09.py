@@ -23,6 +23,7 @@ from prismke.domain import (
     ReviewEvent,
     WorkflowState,
 )
+from prismke.evaluation import evaluate_reflection_manifest
 from prismke.persistence import CaseRepository
 from prismke.providers import MockEmbeddingProvider, MockReflectionProvider
 from prismke.workflow import PrismKEService
@@ -324,3 +325,35 @@ def test_run_identity_changes_when_case_snapshot_changes(tmp_path: Path) -> None
     assert before.run_id != after.run_id
     assert before.case_snapshot_ids == []
     assert after.case_snapshot_ids == ["case:new"]
+
+
+@pytest.mark.asyncio
+async def test_reflection_evaluation_builds_complete_nine_cell_matrix(tmp_path: Path) -> None:
+    manifest = Path(__file__).parents[1] / "examples" / "eval_v0_9" / "manifest.json"
+    report = await evaluate_reflection_manifest(
+        manifest,
+        tmp_path / "evaluation",
+        settings=Settings(_env_file=None, runtime_dir=tmp_path / "runtime"),
+        reflection_provider_name="mock",
+        embedding_provider_name="mock",
+        token_limit=10_000,
+        stop_at=9_000,
+    )
+
+    assert len(report["configurations"]) == 9
+    assert all(len(item["samples"]) == 12 for item in report["configurations"])
+    assert report["metrics"]["max_attempts_per_candidate"] == 2
+    assert report["metrics"]["token_usage"] == 0
+    assert report["publish_ready"] is False
+
+
+@pytest.mark.asyncio
+async def test_reflection_evaluation_rejects_invalid_budget(tmp_path: Path) -> None:
+    manifest = Path(__file__).parents[1] / "examples" / "eval_v0_9" / "manifest.json"
+    with pytest.raises(ValueError, match="budget"):
+        await evaluate_reflection_manifest(
+            manifest,
+            tmp_path / "evaluation",
+            token_limit=100,
+            stop_at=100,
+        )

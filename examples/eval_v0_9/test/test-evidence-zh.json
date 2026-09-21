@@ -1,0 +1,73 @@
+{
+  "id": "test-evidence-zh",
+  "split": "test",
+  "language": "zh",
+  "category": "evidence",
+  "text": "星图引擎由北辰实验室开发。",
+  "candidate": {
+    "id": "candidate:test-evidence-zh",
+    "subject": {
+      "id": "mention:test-evidence-zh:subject",
+      "name": "星图引擎",
+      "entity_type": "Software",
+      "context": "星图引擎由北辰实验室开发。",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:missing"
+      ]
+    },
+    "relation": "developed_by",
+    "object": {
+      "id": "mention:test-evidence-zh:object",
+      "name": "北辰实验室",
+      "entity_type": "Organization",
+      "context": "星图引擎由北辰实验室开发。",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:missing"
+      ]
+    },
+    "confidence": 0.84,
+    "evidence_ids": [
+      "evidence:missing"
+    ],
+    "modalities": [
+      "text"
+    ],
+    "source_tool": "reflection_eval"
+  },
+  "expected_candidate": {
+    "id": "candidate:test-evidence-zh",
+    "subject": {
+      "id": "mention:test-evidence-zh:subject",
+      "name": "星图引擎",
+      "entity_type": "Software",
+      "context": "星图引擎由北辰实验室开发。",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:test-evidence-zh"
+      ]
+    },
+    "relation": "developed_by",
+    "object": {
+      "id": "mention:test-evidence-zh:object",
+      "name": "北辰实验室",
+      "entity_type": "Organization",
+      "context": "星图引擎由北辰实验室开发。",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:test-evidence-zh"
+      ]
+    },
+    "confidence": 0.84,
+    "evidence_ids": [
+      "evidence:test-evidence-zh"
+    ],
+    "modalities": [
+      "text"
+    ],
+    "source_tool": "reflection_eval"
+  },
+  "repairable": true,
+  "relevant_case_key": "evidence:zh"
+}

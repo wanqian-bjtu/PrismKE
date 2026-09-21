@@ -1,0 +1,73 @@
+{
+  "id": "test-domain-en",
+  "split": "test",
+  "language": "en",
+  "category": "domain",
+  "text": "Northstar Labs develops the AtlasFlow software.",
+  "candidate": {
+    "id": "candidate:test-domain-en",
+    "subject": {
+      "id": "mention:test-domain-en:subject",
+      "name": "AtlasFlow",
+      "entity_type": "Organization",
+      "context": "Northstar Labs develops the AtlasFlow software.",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:test-domain-en"
+      ]
+    },
+    "relation": "developed_by",
+    "object": {
+      "id": "mention:test-domain-en:object",
+      "name": "Northstar Labs",
+      "entity_type": "Organization",
+      "context": "Northstar Labs develops the AtlasFlow software.",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:test-domain-en"
+      ]
+    },
+    "confidence": 0.84,
+    "evidence_ids": [
+      "evidence:test-domain-en"
+    ],
+    "modalities": [
+      "text"
+    ],
+    "source_tool": "reflection_eval"
+  },
+  "expected_candidate": {
+    "id": "candidate:test-domain-en",
+    "subject": {
+      "id": "mention:test-domain-en:subject",
+      "name": "AtlasFlow",
+      "entity_type": "Software",
+      "context": "Northstar Labs develops the AtlasFlow software.",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:test-domain-en"
+      ]
+    },
+    "relation": "developed_by",
+    "object": {
+      "id": "mention:test-domain-en:object",
+      "name": "Northstar Labs",
+      "entity_type": "Organization",
+      "context": "Northstar Labs develops the AtlasFlow software.",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:test-domain-en"
+      ]
+    },
+    "confidence": 0.84,
+    "evidence_ids": [
+      "evidence:test-domain-en"
+    ],
+    "modalities": [
+      "text"
+    ],
+    "source_tool": "reflection_eval"
+  },
+  "repairable": true,
+  "relevant_case_key": "domain:en"
+}

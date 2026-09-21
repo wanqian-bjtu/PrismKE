@@ -1,0 +1,73 @@
+{
+  "id": "test-domain-zh-2",
+  "split": "test",
+  "language": "zh",
+  "category": "domain",
+  "text": "星图引擎是一款由北辰实验室开发的软件。",
+  "candidate": {
+    "id": "candidate:test-domain-zh-2",
+    "subject": {
+      "id": "mention:test-domain-zh-2:subject",
+      "name": "星图引擎",
+      "entity_type": "Organization",
+      "context": "星图引擎是一款由北辰实验室开发的软件。",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:test-domain-zh-2"
+      ]
+    },
+    "relation": "developed_by",
+    "object": {
+      "id": "mention:test-domain-zh-2:object",
+      "name": "北辰实验室",
+      "entity_type": "Organization",
+      "context": "星图引擎是一款由北辰实验室开发的软件。",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:test-domain-zh-2"
+      ]
+    },
+    "confidence": 0.84,
+    "evidence_ids": [
+      "evidence:test-domain-zh-2"
+    ],
+    "modalities": [
+      "text"
+    ],
+    "source_tool": "reflection_eval"
+  },
+  "expected_candidate": {
+    "id": "candidate:test-domain-zh-2",
+    "subject": {
+      "id": "mention:test-domain-zh-2:subject",
+      "name": "星图引擎",
+      "entity_type": "Software",
+      "context": "星图引擎是一款由北辰实验室开发的软件。",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:test-domain-zh-2"
+      ]
+    },
+    "relation": "developed_by",
+    "object": {
+      "id": "mention:test-domain-zh-2:object",
+      "name": "北辰实验室",
+      "entity_type": "Organization",
+      "context": "星图引擎是一款由北辰实验室开发的软件。",
+      "modality": "text",
+      "evidence_ids": [
+        "evidence:test-domain-zh-2"
+      ]
+    },
+    "confidence": 0.84,
+    "evidence_ids": [
+      "evidence:test-domain-zh-2"
+    ],
+    "modalities": [
+      "text"
+    ],
+    "source_tool": "reflection_eval"
+  },
+  "repairable": true,
+  "relevant_case_key": "domain:zh"
+}

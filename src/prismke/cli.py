@@ -20,6 +20,7 @@ from prismke.evaluation import (
     EntityLinkingEvaluationReport,
     evaluate_entity_linking_manifest,
     evaluate_manifest,
+    evaluate_reflection_manifest,
 )
 from prismke.evaluation.annotations import export_reviewed_annotations
 from prismke.governance import rebuild_entity_index
@@ -403,6 +404,38 @@ def validate_real_documents(
     finished = sum(case["status"] in {"completed", "awaiting_review"} for case in report["cases"])
     console.print(
         f"Attempted {len(report['cases'])}; finished {finished}; tokens={report['total_tokens']}"
+    )
+
+
+@app.command("evaluate-reflection")
+def evaluate_reflection_command(
+    manifest: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    output: Annotated[Path, typer.Option("--output", file_okay=False)],
+    reflection_provider: Annotated[str, typer.Option("--reflection-provider")] = "mock",
+    embedding_provider: Annotated[str, typer.Option("--embedding-provider")] = "mock",
+    token_limit: Annotated[int, typer.Option("--token-limit")] = 200_000,
+    stop_at: Annotated[int, typer.Option("--stop-at")] = 180_000,
+) -> None:
+    """Run the isolated nine-cell case retrieval and Reflection evaluation."""
+    if not 0 < stop_at < token_limit:
+        raise typer.BadParameter("budget must satisfy 0 < stop_at < token_limit")
+    report = asyncio.run(
+        evaluate_reflection_manifest(
+            manifest,
+            output,
+            reflection_provider_name=reflection_provider,
+            embedding_provider_name=embedding_provider,
+            token_limit=token_limit,
+            stop_at=stop_at,
+        )
+    )
+    _print_model(
+        {
+            "publish_ready": report["publish_ready"],
+            "metrics": report["metrics"],
+            "stopped_reason": report["stopped_reason"],
+            "report": str(output / "report.json"),
+        }
     )
     console.print(f"Report: {output / 'document-validation.json'}")
 

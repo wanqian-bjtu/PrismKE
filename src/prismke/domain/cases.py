@@ -108,4 +108,5 @@ class ReflectionAttempt(BaseModel):
         "unknown_usage",
     ]
     error_code: str | None = None
+    warnings: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
