@@ -12,7 +12,7 @@ def build_correction_tab(service: PrismKEService) -> None:
     from prismke.web.review import ReviewController
 
     controller = ReviewController(service)
-    with gr.Tab("审核历史与纠正"):
+    with gr.Tab("审核历史与纠正", id="corrections"):
         run = gr.Dropdown(controller.runs(), label="纠正运行", value=None)
         refresh = gr.Button("刷新审核历史")
         task = gr.Dropdown(label="历史任务", choices=[], value=None)

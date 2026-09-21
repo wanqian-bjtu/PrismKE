@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "prismke"
-version = "0.7.0"
+version = "0.8.0.dev0"
 description = "Schema-guided, evidence-aware multimodal knowledge graph construction"
 readme = "README.md"
 requires-python = ">=3.11,<3.12"

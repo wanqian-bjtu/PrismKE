@@ -146,8 +146,11 @@ def build_review_tabs(service: PrismKEService) -> None:
     import gradio as gr
 
     controller = ReviewController(service)
-    for kind, title in (("entity", "实体审核"), ("claim", "事实审核")):
-        with gr.Tab(title):
+    for kind, title, tab_id in (
+        ("entity", "实体审核", "entity-review"),
+        ("claim", "事实审核", "claim-review"),
+    ):
+        with gr.Tab(title, id=tab_id):
             _build_review_tab(gr, controller, kind)
     from prismke.web.corrections import build_correction_tab
 

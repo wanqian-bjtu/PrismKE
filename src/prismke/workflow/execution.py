@@ -12,7 +12,12 @@ from filelock import FileLock, Timeout
 from prismke.core.errors import LegacyCheckpointError
 from prismke.core.execution_control import ExecutionPaused, current_execution
 from prismke.core.ids import canonical_hash, file_sha256
-from prismke.domain.execution import ExecutionStatus, ExecutionTask
+from prismke.domain.execution import (
+    BranchProgress,
+    ExecutionStatus,
+    ExecutionTask,
+    RequestReconciliation,
+)
 from prismke.persistence.execution import ExecutionConflict, ExecutionRepository
 from prismke.providers.base import EmbeddingProvider, LLMProvider, OCRProvider, VLMProvider
 
@@ -260,6 +265,112 @@ class ExecutionManager:
             "active": active,
             "can_cancel": bool(active and not legacy),
             "blocked": bool(legacy or blocked),
+        }
+
+    def branch_progress(self, run_id: str) -> list[BranchProgress]:
+        state = self.service.show_run(run_id)
+        task = self.repository.get(run_id)
+        updated = task.updated_at if task else state.revision.created_at if state.revision else None
+        if updated is None:
+            from datetime import UTC, datetime
+
+            updated = datetime.now(UTC)
+        node = task.node if task else state.current_node
+        active = bool(task and task.status in ACTIVE)
+        failed = bool(task and task.status == "failed")
+        calls = state.provider_calls
+        document = state.document
+        text_total = 1 if document and document.text_blocks else 0
+        text_done = min(
+            text_total,
+            sum(c.provider == "llm" and c.status == "succeeded" for c in calls),
+        )
+        visual_total = len(document.media_assets) if document else 0
+        visual_done = min(
+            visual_total,
+            sum(c.provider == "vlm" and c.status == "succeeded" for c in calls),
+        )
+        ocr_total = (
+            sum(asset.requires_ocr for asset in document.media_assets) if document else 0
+        )
+        node_order = [
+            "ingest",
+            "parse_document",
+            "materialize_visual_assets",
+            "run_ocr",
+            "persist_evidence",
+            "load_schema",
+            "extract_text_claims",
+            "extract_visual_claims",
+            "align_modalities",
+            "resolve_entities",
+            "normalize_claims",
+            "detect_conflicts",
+            "route_by_risk",
+            "prepare_graph_commit",
+            "commit_graph",
+        ]
+        position = node_order.index(node) if node in node_order else -1
+
+        def status(completed: int, total: int, start: str, done: str) -> str:
+            if total == 0:
+                return "disabled"
+            if completed >= total or (done in node_order and position > node_order.index(done)):
+                return "completed"
+            if failed and node == start:
+                return "failed"
+            if active and node == start:
+                return "running"
+            return "pending"
+
+        ocr_done = ocr_total if position > node_order.index("run_ocr") else 0
+        commit_done = int(state.revision is not None or bool(task and task.commit_applied))
+        return [
+            BranchProgress(
+                branch="text",
+                status=status(text_done, text_total, "extract_text_claims", "extract_text_claims"),
+                completed=text_done,
+                total=text_total,
+                updated_at=updated,
+            ),
+            BranchProgress(
+                branch="visual",
+                status=status(
+                    visual_done,
+                    visual_total,
+                    "extract_visual_claims",
+                    "extract_visual_claims",
+                ),
+                completed=visual_done,
+                total=visual_total,
+                current_asset=None,
+                updated_at=updated,
+            ),
+            BranchProgress(
+                branch="ocr",
+                status=status(ocr_done, ocr_total, "run_ocr", "run_ocr"),
+                completed=ocr_done,
+                total=ocr_total,
+                updated_at=updated,
+            ),
+            BranchProgress(
+                branch="commit",
+                status=status(commit_done, 1, "commit_graph", "commit_graph"),
+                completed=commit_done,
+                total=1,
+                updated_at=updated,
+            ),
+        ]
+
+    def reconcile_request(
+        self, run_id: str, decision: RequestReconciliation
+    ) -> dict[str, Any]:
+        self.compatible(self.service.show_run(run_id))
+        event = self.repository.reconcile_request(run_id, decision)
+        return {
+            "event": event.model_dump(mode="json"),
+            "execution": self.view(run_id),
+            "requests": self.repository.requests(run_id),
         }
 
     def health(self) -> dict[str, Any]:

@@ -8,7 +8,7 @@ from prismke.workflow import PrismKEService
 
 def build_validation_tab(gr: Any, service: PrismKEService) -> None:
     controller = ReviewController(service)
-    with gr.Tab("校验问题"):
+    with gr.Tab("校验问题", id="validation"):
         with gr.Row():
             run = gr.Dropdown(label="校验运行", choices=controller.runs(), value=None)
             stage = gr.Dropdown(
