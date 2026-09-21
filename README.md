@@ -10,6 +10,8 @@ PrismKE 是一个面向通用多模态知识图谱构建的研究型项目，目
 
 `v0.8.0` 软件版本与流程协议均为 `0.8.0`。工作台验收范围、浏览器视口和安全边界见 [v0.8 工作台与运行治理验收报告](docs/v0.8工作台与运行治理验收报告.md)。未知 Provider 请求只有经审计确认为未发送或未计费后才允许重试；页面不显示或编辑 API Key、Neo4j 密码。
 
+`dev/v0.9` 增加不可变审核案例库、BGE-M3 案例检索和受预算约束的 Reflection。案例只来源于 v0.9 中具有审核人、原因和可验证证据的最终决定；Reflection 默认关闭，不能新增 Schema、伪造证据、绕过硬校验或自动批准事实。使用方法见 [v0.9 案例检索与 Reflection 使用说明](docs/v0.9案例检索与Reflection使用说明.md)，真实模型验收结果见 [v0.9.0 评测与验收报告](docs/v0.9.0评测与验收报告.md)。
+
 ## 当前能力
 
 统一校验自 `v0.5.0` 引入，后续版本保留违规候选隔离、独立排除审计和存储提交硬校验。不同流程协议的检查点不可混用；旧审核工作区继续使用 v0.4.1。
@@ -58,6 +60,15 @@ PrismKE 是一个面向通用多模态知识图谱构建的研究型项目，目
 - `dev/v0.4` 增加可选择的实体/事实审核队列、证据预览及隔离评测运行接续；导入运行不会重新调用模型，写图前必须单独确认。
 - 真实材料的三条任务及访问步骤见 [隔离审核操作说明](docs/隔离审核操作说明.md)。人工确认前不宣称真实审核后闭环已经验收。
 
+### 案例检索与 Reflection
+
+- v0.9 将符合资格的实体和事实审核决定投影为不可变 Good/Bad Case；纠正会生成新案例并停用被替代案例，不覆盖历史。
+- 案例按任务类型、Schema 指纹和语言过滤，再使用 BGE-M3 Dense Embedding 进行 Top-K 召回。
+- 每个运行冻结案例快照、检索策略和 Embedding 指纹，案例库后续变化不会改变该运行的恢复结果。
+- Reflection 仅处理结构、Schema、引用和证据问题，单候选最多两次，并受独立 Token 与时间预算约束。
+- 修复后的候选必须再次通过统一校验；失败、问题增加、未知用量或不确定请求均保留原候选并转人工处理。
+- 案例只作为不可信的结构化示例进入 Prompt，不作为指令，也不会直接批准候选。
+
 ### 图谱与版本
 
 - 默认使用支持文件锁和原子替换的本地 JSON GraphStore。
@@ -78,6 +89,10 @@ ingest
   -> load_schema
        |-> extract_text_claims ---|
        |-> extract_visual_claims -|-> align_modalities
+  -> validate_candidates
+  -> retrieve_cases
+  -> bounded_reflection
+  -> validate_candidates
   -> resolve_entities
        |-> route_entity_reviews -> 人工链接或创建 NIL -> resume
   -> normalize_claims
@@ -164,6 +179,29 @@ prismke review RUN_ID --claim-id CLAIM_ID --decision reject
 
 ```bash
 prismke resume RUN_ID
+```
+
+启用案例检索与 Reflection 时，需要显式选择模式、Provider 和预算：
+
+```bash
+prismke run examples/sample.md \
+  --schema configs/schemas/example.yaml \
+  --provider mock \
+  --cases good_bad \
+  --reflection \
+  --reflection-provider mock \
+  --reflection-max-attempts 2 \
+  --reflection-token-budget 20000 \
+  --reflection-time-budget 180
+```
+
+案例库维护命令不会物理删除历史案例：
+
+```bash
+prismke list-cases --type good --task-type claim
+prismke disable-case CASE_ID --operator researcher --reason "已被纠正事件替代"
+prismke rebuild-case-index --dry-run
+prismke rebuild-case-index
 ```
 
 ## Mock 输入格式
