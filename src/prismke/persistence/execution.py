@@ -293,7 +293,9 @@ class ExecutionRepository:
             task.version += 1
             task.reason = f"REQUEST_RECONCILED:{decision.outcome}"
             self._write(db, task)
-            sequence = int(cursor.lastrowid)
+            if cursor.lastrowid is None:
+                raise ExecutionConflict("RECONCILIATION_EVENT_NOT_SAVED")
+            sequence = cursor.lastrowid
         return RequestReconciliationEvent(sequence=sequence, **payload)
 
     def reconciliations(self, run_id: str) -> list[RequestReconciliationEvent]:
