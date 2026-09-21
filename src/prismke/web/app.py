@@ -246,7 +246,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         )
         return task.model_dump(mode="json")
 
-    async def dashboard() -> tuple[str, list[list[Any]], dict[str, Any]]:
+    async def dashboard() -> tuple[str, list[list[Any]], str]:
         summary = await service.workspace_summary()
         counts = summary["run_counts"]
         headline = (
@@ -271,7 +271,12 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     execution["updated_at"] or "",
                 ]
             )
-        return headline, recent, summary["graph_health"]
+        graph = summary["graph_health"]
+        graph_text = (
+            f"**{graph['backend']}** · "
+            f"{'健康' if graph['healthy'] else '异常'} · {graph['message']}"
+        )
+        return headline, recent, graph_text
 
     def sidebar_run(run_id: str | None) -> tuple[Any, str]:
         states = service.runs.list(limit=1000)
@@ -294,12 +299,8 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
     def save_settings(
         llm_base_url: str,
         llm_model: str,
-        llm_key: str,
-        clear_llm: bool,
         vlm_base_url: str,
         vlm_model: str,
-        vlm_key: str,
-        clear_vlm: bool,
         ocr_device: str,
         ocr_lang: str,
         ocr_model: str,
@@ -307,8 +308,6 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         neo4j_uri: str,
         neo4j_user: str,
         neo4j_database: str,
-        neo4j_password: str,
-        clear_neo4j: bool,
         operator: str,
     ) -> dict[str, Any]:
         values: dict[str, Any] = {
@@ -324,25 +323,13 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             "neo4j_user": neo4j_user,
             "neo4j_database": neo4j_database,
         }
-        if llm_key.strip():
-            values["llm_api_key"] = llm_key.strip()
-        if vlm_key.strip():
-            values["vlm_api_key"] = vlm_key.strip()
-        if neo4j_password.strip():
-            values["neo4j_password"] = neo4j_password.strip()
-        clear = []
-        if clear_llm:
-            clear.append("llm_api_key")
-        if clear_vlm:
-            clear.append("vlm_api_key")
-        if clear_neo4j:
-            clear.append("neo4j_password")
-        return service.update_settings(values, clear, operator)
+        return service.update_settings(values, [], operator)
 
     claim_headers = ["Claim ID", "主语", "关系", "宾语", "置信度", "状态", "证据"]
     public_settings = service.settings_view()
     css = """
-    #workspace-tabs > .tab-nav { display: none !important; }
+    #workspace-tabs > .tab-wrapper > .tab-container[role="tablist"],
+    #workspace-tabs > .tab-wrapper > .overflow-menu { display: none !important; }
     #workspace-sidebar { border-right: 1px solid #e5e7eb; background: #fafafa; }
     #workspace-sidebar .wrap { gap: 8px; }
     .workspace-title h1 { font-size: 24px !important; margin: 0 0 4px; letter-spacing: 0; }
@@ -400,20 +387,14 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             with gr.Accordion("模型与后端设置", open=False):
                 llm_base = gr.Textbox(label="LLM Base URL", value=public_settings["llm_base_url"])
                 llm_model = gr.Textbox(label="LLM 模型别名", value=public_settings["llm_model"])
-                llm_key = gr.Textbox(
-                    label="更新 LLM API Key",
-                    type="password",
-                    placeholder="已配置" if public_settings["llm_api_key"] else "未配置",
-                )
-                clear_llm = gr.Checkbox(label="清除 LLM API Key")
                 vlm_base = gr.Textbox(label="VLM Base URL", value=public_settings["vlm_base_url"])
                 vlm_model = gr.Textbox(label="VLM 模型别名", value=public_settings["vlm_model"])
-                vlm_key = gr.Textbox(
-                    label="更新 VLM API Key",
-                    type="password",
-                    placeholder="已配置" if public_settings["vlm_api_key"] else "未配置",
+                gr.Markdown(
+                    "**密钥状态**  "
+                    f"LLM：{'已配置' if public_settings['llm_api_key'] else '未配置'} · "
+                    f"VLM：{'已配置' if public_settings['vlm_api_key'] else '未配置'}  \n"
+                    "API Key 仅在服务器 `.env` 或安全后端中管理，页面不显示或编辑。"
                 )
-                clear_vlm = gr.Checkbox(label="清除 VLM API Key")
                 ocr_device = gr.Textbox(label="OCR 设备", value=public_settings["ocr_device"])
                 ocr_lang = gr.Textbox(label="OCR 语言", value=public_settings["ocr_lang"])
                 ocr_model = gr.Textbox(label="OCR 模型", value=public_settings["ocr_model"])
@@ -425,12 +406,11 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 neo4j_database = gr.Textbox(
                     label="Neo4j 数据库", value=public_settings["neo4j_database"]
                 )
-                neo4j_password = gr.Textbox(
-                    label="更新 Neo4j 密码",
-                    type="password",
-                    placeholder="已配置" if public_settings["neo4j_password"] else "未配置",
+                gr.Markdown(
+                    "**Neo4j 密码：** "
+                    f"{'已配置' if public_settings['neo4j_password'] else '未配置'}  \n"
+                    "密码仅在服务器配置中管理。"
                 )
-                clear_neo4j = gr.Checkbox(label="清除 Neo4j 密码")
                 config_operator = gr.Textbox(label="配置操作者")
                 save_config = gr.Button("保存设置", variant="primary")
                 config_outcome = gr.JSON(label="设置结果")
@@ -446,7 +426,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     wrap=True,
                     label="最近运行",
                 )
-                graph_health = gr.JSON(label="图存储健康状态")
+                graph_health = gr.Markdown(label="图存储健康状态")
 
             with gr.Tab("新建构建", id="build"):
                 gr.Markdown("## 新建知识构建")
@@ -643,12 +623,8 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             [
                 llm_base,
                 llm_model,
-                llm_key,
-                clear_llm,
                 vlm_base,
                 vlm_model,
-                vlm_key,
-                clear_vlm,
                 ocr_device,
                 ocr_lang,
                 ocr_model,
@@ -656,8 +632,6 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 neo4j_uri,
                 neo4j_user,
                 neo4j_database,
-                neo4j_password,
-                clear_neo4j,
                 config_operator,
             ],
             config_outcome,
