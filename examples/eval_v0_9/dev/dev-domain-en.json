@@ -3,14 +3,14 @@
   "split": "dev",
   "language": "en",
   "category": "domain",
-  "text": "AtlasFlow was developed by Northstar Labs.",
+  "text": "RiverDB was developed by Contoso Data.",
   "candidate": {
     "id": "candidate:dev-domain-en",
     "subject": {
       "id": "mention:dev-domain-en:subject",
-      "name": "AtlasFlow",
+      "name": "RiverDB",
       "entity_type": "Organization",
-      "context": "AtlasFlow was developed by Northstar Labs.",
+      "context": "RiverDB was developed by Contoso Data.",
       "modality": "text",
       "evidence_ids": [
         "evidence:dev-domain-en"
@@ -19,9 +19,9 @@
     "relation": "developed_by",
     "object": {
       "id": "mention:dev-domain-en:object",
-      "name": "Northstar Labs",
+      "name": "Contoso Data",
       "entity_type": "Organization",
-      "context": "AtlasFlow was developed by Northstar Labs.",
+      "context": "RiverDB was developed by Contoso Data.",
       "modality": "text",
       "evidence_ids": [
         "evidence:dev-domain-en"
@@ -40,9 +40,9 @@
     "id": "candidate:dev-domain-en",
     "subject": {
       "id": "mention:dev-domain-en:subject",
-      "name": "AtlasFlow",
+      "name": "RiverDB",
       "entity_type": "Software",
-      "context": "AtlasFlow was developed by Northstar Labs.",
+      "context": "RiverDB was developed by Contoso Data.",
       "modality": "text",
       "evidence_ids": [
         "evidence:dev-domain-en"
@@ -51,9 +51,9 @@
     "relation": "developed_by",
     "object": {
       "id": "mention:dev-domain-en:object",
-      "name": "Northstar Labs",
+      "name": "Contoso Data",
       "entity_type": "Organization",
-      "context": "AtlasFlow was developed by Northstar Labs.",
+      "context": "RiverDB was developed by Contoso Data.",
       "modality": "text",
       "evidence_ids": [
         "evidence:dev-domain-en"

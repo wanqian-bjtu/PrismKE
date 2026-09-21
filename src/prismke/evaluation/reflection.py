@@ -84,6 +84,11 @@ def _seed_cases(
     schema_fingerprint: str,
 ) -> dict[str, str]:
     relevant: dict[str, str] = {}
+    issue_codes = {
+        "relation": "UNKNOWN_RELATION",
+        "domain": "SCHEMA_DOMAIN_RANGE",
+        "evidence": "UNKNOWN_EVIDENCE",
+    }
     for sample in samples:
         original = CandidateClaim.model_validate(sample["candidate"])
         corrected = CandidateClaim.model_validate(sample["expected_candidate"])
@@ -103,7 +108,9 @@ def _seed_cases(
                     task_type="claim",
                     schema_fingerprint=schema_fingerprint,
                     language=str(sample["language"]),
-                    input_summary=_summary(candidate),
+                    input_summary=(
+                        f"{issue_codes[str(sample['category'])]} | {_summary(candidate)}"
+                    ),
                     candidate_snapshot={"candidate": candidate.model_dump(mode="json")},
                     decision=decision,
                     reasons=[f"reviewed development example: {sample['category']}"],
@@ -278,8 +285,7 @@ async def evaluate_reflection_manifest(
             retrieved_ids = [item.case_id for item in state.retrieved_cases]
             relevant_id = relevant.get(str(sample.get("relevant_case_key")))
             evidence_checks = [
-                await evidence_store.exists(item)
-                and await evidence_store.verify(item)
+                await evidence_store.exists(item) and await evidence_store.verify(item)
                 for item in output_candidate.evidence_ids
             ]
             evidence_valid = all(evidence_checks)

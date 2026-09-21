@@ -208,6 +208,24 @@ class ValidationService:
             if schema.relation(c.relation) is None:
                 add("UNKNOWN_RELATION", "schema", "relation", "关系未声明，宽松模式也不允许写图")
             relation = schema.relation(c.relation)
+            if relation and relation.domain:
+                subject_type = schema.entity_type(c.subject.entity_type)
+                if subject_type not in relation.domain:
+                    add(
+                        "SCHEMA_DOMAIN_RANGE",
+                        "schema",
+                        "subject.entity_type",
+                        "主语类型不满足关系 domain 约束",
+                    )
+            if relation and relation.range and isinstance(c.object, EntityMention):
+                object_type = schema.entity_type(c.object.entity_type)
+                if object_type not in relation.range:
+                    add(
+                        "SCHEMA_DOMAIN_RANGE",
+                        "schema",
+                        "object.entity_type",
+                        "宾语类型不满足关系 range 约束",
+                    )
             if relation and relation.range and not isinstance(c.object, EntityMention):
                 add(
                     "SCHEMA_DOMAIN_RANGE",

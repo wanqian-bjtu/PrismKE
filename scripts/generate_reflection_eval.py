@@ -58,8 +58,16 @@ def claim(
     evidence_id: str,
 ) -> dict[str, Any]:
     zh = sample_id.endswith("zh") or "zh-" in sample_id
-    subject = "星图引擎" if zh else "AtlasFlow"
-    organization = "北辰实验室" if zh else "Northstar Labs"
+    category = next(
+        (item for item in ("relation", "domain", "evidence") if item in sample_id),
+        "relation",
+    )
+    names = {
+        "relation": (("星图引擎", "北辰实验室"), ("AtlasFlow", "Northstar Labs")),
+        "domain": (("流云数据库", "乾元科技"), ("RiverDB", "Contoso Data")),
+        "evidence": (("新星图谱", "兰庭系统"), ("NovaGraph", "Orchid Systems")),
+    }
+    subject, organization = names[category][0 if zh else 1]
     return {
         "id": f"candidate:{sample_id}",
         "subject": mention(sample_id, "subject", subject, subject_type, evidence_id, text),
@@ -132,13 +140,17 @@ def corpus() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         ),
         repair_sample("dev-relation-zh", "dev", "zh", "relation", "星图引擎由北辰实验室开发。"),
         repair_sample(
-            "dev-domain-en", "dev", "en", "domain", "AtlasFlow was developed by Northstar Labs."
+            "dev-domain-en", "dev", "en", "domain", "RiverDB was developed by Contoso Data."
         ),
-        repair_sample("dev-domain-zh", "dev", "zh", "domain", "星图引擎由北辰实验室开发。"),
+        repair_sample("dev-domain-zh", "dev", "zh", "domain", "流云数据库由乾元科技开发。"),
         repair_sample(
-            "dev-evidence-en", "dev", "en", "evidence", "AtlasFlow was developed by Northstar Labs."
+            "dev-evidence-en",
+            "dev",
+            "en",
+            "evidence",
+            "NovaGraph was developed by Orchid Systems.",
         ),
-        repair_sample("dev-evidence-zh", "dev", "zh", "evidence", "星图引擎由北辰实验室开发。"),
+        repair_sample("dev-evidence-zh", "dev", "zh", "evidence", "新星图谱由兰庭系统开发。"),
     ]
     test = [
         repair_sample(
@@ -156,17 +168,17 @@ def corpus() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
             "test",
             "en",
             "domain",
-            "Northstar Labs develops the AtlasFlow software.",
+            "Contoso Data develops the RiverDB software.",
         ),
-        repair_sample("test-domain-zh", "test", "zh", "domain", "北辰实验室开发了软件星图引擎。"),
+        repair_sample("test-domain-zh", "test", "zh", "domain", "乾元科技开发了流云数据库软件。"),
         repair_sample(
             "test-evidence-en",
             "test",
             "en",
             "evidence",
-            "AtlasFlow was developed by Northstar Labs.",
+            "NovaGraph was developed by Orchid Systems.",
         ),
-        repair_sample("test-evidence-zh", "test", "zh", "evidence", "星图引擎由北辰实验室开发。"),
+        repair_sample("test-evidence-zh", "test", "zh", "evidence", "新星图谱由兰庭系统开发。"),
         repair_sample(
             "test-relation-en-2",
             "test",
@@ -175,10 +187,14 @@ def corpus() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
             "The developer of AtlasFlow is Northstar Labs.",
         ),
         repair_sample(
-            "test-domain-zh-2", "test", "zh", "domain", "星图引擎是一款由北辰实验室开发的软件。"
+            "test-domain-zh-2", "test", "zh", "domain", "流云数据库是一款由乾元科技开发的软件。"
         ),
         repair_sample(
-            "test-evidence-en-2", "test", "en", "evidence", "Northstar Labs developed AtlasFlow."
+            "test-evidence-en-2",
+            "test",
+            "en",
+            "evidence",
+            "Orchid Systems developed NovaGraph.",
         ),
         ordinary_sample(
             "test-valid-en", "en", "AtlasFlow was developed by Northstar Labs.", valid=True

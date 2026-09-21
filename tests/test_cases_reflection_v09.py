@@ -18,6 +18,7 @@ from prismke.domain import (
     EvidenceRef,
     Modality,
     OutputSchema,
+    ReflectionRequest,
     ReflectionResult,
     RelationDef,
     ReviewEvent,
@@ -195,7 +196,7 @@ async def test_case_snapshot_can_retrieve_case_disabled_after_run_creation(
 async def test_reflection_repairs_candidate_and_preserves_evidence() -> None:
     state = workflow_state("unknown_relation")
 
-    def repair(request: object) -> CandidateClaim:
+    def repair(request: ReflectionRequest) -> CandidateClaim:
         original = request.candidate
         return original.model_copy(update={"relation": "related_to"})
 
@@ -213,6 +214,30 @@ async def test_reflection_repairs_candidate_and_preserves_evidence() -> None:
 
 
 @pytest.mark.asyncio
+async def test_candidate_domain_error_triggers_reflection_before_entity_resolution() -> None:
+    state = workflow_state()
+    state.output_schema.relations[0].domain = ["Thing"]
+    state.candidates[0].subject.entity_type = "Organization"
+    state.original_candidates[0].subject.entity_type = "Organization"
+    state.output_schema.entity_types.append(EntityTypeDef(id="Organization"))
+
+    def repair(request: ReflectionRequest) -> CandidateClaim:
+        original = request.candidate
+        subject = original.subject.model_copy(update={"entity_type": "Thing"})
+        return original.model_copy(update={"subject": subject})
+
+    result = await BoundedReflectionService(
+        MockReflectionProvider(repair),
+        None,
+        MemoryEvidenceStore(evidence()),
+    ).run(state)
+
+    assert result.candidates[0].subject.entity_type == "Thing"
+    assert result.reflection_attempts[0].status == "succeeded"
+    assert result.validation.blocking_count == 0
+
+
+@pytest.mark.asyncio
 async def test_reflection_unknown_usage_stops_without_replacing_candidate() -> None:
     state = workflow_state("unknown_relation")
 
@@ -220,14 +245,14 @@ async def test_reflection_unknown_usage_stops_without_replacing_candidate() -> N
         def fingerprint(self) -> str:
             return "reflection:test:unknown"
 
-        async def reflect(self, request: object) -> ReflectionResult:
+        async def reflect(self, request: ReflectionRequest) -> ReflectionResult:
             original = request.candidate
             return ReflectionResult(
                 candidate=original.model_copy(update={"relation": "related_to"})
             )
 
     result = await BoundedReflectionService(
-        UnknownUsageProvider(),  # type: ignore[arg-type]
+        UnknownUsageProvider(),
         None,
         MemoryEvidenceStore(evidence()),
     ).run(state)

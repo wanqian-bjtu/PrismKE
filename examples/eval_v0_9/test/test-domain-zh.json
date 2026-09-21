@@ -3,14 +3,14 @@
   "split": "test",
   "language": "zh",
   "category": "domain",
-  "text": "北辰实验室开发了软件星图引擎。",
+  "text": "乾元科技开发了流云数据库软件。",
   "candidate": {
     "id": "candidate:test-domain-zh",
     "subject": {
       "id": "mention:test-domain-zh:subject",
-      "name": "星图引擎",
+      "name": "流云数据库",
       "entity_type": "Organization",
-      "context": "北辰实验室开发了软件星图引擎。",
+      "context": "乾元科技开发了流云数据库软件。",
       "modality": "text",
       "evidence_ids": [
         "evidence:test-domain-zh"
@@ -19,9 +19,9 @@
     "relation": "developed_by",
     "object": {
       "id": "mention:test-domain-zh:object",
-      "name": "北辰实验室",
+      "name": "乾元科技",
       "entity_type": "Organization",
-      "context": "北辰实验室开发了软件星图引擎。",
+      "context": "乾元科技开发了流云数据库软件。",
       "modality": "text",
       "evidence_ids": [
         "evidence:test-domain-zh"
@@ -40,9 +40,9 @@
     "id": "candidate:test-domain-zh",
     "subject": {
       "id": "mention:test-domain-zh:subject",
-      "name": "星图引擎",
+      "name": "流云数据库",
       "entity_type": "Software",
-      "context": "北辰实验室开发了软件星图引擎。",
+      "context": "乾元科技开发了流云数据库软件。",
       "modality": "text",
       "evidence_ids": [
         "evidence:test-domain-zh"
@@ -51,9 +51,9 @@
     "relation": "developed_by",
     "object": {
       "id": "mention:test-domain-zh:object",
-      "name": "北辰实验室",
+      "name": "乾元科技",
       "entity_type": "Organization",
-      "context": "北辰实验室开发了软件星图引擎。",
+      "context": "乾元科技开发了流云数据库软件。",
       "modality": "text",
       "evidence_ids": [
         "evidence:test-domain-zh"

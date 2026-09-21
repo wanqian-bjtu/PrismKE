@@ -3,14 +3,14 @@
   "split": "dev",
   "language": "en",
   "category": "evidence",
-  "text": "AtlasFlow was developed by Northstar Labs.",
+  "text": "NovaGraph was developed by Orchid Systems.",
   "candidate": {
     "id": "candidate:dev-evidence-en",
     "subject": {
       "id": "mention:dev-evidence-en:subject",
-      "name": "AtlasFlow",
+      "name": "NovaGraph",
       "entity_type": "Software",
-      "context": "AtlasFlow was developed by Northstar Labs.",
+      "context": "NovaGraph was developed by Orchid Systems.",
       "modality": "text",
       "evidence_ids": [
         "evidence:missing"
@@ -19,9 +19,9 @@
     "relation": "developed_by",
     "object": {
       "id": "mention:dev-evidence-en:object",
-      "name": "Northstar Labs",
+      "name": "Orchid Systems",
       "entity_type": "Organization",
-      "context": "AtlasFlow was developed by Northstar Labs.",
+      "context": "NovaGraph was developed by Orchid Systems.",
       "modality": "text",
       "evidence_ids": [
         "evidence:missing"
@@ -40,9 +40,9 @@
     "id": "candidate:dev-evidence-en",
     "subject": {
       "id": "mention:dev-evidence-en:subject",
-      "name": "AtlasFlow",
+      "name": "NovaGraph",
       "entity_type": "Software",
-      "context": "AtlasFlow was developed by Northstar Labs.",
+      "context": "NovaGraph was developed by Orchid Systems.",
       "modality": "text",
       "evidence_ids": [
         "evidence:dev-evidence-en"
@@ -51,9 +51,9 @@
     "relation": "developed_by",
     "object": {
       "id": "mention:dev-evidence-en:object",
-      "name": "Northstar Labs",
+      "name": "Orchid Systems",
       "entity_type": "Organization",
-      "context": "AtlasFlow was developed by Northstar Labs.",
+      "context": "NovaGraph was developed by Orchid Systems.",
       "modality": "text",
       "evidence_ids": [
         "evidence:dev-evidence-en"

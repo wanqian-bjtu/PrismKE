@@ -3,14 +3,14 @@
   "split": "test",
   "language": "en",
   "category": "domain",
-  "text": "Northstar Labs develops the AtlasFlow software.",
+  "text": "Contoso Data develops the RiverDB software.",
   "candidate": {
     "id": "candidate:test-domain-en",
     "subject": {
       "id": "mention:test-domain-en:subject",
-      "name": "AtlasFlow",
+      "name": "RiverDB",
       "entity_type": "Organization",
-      "context": "Northstar Labs develops the AtlasFlow software.",
+      "context": "Contoso Data develops the RiverDB software.",
       "modality": "text",
       "evidence_ids": [
         "evidence:test-domain-en"
@@ -19,9 +19,9 @@
     "relation": "developed_by",
     "object": {
       "id": "mention:test-domain-en:object",
-      "name": "Northstar Labs",
+      "name": "Contoso Data",
       "entity_type": "Organization",
-      "context": "Northstar Labs develops the AtlasFlow software.",
+      "context": "Contoso Data develops the RiverDB software.",
       "modality": "text",
       "evidence_ids": [
         "evidence:test-domain-en"
@@ -40,9 +40,9 @@
     "id": "candidate:test-domain-en",
     "subject": {
       "id": "mention:test-domain-en:subject",
-      "name": "AtlasFlow",
+      "name": "RiverDB",
       "entity_type": "Software",
-      "context": "Northstar Labs develops the AtlasFlow software.",
+      "context": "Contoso Data develops the RiverDB software.",
       "modality": "text",
       "evidence_ids": [
         "evidence:test-domain-en"
@@ -51,9 +51,9 @@
     "relation": "developed_by",
     "object": {
       "id": "mention:test-domain-en:object",
-      "name": "Northstar Labs",
+      "name": "Contoso Data",
       "entity_type": "Organization",
-      "context": "Northstar Labs develops the AtlasFlow software.",
+      "context": "Contoso Data develops the RiverDB software.",
       "modality": "text",
       "evidence_ids": [
         "evidence:test-domain-en"

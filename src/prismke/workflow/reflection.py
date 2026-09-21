@@ -93,13 +93,19 @@ class BoundedReflectionService:
                 retrieved = []
                 if case_types and self.retriever is not None:
                     object_context = getattr(current.object, "context", "")
-                    query = " | ".join(
+                    candidate_context = " | ".join(
                         [
                             current.subject.name,
                             current.relation,
                             getattr(current.object, "name", str(current.object)),
                             current.subject.context,
                             object_context,
+                        ]
+                    )
+                    query = " | ".join(
+                        [
+                            candidate_context,
+                            " ".join(item.code for item in issues),
                             " ".join(item.message for item in issues),
                         ]
                     )
@@ -107,7 +113,7 @@ class BoundedReflectionService:
                         query,
                         task_type="claim",
                         schema_fingerprint=schema_fingerprint,
-                        language=_language(query),
+                        language=_language(candidate_context),
                         case_types=case_types,
                         top_k=5,
                         use_location=f"candidate:{original.id}:attempt:{attempt_number}",
