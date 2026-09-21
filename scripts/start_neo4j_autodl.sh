@@ -2,12 +2,28 @@
 set -euo pipefail
 
 PROJECT_DIR="${PRISMKE_PROJECT_DIR:-/root/autodl-tmp/PrismKE}"
-NEO4J_HOME="${PROJECT_DIR}/runtime/neo4j/current"
+RUNTIME_DIR="${PRISMKE_RUNTIME_DIR:-${PROJECT_DIR}/runtime}"
+if [[ "${RUNTIME_DIR}" != /* ]]; then
+  RUNTIME_DIR="${PROJECT_DIR}/${RUNTIME_DIR}"
+fi
+NEO4J_HOME="${PRISMKE_NEO4J_HOME:-${RUNTIME_DIR}/neo4j/current}"
+NEO4J_CONF="${PRISMKE_NEO4J_CONF:-${NEO4J_HOME}/conf}"
+NEO4J_HTTP_PORT="${PRISMKE_NEO4J_HTTP_PORT:-7474}"
+NEO4J_BOLT_PORT="${PRISMKE_NEO4J_BOLT_PORT:-7687}"
 cd "${PROJECT_DIR}"
 
-if "${NEO4J_HOME}/bin/neo4j" status >/dev/null 2>&1; then
+[[ -d "${NEO4J_CONF}" ]] || {
+  echo "Neo4j configuration directory not found: ${NEO4J_CONF}" >&2
+  exit 1
+}
+
+neo4j_command() {
+  NEO4J_CONF="${NEO4J_CONF}" "${NEO4J_HOME}/bin/neo4j" "$@"
+}
+
+if neo4j_command status >/dev/null 2>&1; then
   echo "Neo4j is already running."
-  "${NEO4J_HOME}/bin/neo4j" status
+  neo4j_command status
   exit 0
 fi
 
@@ -21,9 +37,11 @@ if [[ -z "${PASSWORD}" ]]; then
   exit 1
 fi
 
-AUTH_FILE="${PROJECT_DIR}/runtime/neo4j/data/dbms/auth"
+AUTH_FILE="${RUNTIME_DIR}/neo4j/data/dbms/auth"
 if [[ ! -f "${AUTH_FILE}" ]]; then
-  "${NEO4J_HOME}/bin/neo4j-admin" dbms set-initial-password "${PASSWORD}" >/dev/null
+  NEO4J_CONF="${NEO4J_CONF}" \
+    "${NEO4J_HOME}/bin/neo4j-admin" dbms set-initial-password "${PASSWORD}" >/dev/null
 fi
-"${NEO4J_HOME}/bin/neo4j" start
-"${NEO4J_HOME}/bin/neo4j" status
+echo "Starting Neo4j on loopback HTTP ${NEO4J_HTTP_PORT} and Bolt ${NEO4J_BOLT_PORT}."
+neo4j_command start
+neo4j_command status
