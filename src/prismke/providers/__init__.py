@@ -8,6 +8,11 @@ from prismke.providers.embedding import (
 from prismke.providers.mock import MockLLMProvider, MockVLMProvider
 from prismke.providers.ocr import DisabledOCRProvider, MockOCRProvider, PaddleOCRProvider
 from prismke.providers.openai_compatible import OpenAICompatibleLLMProvider
+from prismke.providers.reflection import (
+    DisabledReflectionProvider,
+    MockReflectionProvider,
+    OpenAICompatibleReflectionProvider,
+)
 from prismke.providers.vlm import DisabledVLMProvider, OpenAICompatibleVLMProvider
 
 __all__ = [
@@ -22,4 +27,7 @@ __all__ = [
     "OpenAICompatibleLLMProvider",
     "OpenAICompatibleVLMProvider",
     "PaddleOCRProvider",
+    "DisabledReflectionProvider",
+    "MockReflectionProvider",
+    "OpenAICompatibleReflectionProvider",
 ]

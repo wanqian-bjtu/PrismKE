@@ -81,6 +81,16 @@ class ReviewService:
                 {"event_id": event.id, **event.model_dump(mode="json")},
             )
             self.repository.delivered(event.id)
+            if state.pipeline_version == "0.9.0":
+                try:
+                    await self.service.cases.project_review_event(event, state)
+                except Exception as exc:
+                    # Case projection is replayable and must never invalidate an accepted review.
+                    self.service.audit.record(
+                        "case_projection_pending",
+                        event.id,
+                        {"error_type": type(exc).__name__},
+                    )
             return state
         except Exception:
             summary = self.service.runs.load(state.run_id)

@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from prismke.domain.cases import ReflectionAttempt, RetrievedCase
 from prismke.domain.documents import (
     DocumentIR,
     EvidenceRef,
@@ -108,6 +109,17 @@ class WorkflowState(BaseModel):
     vlm_provider_fingerprint: str = "disabled"
     embedding_provider_name: str = "disabled"
     embedding_provider_fingerprint: str = "disabled"
+    case_mode: Literal["none", "good", "good_bad"] = "none"
+    case_snapshot_fingerprint: str = "cases:disabled"
+    case_snapshot_ids: list[str] = Field(default_factory=list)
+    case_retrieval_policy_version: str | None = None
+    reflection_enabled: bool = False
+    reflection_provider_name: str = "disabled"
+    reflection_provider_fingerprint: str = "reflection:disabled"
+    reflection_policy_version: str | None = None
+    reflection_max_attempts: int = 0
+    reflection_token_budget: int = 0
+    reflection_time_budget_seconds: float = 0.0
     allow_remote_assets: bool = False
     pipeline_version: str = "0.4.0"
     entity_resolution_policy_version: str | None = None
@@ -136,5 +148,10 @@ class WorkflowState(BaseModel):
     errors: list[str] = Field(default_factory=list)
     retry_count: int = 0
     provider_calls: list[ProviderCallRecord] = Field(default_factory=list)
+    retrieved_cases: list[RetrievedCase] = Field(default_factory=list)
+    reflection_attempts: list[ReflectionAttempt] = Field(default_factory=list)
+    repaired_issue_ids: list[str] = Field(default_factory=list)
+    reflection_token_usage: int = 0
+    reflection_elapsed_ms: float = 0.0
     review_workspace: bool = False
     submission_confirmed: bool = False

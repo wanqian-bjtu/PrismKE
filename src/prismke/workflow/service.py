@@ -32,6 +32,7 @@ from prismke.governance.validation import ValidationService
 from prismke.parsing import ParserRegistry
 from prismke.persistence import (
     AuditLog,
+    CaseRepository,
     EntityGovernanceRepository,
     FileEvidenceStore,
     JSONGraphStore,
@@ -44,17 +45,32 @@ from prismke.providers import (
     BGEM3EmbeddingProvider,
     DisabledEmbeddingProvider,
     DisabledOCRProvider,
+    DisabledReflectionProvider,
     DisabledVLMProvider,
     MockEmbeddingProvider,
     MockLLMProvider,
     MockOCRProvider,
+    MockReflectionProvider,
     MockVLMProvider,
     OpenAICompatibleLLMProvider,
+    OpenAICompatibleReflectionProvider,
     OpenAICompatibleVLMProvider,
     PaddleOCRProvider,
 )
-from prismke.providers.base import EmbeddingProvider, LLMProvider, OCRProvider, VLMProvider
+from prismke.providers.base import (
+    EmbeddingProvider,
+    LLMProvider,
+    OCRProvider,
+    ReflectionProvider,
+    VLMProvider,
+)
+from prismke.workflow.cases import (
+    CASE_RETRIEVAL_VERSION,
+    CaseRetriever,
+    CaseService,
+)
 from prismke.workflow.graph import PrismKEWorkflow
+from prismke.workflow.reflection import REFLECTION_POLICY_VERSION, BoundedReflectionService
 from prismke.workflow.review_workspace import validate_workspace_run, workspace_metadata
 
 PIPELINE_VERSION = "0.9.0"
@@ -87,6 +103,8 @@ class PrismKEService:
         self.entity_governance_repository = EntityGovernanceRepository(
             self.settings.entity_governance_path
         )
+        self.case_repository = CaseRepository(self.settings.cases_path)
+        self.cases = CaseService(self.case_repository, self.evidence_store)
         self._ocr_providers: dict[str, OCRProvider] = {}
         self._embedding_provider: EmbeddingProvider | None = None
         from prismke.workflow.reviews import ReviewService
@@ -422,6 +440,105 @@ class PrismKEService:
         self._embedding_provider = provider
         return provider
 
+    def reflection_provider(self, name: str) -> ReflectionProvider:
+        if name == "disabled":
+            return DisabledReflectionProvider()
+        if name == "mock":
+            return MockReflectionProvider()
+        if name != "openai-compatible":
+            raise ProviderConfigurationError(f"unknown Reflection provider: {name}")
+        if not self.settings.llm_api_key:
+            raise ProviderConfigurationError(
+                "openai-compatible Reflection requires PRISMKE_LLM_API_KEY"
+            )
+        if not self.settings.llm_model:
+            raise ProviderConfigurationError(
+                "openai-compatible Reflection requires PRISMKE_LLM_MODEL"
+            )
+        self._validate_endpoint(self.settings.llm_base_url, "PRISMKE_LLM_BASE_URL")
+        return OpenAICompatibleReflectionProvider(
+            base_url=self.settings.llm_base_url,
+            api_key=self.settings.llm_api_key,
+            model=self.settings.llm_model,
+            timeout=self.settings.request_timeout,
+        )
+
+    def case_retriever(self) -> CaseRetriever:
+        provider = self.embedding_provider()
+        if provider.fingerprint() == "embedding:disabled":
+            raise ProviderConfigurationError("case retrieval requires an embedding provider")
+        return CaseRetriever(self.case_repository, provider)
+
+    def list_cases(
+        self,
+        *,
+        case_type: str | None = None,
+        task_type: str | None = None,
+        language: str | None = None,
+        active_only: bool = True,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        records = self.case_repository.list(
+            case_type=case_type,
+            task_type=task_type,
+            language=language,
+            active_only=active_only,
+            limit=limit,
+        )
+        return [
+            {
+                **record.model_dump(mode="json"),
+                "active": self.case_repository.is_active(record.id),
+            }
+            for record in records
+        ]
+
+    def get_case(self, case_id: str) -> dict[str, Any]:
+        record = self.case_repository.get(case_id)
+        return {
+            **record.model_dump(mode="json"),
+            "active": self.case_repository.is_active(case_id),
+            "status_events": [
+                item.model_dump(mode="json") for item in self.case_repository.status_events(case_id)
+            ],
+        }
+
+    def disable_case(
+        self, case_id: str, *, operator: str, reason: str, request_id: str
+    ) -> dict[str, Any]:
+        from prismke.domain import CaseStatusEvent
+
+        if not operator.strip() or not reason.strip() or not request_id.strip():
+            raise ValueError("operator, reason and request_id are required")
+        self.case_repository.get(case_id)
+        event = CaseStatusEvent(
+            id=stable_id("case-status", case_id, request_id),
+            case_id=case_id,
+            action="disable",
+            operator=operator.strip(),
+            reason=reason.strip(),
+        )
+        self.case_repository.disable(event)
+        self.audit.record("disable_case", case_id, event.model_dump(mode="json"))
+        return self.get_case(case_id)
+
+    async def rebuild_case_index(self, *, dry_run: bool = False) -> dict[str, Any]:
+        return await self.case_retriever().rebuild(dry_run=dry_run)
+
+    async def replay_case_projections(self) -> int:
+        count = 0
+        for run in self.runs.list(limit=10_000):
+            if run.pipeline_version != PIPELINE_VERSION:
+                continue
+            for event in self.reviews.repository.events(run.run_id):
+                if self.case_repository.projected(event.id):
+                    continue
+                payload = self.reviews.repository.event_state(event.id)
+                state = WorkflowState.model_validate(payload)
+                await self.cases.project_review_event(event, state)
+                count += 1
+        return count
+
     def entity_governance(self) -> EntityGovernanceService:
         return EntityGovernanceService(
             self.graph_store,
@@ -532,7 +649,16 @@ class PrismKEService:
         ocr_provider: OCRProvider,
         vlm_provider: VLMProvider,
         allow_remote_assets: bool = False,
+        state: WorkflowState | None = None,
     ) -> PrismKEWorkflow:
+        reflection_service = None
+        if state is not None and state.reflection_enabled:
+            retriever = self.case_retriever() if state.case_mode != "none" else None
+            reflection_service = BoundedReflectionService(
+                self.reflection_provider(state.reflection_provider_name),
+                retriever,
+                self.evidence_store,
+            )
         return PrismKEWorkflow(
             provider,
             ocr_provider,
@@ -550,6 +676,7 @@ class PrismKEService:
             entity_auto_link_threshold=self.settings.entity_auto_link_threshold,
             entity_review_threshold=self.settings.entity_review_threshold,
             entity_min_margin=self.settings.entity_min_margin,
+            reflection_service=reflection_service,
         )
 
     async def run(
@@ -560,6 +687,12 @@ class PrismKEService:
         ocr_provider_name: str = "disabled",
         vlm_provider_name: str = "disabled",
         allow_remote_assets: bool = False,
+        case_mode: Literal["none", "good", "good_bad"] = "none",
+        reflection_enabled: bool = False,
+        reflection_provider_name: str = "disabled",
+        reflection_max_attempts: int | None = None,
+        reflection_token_budget: int | None = None,
+        reflection_time_budget_seconds: int | None = None,
     ) -> WorkflowState:
         state, created = self.create_run(
             input_path,
@@ -568,6 +701,12 @@ class PrismKEService:
             ocr_provider_name,
             vlm_provider_name,
             allow_remote_assets,
+            case_mode,
+            reflection_enabled,
+            reflection_provider_name,
+            reflection_max_attempts,
+            reflection_token_budget,
+            reflection_time_budget_seconds,
         )
         if not created:
             return state
@@ -581,6 +720,12 @@ class PrismKEService:
         ocr_provider_name: str = "disabled",
         vlm_provider_name: str = "disabled",
         allow_remote_assets: bool = False,
+        case_mode: Literal["none", "good", "good_bad"] = "none",
+        reflection_enabled: bool = False,
+        reflection_provider_name: str = "disabled",
+        reflection_max_attempts: int | None = None,
+        reflection_token_budget: int | None = None,
+        reflection_time_budget_seconds: int | None = None,
     ) -> tuple[WorkflowState, bool]:
         """Validate a request and persist its initial state without executing it."""
         self.executions.ensure_accepting()
@@ -592,6 +737,39 @@ class PrismKEService:
         ocr_provider = self.ocr_provider(ocr_provider_name)
         vlm_provider = self.vlm_provider(vlm_provider_name)
         embedding_provider = self.embedding_provider()
+        if case_mode not in {"none", "good", "good_bad"}:
+            raise ValueError("case_mode must be none, good or good_bad")
+        if case_mode != "none" and embedding_provider.fingerprint() == "embedding:disabled":
+            raise ProviderConfigurationError("case retrieval requires an embedding provider")
+        max_attempts = (
+            self.settings.reflection_max_attempts
+            if reflection_max_attempts is None
+            else reflection_max_attempts
+        )
+        token_budget = (
+            self.settings.reflection_token_budget
+            if reflection_token_budget is None
+            else reflection_token_budget
+        )
+        time_budget = (
+            self.settings.reflection_time_budget_seconds
+            if reflection_time_budget_seconds is None
+            else reflection_time_budget_seconds
+        )
+        if not 0 <= max_attempts <= 2:
+            raise ValueError("reflection_max_attempts must be between 0 and 2")
+        if token_budget <= 0 or time_budget <= 0:
+            raise ValueError("Reflection token and time budgets must be positive")
+        reflection = self.reflection_provider(
+            reflection_provider_name if reflection_enabled else "disabled"
+        )
+        if reflection_enabled and reflection.fingerprint() == "reflection:disabled":
+            raise ProviderConfigurationError(
+                "Reflection requires mock or openai-compatible provider"
+            )
+        retriever = self.case_retriever() if case_mode != "none" else None
+        case_snapshot_ids = retriever.snapshot_ids() if retriever else []
+        case_snapshot = retriever.fingerprint_for(case_snapshot_ids) if retriever else "cases:none"
         schema = load_schema(schema_path)
         schema_fingerprint = canonical_hash(schema.model_dump(mode="json"))
         run_id = stable_id(
@@ -603,6 +781,15 @@ class PrismKEService:
             ocr_provider.fingerprint(),
             vlm_provider.fingerprint(),
             embedding_provider.fingerprint(),
+            case_snapshot,
+            CASE_RETRIEVAL_VERSION,
+            reflection.fingerprint(),
+            REFLECTION_POLICY_VERSION,
+            case_mode,
+            reflection_enabled,
+            max_attempts,
+            token_budget,
+            time_budget,
             ASSET_POLICY_VERSION,
             ALIGNMENT_POLICY_VERSION,
             ENTITY_RESOLUTION_POLICY_VERSION,
@@ -628,6 +815,19 @@ class PrismKEService:
             vlm_provider_fingerprint=vlm_provider.fingerprint(),
             embedding_provider_name=self.settings.embedding_provider,
             embedding_provider_fingerprint=embedding_provider.fingerprint(),
+            case_mode=case_mode,
+            case_snapshot_fingerprint=case_snapshot,
+            case_snapshot_ids=case_snapshot_ids,
+            case_retrieval_policy_version=CASE_RETRIEVAL_VERSION,
+            reflection_enabled=reflection_enabled,
+            reflection_provider_name=(
+                reflection_provider_name if reflection_enabled else "disabled"
+            ),
+            reflection_provider_fingerprint=reflection.fingerprint(),
+            reflection_policy_version=REFLECTION_POLICY_VERSION,
+            reflection_max_attempts=max_attempts,
+            reflection_token_budget=token_budget,
+            reflection_time_budget_seconds=time_budget,
             allow_remote_assets=allow_remote_assets,
             pipeline_version=PIPELINE_VERSION,
             entity_resolution_policy_version=ENTITY_RESOLUTION_POLICY_VERSION,
@@ -650,8 +850,13 @@ class PrismKEService:
         provider = self.provider(state.provider_name)
         ocr_provider = self.ocr_provider(state.ocr_provider_name)
         vlm_provider = self.vlm_provider(state.vlm_provider_name)
+        self._validate_reflection_policy(state)
         return await self._workflow(
-            provider, ocr_provider, vlm_provider, state.allow_remote_assets
+            provider,
+            ocr_provider,
+            vlm_provider,
+            state.allow_remote_assets,
+            state,
         ).invoke(state)
 
     def show_run(self, run_id: str) -> WorkflowState:
@@ -774,7 +979,8 @@ class PrismKEService:
             validate_workspace_run(self.settings.runtime_dir, state)
         if not state.review_workspace:
             provider, ocr, vlm = self._validated_run_providers(state)
-            return self._workflow(provider, ocr, vlm, state.allow_remote_assets)
+            self._validate_reflection_policy(state)
+            return self._workflow(provider, ocr, vlm, state.allow_remote_assets, state)
         validate_workspace_run(self.settings.runtime_dir, state)
         self._validate_entity_policy(state)
         return PrismKEWorkflow(
@@ -840,7 +1046,27 @@ class PrismKEService:
             raise ProviderConfigurationError(
                 "embedding provider configuration changed since run creation"
             )
+        self._validate_reflection_policy(state)
         return provider, ocr_provider, vlm_provider
+
+    def _validate_reflection_policy(self, state: WorkflowState) -> None:
+        if state.case_retrieval_policy_version != CASE_RETRIEVAL_VERSION:
+            raise LegacyCheckpointError(
+                "case retrieval policy changed; old runs are read-only, rerun the input"
+            )
+        if state.reflection_policy_version != REFLECTION_POLICY_VERSION:
+            raise LegacyCheckpointError(
+                "Reflection policy changed; old runs are read-only, rerun the input"
+            )
+        reflection = self.reflection_provider(state.reflection_provider_name)
+        if reflection.fingerprint() != state.reflection_provider_fingerprint:
+            raise ProviderConfigurationError(
+                "Reflection provider configuration changed since run creation"
+            )
+        if state.case_mode != "none":
+            expected = self.case_retriever().fingerprint_for(state.case_snapshot_ids)
+            if expected != state.case_snapshot_fingerprint:
+                raise ProviderConfigurationError("case library snapshot is inconsistent")
 
     @staticmethod
     def _validate_entity_policy(state: WorkflowState) -> None:

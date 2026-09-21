@@ -9,6 +9,8 @@ from prismke.domain import (
     ExtractionResult,
     OCRRequest,
     OCRResult,
+    ReflectionRequest,
+    ReflectionResult,
     VisualExtractionRequest,
 )
 
@@ -35,3 +37,9 @@ class EmbeddingProvider(Protocol):
     def fingerprint(self) -> str: ...
 
     async def encode(self, texts: list[str]) -> list[list[float]]: ...
+
+
+class ReflectionProvider(Protocol):
+    def fingerprint(self) -> str: ...
+
+    async def reflect(self, request: ReflectionRequest) -> ReflectionResult: ...

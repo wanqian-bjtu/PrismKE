@@ -41,6 +41,7 @@ from prismke.persistence.base import EvidenceStore, GraphStore
 from prismke.persistence.reviews import ReviewRepository
 from prismke.providers.base import EmbeddingProvider, LLMProvider, OCRProvider, VLMProvider
 from prismke.providers.embedding import DisabledEmbeddingProvider
+from prismke.workflow.reflection import BoundedReflectionService
 
 
 class WorkflowNodes:
@@ -60,6 +61,7 @@ class WorkflowNodes:
         entity_auto_link_threshold: float = 0.88,
         entity_review_threshold: float = 0.65,
         entity_min_margin: float = 0.08,
+        reflection_service: BoundedReflectionService | None = None,
     ) -> None:
         self.provider = provider
         self.ocr_provider = ocr_provider
@@ -72,6 +74,7 @@ class WorkflowNodes:
         self.entity_auto_link_threshold = entity_auto_link_threshold
         self.entity_review_threshold = entity_review_threshold
         self.entity_min_margin = entity_min_margin
+        self.reflection_service = reflection_service
 
     async def ingest(self, state: WorkflowState) -> WorkflowState:
         if not SourceDocument(path=state.input_path).path.is_file():
@@ -189,6 +192,11 @@ class WorkflowNodes:
             state.text_candidates, state.visual_candidates, SchemaIndex(state.output_schema)
         )
         return state
+
+    async def reflect_candidates(self, state: WorkflowState) -> WorkflowState:
+        if self.reflection_service is None:
+            return state
+        return await self.reflection_service.run(state)
 
     async def resolve_entities(self, state: WorkflowState) -> WorkflowState:
         assert state.output_schema is not None

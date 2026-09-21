@@ -18,6 +18,7 @@ from prismke.persistence.reviews import ReviewRepository
 from prismke.persistence.runs import RunRepository
 from prismke.providers.base import EmbeddingProvider, LLMProvider, OCRProvider, VLMProvider
 from prismke.workflow.nodes import WorkflowNodes
+from prismke.workflow.reflection import BoundedReflectionService
 
 
 class GraphState(TypedDict, total=False):
@@ -47,6 +48,7 @@ class PrismKEWorkflow:
         entity_review_threshold: float = 0.65,
         entity_min_margin: float = 0.08,
         review_only: bool = False,
+        reflection_service: BoundedReflectionService | None = None,
     ) -> None:
         self.checkpoint_path = checkpoint_path
         self.runs = runs
@@ -69,6 +71,7 @@ class PrismKEWorkflow:
             entity_auto_link_threshold=entity_auto_link_threshold,
             entity_review_threshold=entity_review_threshold,
             entity_min_margin=entity_min_margin,
+            reflection_service=reflection_service,
         )
         self.nodes.review_repository = self.reviews
 
@@ -239,6 +242,10 @@ class PrismKEWorkflow:
         )
         builder.add_node("align_modalities", cast(Any, self._join_modalities))
         builder.add_node(
+            "reflect_candidates",
+            cast(Any, self._node("reflect_candidates", self.nodes.reflect_candidates)),
+        )
+        builder.add_node(
             "prepare_graph_commit",
             cast(Any, self._node("prepare_graph_commit", self.nodes.prepare_graph_commit)),
         )
@@ -251,7 +258,8 @@ class PrismKEWorkflow:
         builder.add_edge("load_schema", "extract_text_claims")
         builder.add_edge("load_schema", "extract_visual_claims")
         builder.add_edge(["extract_text_claims", "extract_visual_claims"], "align_modalities")
-        builder.add_edge("align_modalities", "resolve_entities")
+        builder.add_edge("align_modalities", "reflect_candidates")
+        builder.add_edge("reflect_candidates", "resolve_entities")
         builder.add_conditional_edges(
             "resolve_entities",
             self._after_entity_resolution,

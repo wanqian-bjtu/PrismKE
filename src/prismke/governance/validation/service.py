@@ -32,7 +32,9 @@ class ValidationService:
     def blocked_candidate_ids(
         candidates: list[CandidateClaim], result: ValidationResult
     ) -> set[str]:
-        targets = {i.target_id for i in result.issues if i.severity == "blocking"}
+        targets = {
+            i.target_id for i in result.issues if i.severity == "blocking" and i.status == "open"
+        }
         return {
             c.id
             for c in candidates
