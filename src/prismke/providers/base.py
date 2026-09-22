@@ -5,14 +5,31 @@ from __future__ import annotations
 from typing import Protocol
 
 from prismke.domain import (
+    EntityAdvice,
+    EntityAdviceRequest,
     ExtractionRequest,
     ExtractionResult,
+    FusionAdvice,
+    FusionAdviceRequest,
     OCRRequest,
     OCRResult,
+    ProviderCallRecord,
     ReflectionRequest,
     ReflectionResult,
     VisualExtractionRequest,
 )
+
+
+class SemanticAdvisor(Protocol):
+    def fingerprint(self) -> str: ...
+
+    async def advise_entity(
+        self, request: EntityAdviceRequest
+    ) -> tuple[EntityAdvice, ProviderCallRecord | None]: ...
+
+    async def advise_fusion(
+        self, request: FusionAdviceRequest
+    ) -> tuple[FusionAdvice, ProviderCallRecord | None]: ...
 
 
 class LLMProvider(Protocol):

@@ -16,7 +16,13 @@ from prismke.persistence.base import EvidenceStore, GraphStore
 from prismke.persistence.checkpoints import open_checkpointer
 from prismke.persistence.reviews import ReviewRepository
 from prismke.persistence.runs import RunRepository
-from prismke.providers.base import EmbeddingProvider, LLMProvider, OCRProvider, VLMProvider
+from prismke.providers.base import (
+    EmbeddingProvider,
+    LLMProvider,
+    OCRProvider,
+    SemanticAdvisor,
+    VLMProvider,
+)
 from prismke.workflow.nodes import WorkflowNodes
 from prismke.workflow.reflection import BoundedReflectionService
 
@@ -49,6 +55,7 @@ class PrismKEWorkflow:
         entity_min_margin: float = 0.08,
         review_only: bool = False,
         reflection_service: BoundedReflectionService | None = None,
+        semantic_advisor: SemanticAdvisor | None = None,
     ) -> None:
         self.checkpoint_path = checkpoint_path
         self.runs = runs
@@ -72,6 +79,7 @@ class PrismKEWorkflow:
             entity_review_threshold=entity_review_threshold,
             entity_min_margin=entity_min_margin,
             reflection_service=reflection_service,
+            semantic_advisor=semantic_advisor,
         )
         self.nodes.review_repository = self.reviews
 
@@ -152,6 +160,18 @@ class PrismKEWorkflow:
         visual_state = WorkflowState.model_validate(graph_state["visual_branch"])
         state.text_candidates = text_state.text_candidates
         state.visual_candidates = visual_state.visual_candidates
+        state.modality_status = {
+            **state.modality_status,
+            **text_state.modality_status,
+            **visual_state.modality_status,
+        }
+        state.modality_errors = {
+            **state.modality_errors,
+            **text_state.modality_errors,
+            **visual_state.modality_errors,
+        }
+        traces = [*state.agent_traces, *text_state.agent_traces, *visual_state.agent_traces]
+        state.agent_traces = list({item.id: item for item in traces}.values())
         state.document = visual_state.document
         state.validation = ValidationService.merge(
             state.validation, [*text_state.validation.issues, *visual_state.validation.issues]

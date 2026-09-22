@@ -1,5 +1,13 @@
 """Stable public PrismKE domain contracts."""
 
+from prismke.domain.agents import (
+    AgentHandoff,
+    AgentTrace,
+    EntityAdvice,
+    EntityAdviceRequest,
+    FusionAdvice,
+    FusionAdviceRequest,
+)
 from prismke.domain.cases import (
     CaseEmbedding,
     CaseRecord,
@@ -81,6 +89,12 @@ from prismke.domain.workflow import (
 )
 
 __all__ = [
+    "AgentHandoff",
+    "AgentTrace",
+    "EntityAdvice",
+    "EntityAdviceRequest",
+    "FusionAdvice",
+    "FusionAdviceRequest",
     "CaseEmbedding",
     "CaseRecord",
     "CaseStatusEvent",

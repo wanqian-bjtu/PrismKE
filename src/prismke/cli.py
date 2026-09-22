@@ -182,6 +182,8 @@ def run(
     reflection_max_attempts: Annotated[int, typer.Option("--reflection-max-attempts")] = 2,
     reflection_token_budget: Annotated[int, typer.Option("--reflection-token-budget")] = 20_000,
     reflection_time_budget: Annotated[int, typer.Option("--reflection-time-budget")] = 180,
+    semantic_advisor: Annotated[str, typer.Option("--semantic-advisor")] = "disabled",
+    agent_token_budget: Annotated[int, typer.Option("--agent-token-budget")] = 20_000,
 ) -> None:
     """Run the complete PrismKE workflow for one document."""
     state = asyncio.run(
@@ -198,6 +200,8 @@ def run(
             reflection_max_attempts,
             reflection_token_budget,
             reflection_time_budget,
+            semantic_advisor,
+            agent_token_budget,
         )
     )
     console.print(f"run_id={state.run_id} status={state.status}")
@@ -208,6 +212,12 @@ def run(
 def show_run(run_id: str) -> None:
     """Print the latest serialized state of a run."""
     _print_model(PrismKEService().show_run(run_id))
+
+
+@app.command("agent-traces")
+def agent_traces(run_id: str) -> None:
+    """Show the sanitized, idempotent decisions of the three agents."""
+    _print_model(PrismKEService().show_run(run_id).agent_traces)
 
 
 @app.command("list-cases")

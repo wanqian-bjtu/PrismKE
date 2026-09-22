@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
 
+from prismke.agents import AGENT_POLICY_VERSION
 from prismke.core.errors import (
     GraphIntegrityError,
     LegacyCheckpointError,
@@ -62,7 +63,13 @@ from prismke.providers.base import (
     LLMProvider,
     OCRProvider,
     ReflectionProvider,
+    SemanticAdvisor,
     VLMProvider,
+)
+from prismke.providers.semantic import (
+    DisabledSemanticAdvisor,
+    MockSemanticAdvisor,
+    OpenAICompatibleSemanticAdvisor,
 )
 from prismke.workflow.cases import (
     CASE_RETRIEVAL_VERSION,
@@ -73,7 +80,7 @@ from prismke.workflow.graph import PrismKEWorkflow
 from prismke.workflow.reflection import REFLECTION_POLICY_VERSION, BoundedReflectionService
 from prismke.workflow.review_workspace import validate_workspace_run, workspace_metadata
 
-PIPELINE_VERSION = "0.9.0"
+PIPELINE_VERSION = "0.10.0"
 ASSET_POLICY_VERSION = "assets-v3"
 ALIGNMENT_POLICY_VERSION = "alignment-v1"
 
@@ -463,6 +470,25 @@ class PrismKEService:
             timeout=self.settings.request_timeout,
         )
 
+    def semantic_advisor(self, name: str) -> SemanticAdvisor:
+        if name == "disabled":
+            return DisabledSemanticAdvisor()
+        if name == "mock":
+            return MockSemanticAdvisor()
+        if name != "openai-compatible":
+            raise ProviderConfigurationError(f"unknown semantic advisor: {name}")
+        if not self.settings.llm_api_key:
+            raise ProviderConfigurationError("semantic advisor requires PRISMKE_LLM_API_KEY")
+        if not self.settings.llm_model:
+            raise ProviderConfigurationError("semantic advisor requires PRISMKE_LLM_MODEL")
+        self._validate_endpoint(self.settings.llm_base_url, "PRISMKE_LLM_BASE_URL")
+        return OpenAICompatibleSemanticAdvisor(
+            base_url=self.settings.llm_base_url,
+            api_key=self.settings.llm_api_key,
+            model=self.settings.llm_model,
+            timeout=self.settings.request_timeout,
+        )
+
     def case_retriever(self) -> CaseRetriever:
         provider = self.embedding_provider()
         if provider.fingerprint() == "embedding:disabled":
@@ -677,6 +703,9 @@ class PrismKEService:
             entity_review_threshold=self.settings.entity_review_threshold,
             entity_min_margin=self.settings.entity_min_margin,
             reflection_service=reflection_service,
+            semantic_advisor=self.semantic_advisor(
+                state.semantic_advisor_name if state is not None else "disabled"
+            ),
         )
 
     async def run(
@@ -693,6 +722,8 @@ class PrismKEService:
         reflection_max_attempts: int | None = None,
         reflection_token_budget: int | None = None,
         reflection_time_budget_seconds: int | None = None,
+        semantic_advisor_name: str = "disabled",
+        agent_token_budget: int | None = None,
     ) -> WorkflowState:
         state, created = self.create_run(
             input_path,
@@ -707,6 +738,8 @@ class PrismKEService:
             reflection_max_attempts,
             reflection_token_budget,
             reflection_time_budget_seconds,
+            semantic_advisor_name,
+            agent_token_budget,
         )
         if not created:
             return state
@@ -726,6 +759,8 @@ class PrismKEService:
         reflection_max_attempts: int | None = None,
         reflection_token_budget: int | None = None,
         reflection_time_budget_seconds: int | None = None,
+        semantic_advisor_name: str = "disabled",
+        agent_token_budget: int | None = None,
     ) -> tuple[WorkflowState, bool]:
         """Validate a request and persist its initial state without executing it."""
         self.executions.ensure_accepting()
@@ -767,6 +802,12 @@ class PrismKEService:
             raise ProviderConfigurationError(
                 "Reflection requires mock or openai-compatible provider"
             )
+        advisor = self.semantic_advisor(semantic_advisor_name)
+        advice_budget = (
+            self.settings.agent_token_budget if agent_token_budget is None else agent_token_budget
+        )
+        if advice_budget <= 0:
+            raise ValueError("agent_token_budget must be positive")
         retriever = self.case_retriever() if case_mode != "none" else None
         case_snapshot_ids = retriever.snapshot_ids() if retriever else []
         case_snapshot = retriever.fingerprint_for(case_snapshot_ids) if retriever else "cases:none"
@@ -784,6 +825,9 @@ class PrismKEService:
             case_snapshot,
             CASE_RETRIEVAL_VERSION,
             reflection.fingerprint(),
+            advisor.fingerprint(),
+            AGENT_POLICY_VERSION,
+            advice_budget,
             REFLECTION_POLICY_VERSION,
             case_mode,
             reflection_enabled,
@@ -828,6 +872,10 @@ class PrismKEService:
             reflection_max_attempts=max_attempts,
             reflection_token_budget=token_budget,
             reflection_time_budget_seconds=time_budget,
+            semantic_advisor_name=semantic_advisor_name,
+            semantic_advisor_fingerprint=advisor.fingerprint(),
+            agent_policy_version=AGENT_POLICY_VERSION,
+            agent_token_budget=advice_budget,
             allow_remote_assets=allow_remote_assets,
             pipeline_version=PIPELINE_VERSION,
             entity_resolution_policy_version=ENTITY_RESOLUTION_POLICY_VERSION,
@@ -851,6 +899,7 @@ class PrismKEService:
         ocr_provider = self.ocr_provider(state.ocr_provider_name)
         vlm_provider = self.vlm_provider(state.vlm_provider_name)
         self._validate_reflection_policy(state)
+        self._validate_agent_policy(state)
         return await self._workflow(
             provider,
             ocr_provider,
@@ -1047,7 +1096,19 @@ class PrismKEService:
                 "embedding provider configuration changed since run creation"
             )
         self._validate_reflection_policy(state)
+        self._validate_agent_policy(state)
         return provider, ocr_provider, vlm_provider
+
+    def _validate_agent_policy(self, state: WorkflowState) -> None:
+        if state.agent_policy_version != AGENT_POLICY_VERSION:
+            raise LegacyCheckpointError(
+                "agent policy changed; old runs are read-only, rerun the input"
+            )
+        advisor = self.semantic_advisor(state.semantic_advisor_name)
+        if advisor.fingerprint() != state.semantic_advisor_fingerprint:
+            raise ProviderConfigurationError(
+                "semantic advisor configuration changed since run creation"
+            )
 
     def _validate_reflection_policy(self, state: WorkflowState) -> None:
         if state.case_retrieval_policy_version != CASE_RETRIEVAL_VERSION:
@@ -1133,7 +1194,9 @@ class PrismKEService:
         await self.reviews.recover(run_id)
         state = self.runs.load(run_id)
         if state.pipeline_version != PIPELINE_VERSION:
-            raise LegacyCheckpointError("旧流程不能由 v0.8 恢复；请使用对应发布版本接续")
+            raise LegacyCheckpointError(
+                f"旧流程不能由 v{PIPELINE_VERSION} 恢复；请使用对应发布版本接续"
+            )
         if (
             state.validation.blocking_count
             or any(task.status == "pending" for task in state.entity_review_tasks)

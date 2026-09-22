@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from prismke.domain.agents import AgentHandoff, AgentTrace
 from prismke.domain.cases import ReflectionAttempt, RetrievedCase
 from prismke.domain.documents import (
     DocumentIR,
@@ -46,7 +47,7 @@ class ProviderCallRecord(BaseModel):
     """Sanitized metadata for one external model request."""
 
     id: str
-    provider: Literal["llm", "vlm"]
+    provider: Literal["llm", "vlm", "governance", "fusion"]
     operation_id: str
     requested_model: str
     response_model: str | None = None
@@ -153,5 +154,17 @@ class WorkflowState(BaseModel):
     repaired_issue_ids: list[str] = Field(default_factory=list)
     reflection_token_usage: int = 0
     reflection_elapsed_ms: float = 0.0
+    semantic_advisor_name: str = "disabled"
+    semantic_advisor_fingerprint: str = "semantic:disabled"
+    agent_policy_version: str | None = None
+    agent_token_budget: int = 0
+    agent_token_usage: int = 0
+    agent_traces: list[AgentTrace] = Field(default_factory=list)
+    agent_handoffs: list[AgentHandoff] = Field(default_factory=list)
+    agent_review_claim_ids: list[str] = Field(default_factory=list)
+    modality_status: dict[str, Literal["pending", "skipped", "succeeded", "failed"]] = Field(
+        default_factory=dict
+    )
+    modality_errors: dict[str, str] = Field(default_factory=dict)
     review_workspace: bool = False
     submission_confirmed: bool = False

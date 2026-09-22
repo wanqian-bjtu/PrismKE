@@ -53,7 +53,7 @@ def _failure(status: int | None, kind: str) -> tuple[str, str]:
 
 def _record(
     *,
-    provider: Literal["llm", "vlm"],
+    provider: Literal["llm", "vlm", "governance", "fusion"],
     operation_id: str,
     requested_model: str,
     prompt_version: str,
@@ -106,7 +106,7 @@ async def post_chat_completion(
     api_key: str,
     body: dict[str, Any],
     timeout: float,
-    provider: Literal["llm", "vlm"],
+    provider: Literal["llm", "vlm", "governance", "fusion"],
     operation_id: str,
     prompt_version: str,
     transport: httpx.AsyncBaseTransport | None = None,

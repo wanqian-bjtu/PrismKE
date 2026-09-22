@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     reflection_max_attempts: int = 2
     reflection_token_budget: int = 20_000
     reflection_time_budget_seconds: float = 180.0
+    agent_token_budget: int = 20_000
 
     @property
     def runs_dir(self) -> Path:

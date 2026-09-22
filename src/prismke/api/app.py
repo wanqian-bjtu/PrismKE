@@ -135,6 +135,8 @@ def create_app(
         reflection_max_attempts: Annotated[int, Form(ge=0, le=2)] = 2,
         reflection_token_budget: Annotated[int, Form(gt=0)] = 20_000,
         reflection_time_budget_seconds: Annotated[int, Form(gt=0)] = 180,
+        semantic_advisor: Annotated[str, Form()] = "disabled",
+        agent_token_budget: Annotated[int, Form(gt=0)] = 20_000,
     ) -> RunAccepted:
         service.executions.ensure_accepting()
         if service.review_metadata:
@@ -154,6 +156,8 @@ def create_app(
             reflection_max_attempts,
             reflection_token_budget,
             reflection_time_budget_seconds,
+            semantic_advisor,
+            agent_token_budget,
         )
         if created:
             service.executions.enqueue(state.run_id, "execute")
@@ -220,6 +224,21 @@ def create_app(
             raise HTTPException(status_code=404, detail="run not found") from exc
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @api.get("/runs/{run_id}/agent-traces")
+    async def agent_traces(run_id: str) -> object:
+        try:
+            state = service.show_run(run_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="run not found") from exc
+        return {
+            "policy": state.agent_policy_version,
+            "handoffs": state.agent_handoffs,
+            "traces": state.agent_traces,
+            "modality_status": state.modality_status,
+            "modality_errors": state.modality_errors,
+            "agent_token_usage": state.agent_token_usage,
+        }
 
     @api.post("/runs/{run_id}/validation-issues/{issue_id}/exclude")
     async def exclude_validation(

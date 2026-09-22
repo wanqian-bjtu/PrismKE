@@ -4,43 +4,38 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from prismke.agents.extraction import MultimodalExtractionAgent
+from prismke.agents.fusion import FusionReviewAgent
+from prismke.agents.governance import EntityGovernanceAgent
 from prismke.core.errors import EvidenceIntegrityError, GraphIntegrityError
-from prismke.core.execution_control import cached_operation, check_execution, current_execution
+from prismke.core.execution_control import current_execution
 from prismke.core.ids import canonical_hash, stable_id
 from prismke.domain import (
     ClaimStatus,
     CommitValidationContext,
     EntityEmbedding,
-    ExtractionRequest,
-    ExtractionResult,
     GraphChange,
     GraphCommit,
     GraphDocument,
     GraphRevision,
-    LocalizationLevel,
-    OCRRequest,
-    OCRResult,
-    SchemaIndex,
     SourceDocument,
-    VisualExtractionRequest,
     WorkflowState,
     load_schema,
 )
-from prismke.governance import (
-    MultimodalAlignmentService,
-    SemanticEntityResolver,
-    collect_mentions,
-    detect_conflicts,
-    entity_embedding_text,
-    normalize_claims,
-    route_by_risk,
-)
+from prismke.governance import entity_embedding_text
 from prismke.governance.validation import ValidationService
-from prismke.parsing import ParserRegistry, select_analysis_assets
+from prismke.parsing import ParserRegistry
 from prismke.persistence.base import EvidenceStore, GraphStore
 from prismke.persistence.reviews import ReviewRepository
-from prismke.providers.base import EmbeddingProvider, LLMProvider, OCRProvider, VLMProvider
+from prismke.providers.base import (
+    EmbeddingProvider,
+    LLMProvider,
+    OCRProvider,
+    SemanticAdvisor,
+    VLMProvider,
+)
 from prismke.providers.embedding import DisabledEmbeddingProvider
+from prismke.providers.semantic import DisabledSemanticAdvisor
 from prismke.workflow.reflection import BoundedReflectionService
 
 
@@ -62,6 +57,7 @@ class WorkflowNodes:
         entity_review_threshold: float = 0.65,
         entity_min_margin: float = 0.08,
         reflection_service: BoundedReflectionService | None = None,
+        semantic_advisor: SemanticAdvisor | None = None,
     ) -> None:
         self.provider = provider
         self.ocr_provider = ocr_provider
@@ -75,6 +71,21 @@ class WorkflowNodes:
         self.entity_review_threshold = entity_review_threshold
         self.entity_min_margin = entity_min_margin
         self.reflection_service = reflection_service
+        advisor = semantic_advisor or DisabledSemanticAdvisor()
+        self.extraction_agent = MultimodalExtractionAgent(
+            provider, ocr_provider, vlm_provider, evidence_store
+        )
+        self.governance_agent = EntityGovernanceAgent(
+            graph_store,
+            evidence_store,
+            self.embedding_provider,
+            advisor,
+            top_k=entity_top_k,
+            auto_link_threshold=entity_auto_link_threshold,
+            review_threshold=entity_review_threshold,
+            min_margin=entity_min_margin,
+        )
+        self.fusion_agent = FusionReviewAgent(graph_store, advisor, reflection_service)
 
     async def ingest(self, state: WorkflowState) -> WorkflowState:
         if not SourceDocument(path=state.input_path).path.is_file():
@@ -96,23 +107,7 @@ class WorkflowNodes:
         return state
 
     async def run_ocr(self, state: WorkflowState) -> WorkflowState:
-        assert state.document is not None
-        request = OCRRequest(document=state.document)
-        result = await cached_operation(
-            stable_id("ocr-result", self.ocr_provider.fingerprint(), state.document.id),
-            OCRResult,
-            lambda: self.ocr_provider.recognize(request),
-        )
-        existing = {block.id for block in state.document.text_blocks}
-        state.document.text_blocks.extend(
-            block for block in result.text_blocks if block.id not in existing
-        )
-        known_evidence = {item.id for item in state.document.evidence}
-        state.document.evidence.extend(
-            item for item in result.evidence if item.id not in known_evidence
-        )
-        state.warnings.extend(result.warnings)
-        return state
+        return await self.extraction_agent.recognize(state)
 
     async def persist_evidence(self, state: WorkflowState) -> WorkflowState:
         assert state.document is not None
@@ -124,206 +119,29 @@ class WorkflowNodes:
         return state
 
     async def extract_text_claims(self, state: WorkflowState) -> WorkflowState:
-        assert state.document is not None and state.output_schema is not None
-        if not state.document.text_blocks:
-            state.text_candidates = []
-            state.warnings.append("text_extraction_skipped:no_text_blocks")
-            return state
-        request = ExtractionRequest(document=state.document, output_schema=state.output_schema)
-        result = await cached_operation(
-            stable_id("text-result", self.provider.fingerprint(), state.document.id),
-            ExtractionResult,
-            lambda: self.provider.extract(request),
-        )
-        state.text_candidates = result.candidates
-        state.warnings.extend(result.warnings)
-        state.provider_calls.extend(result.call_records)
-        state.validation = ValidationService.merge(state.validation, result.validation.issues)
-        return state
+        return await self.extraction_agent.extract_text(state)
 
     async def extract_visual_claims(self, state: WorkflowState) -> WorkflowState:
-        assert state.document is not None and state.output_schema is not None
-        state.visual_candidates = []
-        for asset in select_analysis_assets(state.document):
-            check_execution()
-            ocr_blocks = [
-                block
-                for block in state.document.text_blocks
-                if block.source_media_asset_id == asset.id
-            ]
-            request = VisualExtractionRequest(
-                document=state.document,
-                output_schema=state.output_schema,
-                asset=asset,
-                ocr_blocks=ocr_blocks,
-            )
-
-            async def visual_call(req: VisualExtractionRequest = request) -> ExtractionResult:
-                return await self.vlm_provider.extract(req)
-
-            result = await cached_operation(
-                stable_id("visual-result", self.vlm_provider.fingerprint(), asset.id),
-                ExtractionResult,
-                visual_call,
-            )
-            for candidate in result.candidates:
-                evidence_by_id = {
-                    item.id: item for item in [*state.document.evidence, *result.evidence]
-                }
-                if any(
-                    evidence_by_id[item].localization_level == LocalizationLevel.ASSET
-                    for item in candidate.evidence_ids
-                    if item in evidence_by_id
-                ):
-                    candidate.coarse_visual_evidence = True
-            state.visual_candidates.extend(result.candidates)
-            state.document.visual_observations.extend(result.observations)
-            for evidence in result.evidence:
-                await self.evidence_store.put_ref(evidence)
-                state.document.evidence.append(evidence)
-            state.warnings.extend(result.warnings)
-            state.provider_calls.extend(result.call_records)
-            state.validation = ValidationService.merge(state.validation, result.validation.issues)
-        return state
+        return await self.extraction_agent.extract_visual(state)
 
     async def align_modalities(self, state: WorkflowState) -> WorkflowState:
-        assert state.output_schema is not None
-        state.candidates, state.alignment_records = MultimodalAlignmentService().align(
-            state.text_candidates, state.visual_candidates, SchemaIndex(state.output_schema)
-        )
-        return state
+        return await self.extraction_agent.align(state)
 
     async def reflect_candidates(self, state: WorkflowState) -> WorkflowState:
-        if self.reflection_service is None:
-            return state
-        return await self.reflection_service.run(state)
+        return await self.fusion_agent.triage_candidates(state)
 
     async def resolve_entities(self, state: WorkflowState) -> WorkflowState:
-        assert state.output_schema is not None
-        assert state.document is not None
-        issues = await ValidationService().candidates(
-            state.candidates, SchemaIndex(state.output_schema), state.document, self.evidence_store
-        )
-        state.validation = ValidationService.merge(state.validation, issues)
-        excluded = ValidationService.blocked_candidate_ids(state.candidates, state.validation)
-        resolver = SemanticEntityResolver(
-            SchemaIndex(state.output_schema),
-            self.graph_store,
-            self.embedding_provider,
-            run_id=state.run_id,
-            top_k=self.entity_top_k,
-            auto_link_threshold=self.entity_auto_link_threshold,
-            review_threshold=self.entity_review_threshold,
-            min_margin=self.entity_min_margin,
-        )
-        resolution = await resolver.resolve(
-            collect_mentions([c for c in state.candidates if c.id not in excluded])
-        )
-        state.entities = resolution.entities
-        state.mention_to_entity = resolution.mention_to_entity
-        state.entity_resolution_decisions = resolution.decisions or []
-        resolved = {
-            item.mention_id: item
-            for item in state.entity_review_tasks
-            if item.status == "resolved" and item.mention_id is not None
-        }
-        state.entity_review_tasks = [
-            resolved.get(item.mention_id, item) if item.mention_id is not None else item
-            for item in (resolution.review_tasks or [])
-        ]
-        state.warnings.extend(
-            f"review_required:{mention_id}:{','.join(reasons)}"
-            for mention_id, reasons in resolution.review_reasons.items()
-        )
-        state.status = (
-            "awaiting_review"
-            if any(item.status == "pending" for item in state.entity_review_tasks)
-            or state.validation.blocking_count
-            else "running"
-        )
-        return state
+        return await self.governance_agent.resolve(state)
 
     async def normalize_claims(self, state: WorkflowState) -> WorkflowState:
-        assert state.output_schema is not None
-        assert state.document is not None
-        entities = {item.id: item for item in state.entities}
-        blocked = ValidationService.blocked_candidate_ids(state.candidates, state.validation)
-        eligible = [c for c in state.candidates if c.id not in blocked]
-        issues = await ValidationService().candidates(
-            eligible,
-            SchemaIndex(state.output_schema),
-            state.document,
-            self.evidence_store,
-            entities,
-            state.mention_to_entity,
-        )
-        state.validation = ValidationService.merge(
-            state.validation,
-            issues,
-            canonical_hash([c.model_dump(mode="json") for c in state.candidates]),
-        )
-        blocked.update(i.target_id for i in issues)
-        state.claims = normalize_claims(
-            [c for c in eligible if c.id not in blocked],
-            SchemaIndex(state.output_schema),
-            entities,
-            state.mention_to_entity,
-        )
-        state.validation.passed_count = len(state.claims)
-        return state
+        return await self.governance_agent.normalize(state)
 
     async def detect_conflicts(self, state: WorkflowState) -> WorkflowState:
-        assert state.output_schema is not None
-        state.conflicts = detect_conflicts(
-            state.claims, await self.graph_store.list_claims(), SchemaIndex(state.output_schema)
-        )
-        return state
+        return await self.fusion_agent.detect_conflicts(state)
 
     async def route_by_risk(self, state: WorkflowState) -> WorkflowState:
-        state.claims, new_reviews = route_by_risk(state.run_id, state.claims, state.conflicts)
-        if state.pending_correction_id and self.review_repository is not None:
-            proposal = self.review_repository.correction(state.pending_correction_id)
-            if proposal.kind == "entity":
-                affected = set(proposal.preview["candidate_ids"])
-                from prismke.domain import ReviewTask
-
-                for claim in state.claims:
-                    if (
-                        set(claim.source_candidate_ids) & affected
-                        and claim.status != ClaimStatus.REJECTED
-                    ):
-                        claim.status = ClaimStatus.REVIEW_REQUIRED
-                        if claim.id not in {t.claim_id for t in new_reviews}:
-                            new_reviews.append(
-                                ReviewTask(
-                                    id=stable_id("review", state.run_id, claim.id),
-                                    run_id=state.run_id,
-                                    claim_id=claim.id,
-                                    reasons=["identity_correction_requires_review"],
-                                )
-                            )
-        resolved = {item.claim_id: item for item in state.review_tasks if item.status == "resolved"}
-        state.review_tasks = [resolved.get(item.claim_id, item) for item in new_reviews]
-        repository = getattr(self, "review_repository", None)
-        if repository is not None:
-            for task in state.review_tasks:
-                task.version = repository.version(state.run_id, task.id)
-        for task in state.review_tasks:
-            if task.status != "resolved":
-                continue
-            claim = next(item for item in state.claims if item.id == task.claim_id)
-            claim.status = (
-                ClaimStatus.APPROVED
-                if task.decision and task.decision.value == "approve"
-                else ClaimStatus.REJECTED
-            )
-        state.status = (
-            "awaiting_review"
-            if any(item.status == "pending" for item in state.review_tasks)
-            or state.validation.blocking_count
-            else "running"
-        )
-        return state
+        self.fusion_agent.review_repository = self.review_repository
+        return await self.fusion_agent.route_by_risk(state)
 
     async def prepare_graph_commit(self, state: WorkflowState) -> WorkflowState:
         assert state.document is not None

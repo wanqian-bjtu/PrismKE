@@ -59,6 +59,8 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         reflection_max_attempts: int,
         reflection_token_budget: int,
         reflection_time_budget: int,
+        semantic_advisor: str,
+        agent_token_budget: int,
     ) -> tuple[dict[str, Any], list[list[Any]], str]:
         state, created = service.create_run(
             Path(document),
@@ -73,6 +75,8 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             int(reflection_max_attempts),
             int(reflection_token_budget),
             int(reflection_time_budget),
+            semantic_advisor,
+            int(agent_token_budget),
         )
         if created:
             service.executions.enqueue(state.run_id, "execute")
@@ -81,6 +85,30 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
     def load_run(run_id: str) -> tuple[dict[str, Any], list[list[Any]]]:
         state = service.show_run(run_id)
         return _state_summary(state), _claim_rows(state)
+
+    def agent_report(run_id: str | None) -> tuple[list[list[Any]], dict[str, Any]]:
+        if not run_id:
+            return [], {}
+        state = service.show_run(run_id)
+        rows = [
+            [
+                trace.agent,
+                trace.step,
+                trace.decision,
+                ", ".join(trace.selected_tools),
+                ", ".join(trace.reason_codes),
+                trace.token_usage,
+                trace.status,
+            ]
+            for trace in state.agent_traces
+        ]
+        return rows, {
+            "modality_status": state.modality_status,
+            "modality_errors": state.modality_errors,
+            "token_usage": state.agent_token_usage,
+            "token_budget": state.agent_token_budget,
+            "handoffs": [item.model_dump(mode="json") for item in state.agent_handoffs],
+        }
 
     async def review_claim(
         run_id: str, claim_id: str, decision: str
@@ -481,6 +509,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     ("实体治理", "governance"),
                     ("案例库", "cases"),
                     ("Reflection", "reflection"),
+                    ("Agent 协作", "agents"),
                     ("版本管理", "revisions"),
                     ("系统状态", "health"),
                 ],
@@ -523,6 +552,14 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 )
                 reflection_time_input = gr.Number(
                     value=180, precision=0, label="单运行时间预算（秒）"
+                )
+                semantic_advisor_input = gr.Dropdown(
+                    ["disabled", "mock", "openai-compatible"],
+                    value="disabled",
+                    label="治理/融合语义建议",
+                )
+                agent_tokens_input = gr.Number(
+                    value=20_000, precision=0, label="Agent 建议 Token 预算"
                 )
             with gr.Accordion("模型与后端设置", open=False):
                 llm_base = gr.Textbox(label="LLM Base URL", value=public_settings["llm_base_url"])
@@ -819,6 +856,21 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 reflection_output = gr.JSON(label="Reflection 摘要")
                 reflection_refresh.click(reflection_report, reflection_run, reflection_output)
 
+            with gr.Tab("Agent 协作", id="agents"):
+                gr.Markdown("## Agent 决策轨迹")
+                agent_run = gr.Dropdown(label="运行", choices=[])
+                agent_refresh = gr.Button("查看轨迹")
+                agent_table = gr.Dataframe(
+                    headers=["Agent", "步骤", "决定", "工具", "原因", "Token", "状态"],
+                    interactive=False,
+                    wrap=False,
+                    column_widths=[100, 170, 180, 210, 210, 80, 90],
+                    label="执行与交接",
+                )
+                with gr.Accordion("交接与模态详情", open=False):
+                    agent_details = gr.JSON(label="Agent 交接")
+                agent_refresh.click(agent_report, agent_run, [agent_table, agent_details])
+
             with gr.Tab("健康状态", id="health"):
                 gr.Markdown("## 系统状态")
                 health_button = gr.Button("检查连接")
@@ -833,6 +885,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             run_claims, evidence_run, evidence_claim
         ).then(claim_evidence, [evidence_run, evidence_claim], evidence_id)
         demo.load(evidence_runs, outputs=reflection_run)
+        demo.load(evidence_runs, outputs=agent_run)
         demo.load(
             case_rows,
             [
@@ -860,6 +913,8 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 reflection_attempts_input,
                 reflection_tokens_input,
                 reflection_time_input,
+                semantic_advisor_input,
+                agent_tokens_input,
             ],
             [run_summary, claim_table, run_id_output],
         ).then(sidebar_run, [run_id_output], [current_run, run_context])

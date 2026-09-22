@@ -162,6 +162,8 @@ class EntityResolutionDecision(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     margin: float | None = None
     requires_review: bool = False
+    advised_entity_id: str | None = None
+    advised_action: Literal["link", "review", "nil"] | None = None
     reasons: list[str] = Field(default_factory=list)
 
 
@@ -191,6 +193,8 @@ class EntityReviewTask(BaseModel):
     decision: Literal["link", "create", "approve", "reject", "defer"] | None = None
     selected_entity_id: str | None = None
     proposed_entity_id: str | None = None
+    advised_entity_id: str | None = None
+    advised_action: Literal["link", "review", "nil"] | None = None
     created_at: datetime = Field(default_factory=utc_now)
 
     resolved_at: datetime | None = None
