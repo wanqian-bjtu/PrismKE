@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -56,6 +57,11 @@ def fake_runtime(tmp_path: Path) -> FakeRuntime:
     (project / "runtime" / "neo4j" / "logs" / "neo4j.log").write_text(
         "neo4j ready\n", encoding="utf-8"
     )
+    (project / "runtime" / "neo4j" / "current" / "conf" / "neo4j.conf").write_text(
+        "server.default_listen_address=127.0.0.1\n", encoding="utf-8"
+    )
+    for name in ("service_profile.sh", "start_web.sh", "start_neo4j.sh"):
+        shutil.copyfile(SCRIPT.parent / name, project / "scripts" / name)
 
     _executable(
         project / ".venv" / "bin" / "python",
@@ -179,6 +185,7 @@ exec /usr/bin/tail "$@"
             "FAKE_STATE": str(state),
             "FAKE_API_PORT": "18000",
             "PRISMKE_PROJECT_DIR": str(project),
+            "PRISMKE_RUNTIME_DIR": str(project / "runtime"),
             "PRISMKE_UV_BIN": str(fake_bin / "uv"),
             "PRISMKE_START_TIMEOUT": "1",
         }
@@ -193,6 +200,69 @@ def test_help_and_unknown_command(fake_runtime: FakeRuntime) -> None:
     assert "prismke_autodl.sh start" in help_result.stdout
     assert unknown_result.returncode == 2
     assert "Usage:" in unknown_result.stderr
+
+
+def test_web_entrypoint_is_foreground_and_loopback_only(fake_runtime: FakeRuntime) -> None:
+    env = fake_runtime.env.copy()
+    env["PRISMKE_NEO4J_CONF"] = str(
+        fake_runtime.project / "runtime" / "neo4j" / "current" / "conf"
+    )
+    result = subprocess.run(
+        ["bash", str(fake_runtime.project / "scripts" / "start_web.sh")],
+        cwd=fake_runtime.state,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    env["PRISMKE_API_HOST"] = "0.0.0.0"
+    rejected = subprocess.run(
+        ["bash", str(fake_runtime.project / "scripts" / "start_web.sh")],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert rejected.returncode == 1
+    assert "127.0.0.1" in rejected.stderr
+    assert "sk-private-do-not-print" not in rejected.stderr
+
+
+def test_neo4j_entrypoint_prepares_only_the_isolated_instance(
+    fake_runtime: FakeRuntime,
+) -> None:
+    env = fake_runtime.env.copy()
+    env.pop("PRISMKE_RUNTIME_DIR")
+    result = subprocess.run(
+        ["bash", str(fake_runtime.project / "scripts" / "start_neo4j.sh"), "--prepare"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    config = (
+        fake_runtime.project
+        / "runtime"
+        / "services"
+        / "v010"
+        / "neo4j"
+        / "conf"
+        / "neo4j.conf"
+    )
+    assert result.returncode == 0
+    assert f"server.directories.data={config.parent.parent / 'data'}" in config.read_text()
+    assert not (fake_runtime.state / "neo4j-7687").exists()
+    config.write_text(config.read_text().replace("/services/v010/", "/neo4j/"))
+    rejected = subprocess.run(
+        ["bash", str(fake_runtime.project / "scripts" / "start_neo4j.sh"), "--prepare"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert rejected.returncode == 1
+    assert "isolated v0.10 data" in rejected.stderr
 
 
 def test_full_lifecycle_is_idempotent_and_redacts_environment(

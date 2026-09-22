@@ -63,7 +63,7 @@ embedding = [
 prismke = "prismke.cli:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/prismke"]
+packages = ["src/prismke", "frontend"]
 
 [tool.uv.sources]
 torch = [{ index = "pytorch-cu124", marker = "sys_platform == 'linux'" }]

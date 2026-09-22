@@ -8,12 +8,16 @@ TMUX_SESSION="${PRISMKE_TMUX_SESSION:-prismke-web}"
 LEGACY_TMUX_SESSION="prismke-v03"
 START_TIMEOUT="${PRISMKE_START_TIMEOUT:-30}"
 
-RUNTIME_DIR="${PRISMKE_RUNTIME_DIR:-${PROJECT_DIR}/runtime}"
+RUNTIME_DIR="${PRISMKE_RUNTIME_DIR:-${PROJECT_DIR}/runtime/services/v010}"
 if [[ "${RUNTIME_DIR}" != /* ]]; then
   RUNTIME_DIR="${PROJECT_DIR}/${RUNTIME_DIR}"
 fi
-NEO4J_HOME="${PRISMKE_NEO4J_HOME:-${RUNTIME_DIR}/neo4j/current}"
-NEO4J_CONF="${PRISMKE_NEO4J_CONF:-${NEO4J_HOME}/conf}"
+NEO4J_HOME="${PRISMKE_NEO4J_HOME:-${PROJECT_DIR}/runtime/neo4j/current}"
+if [[ "${RUNTIME_DIR}" == "${PROJECT_DIR}/runtime/services/v010" ]]; then
+  NEO4J_CONF="${PRISMKE_NEO4J_CONF:-${RUNTIME_DIR}/neo4j/conf}"
+else
+  NEO4J_CONF="${PRISMKE_NEO4J_CONF:-${NEO4J_HOME}/conf}"
+fi
 NEO4J_HTTP_PORT="${PRISMKE_NEO4J_HTTP_PORT:-7474}"
 NEO4J_BOLT_PORT="${PRISMKE_NEO4J_BOLT_PORT:-7687}"
 NEO4J_BIN="${NEO4J_HOME}/bin/neo4j"
@@ -73,6 +77,9 @@ preflight() {
   [[ -x "${UV_BIN}" ]] || die "uv executable not found: ${UV_BIN}"
   [[ -x "${PYTHON_BIN}" ]] || die "project Python not found: ${PYTHON_BIN}"
   [[ -x "${NEO4J_BIN}" ]] || die "Neo4j is not installed: ${NEO4J_BIN}"
+  if [[ "${RUNTIME_DIR}" == "${PROJECT_DIR}/runtime/services/v010" ]]; then
+    bash "${PROJECT_DIR}/scripts/start_neo4j.sh" --prepare 9>&-
+  fi
   [[ -d "${NEO4J_CONF}" ]] || die "Neo4j configuration directory not found: ${NEO4J_CONF}"
   [[ "${START_TIMEOUT}" =~ ^[1-9][0-9]*$ ]] || die "PRISMKE_START_TIMEOUT must be a positive integer"
   [[ "${NEO4J_HTTP_PORT}" =~ ^[1-9][0-9]*$ ]] || die "PRISMKE_NEO4J_HTTP_PORT must be a positive integer"
@@ -173,10 +180,10 @@ start_web() {
   local command
   rotate_web_log
   # tmux may have been started by another instance and retain its old environment.
-  printf -v command 'cd %q && exec env PRISMKE_RUNTIME_DIR=%q PRISMKE_API_HOST=%q PRISMKE_API_PORT=%q PRISMKE_NEO4J_URI=%q %q run prismke serve >>%q 2>&1' \
-    "${PROJECT_DIR}" "${RUNTIME_DIR}" "${PRISMKE_API_HOST:-127.0.0.1}" \
+  printf -v command 'cd %q && exec env PRISMKE_PROJECT_DIR=%q PRISMKE_RUNTIME_DIR=%q PRISMKE_API_HOST=%q PRISMKE_API_PORT=%q PRISMKE_NEO4J_URI=%q PRISMKE_UV_BIN=%q bash %q >>%q 2>&1' \
+    "${PROJECT_DIR}" "${PROJECT_DIR}" "${RUNTIME_DIR}" "${PRISMKE_API_HOST:-127.0.0.1}" \
     "$(api_port)" "${PRISMKE_NEO4J_URI:-bolt://127.0.0.1:${NEO4J_BOLT_PORT}}" \
-    "${UV_BIN}" "${WEB_LOG}"
+    "${UV_BIN}" "${PROJECT_DIR}/scripts/start_web.sh" "${WEB_LOG}"
   tmux new-session -d -s "${TMUX_SESSION}" "${command}" 9>&-
 }
 
@@ -228,7 +235,7 @@ start_all() {
       PRISMKE_NEO4J_CONF="${NEO4J_CONF}" \
       PRISMKE_NEO4J_HTTP_PORT="${NEO4J_HTTP_PORT}" \
       PRISMKE_NEO4J_BOLT_PORT="${NEO4J_BOLT_PORT}" \
-      bash "${PROJECT_DIR}/scripts/start_neo4j_autodl.sh" 9>&-
+      bash "${PROJECT_DIR}/scripts/start_neo4j.sh" 9>&-
     started_neo4j=1
   fi
 

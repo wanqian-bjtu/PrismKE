@@ -617,7 +617,7 @@ def create_app(
     app.include_router(api)
     if mount_ui:
         try:
-            from prismke.web.app import mount_gradio
+            from frontend.app import mount_gradio
         except ImportError:
             pass
         else:

@@ -13,6 +13,7 @@ COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --extra neo4j --extra web --no-install-project
 
 COPY src ./src
+COPY frontend ./frontend
 COPY configs ./configs
 RUN uv sync --frozen --no-dev --extra neo4j --extra web
 

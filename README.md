@@ -370,12 +370,19 @@ GET  /api/v1/entities/{entity_id}/history
 
 Gradio `/ui` 中的“实体治理”页面可以检查 Top-K 候选和评分、处理实体链接审核、创建合并/拆分建议并查看治理结果。合并和拆分始终需要人工批准。
 
-AutoDL 原生部署使用统一控制脚本启动 Neo4j 与 PrismKE Web：
+AutoDL 原生部署使用统一控制脚本启动 Neo4j 与 PrismKE Web。`dev/v0.10` 默认使用
+`runtime/services/v010/` 的独立空图谱和运行状态；不会读取旧的 `runtime/neo4j/data`：
 
 ```bash
 bash scripts/prismke_autodl.sh start
 bash scripts/prismke_autodl.sh status
 ```
+
+也可以分别启动：`bash scripts/start_neo4j.sh` 启动本机 Neo4j daemon，
+`bash scripts/start_web.sh` 在当前终端前台启动 Web（`Ctrl+C` 停止 Web）。
+实际 Gradio 页面代码位于根目录 `frontend/`，FastAPI 仍由 `prismke serve`
+启动并在 `/ui/` 挂载页面。独立实例、旧版服务回退及端口转发见
+[v0.10 前端目录与服务切换说明](docs/v0.10前端目录与服务切换说明.md)。
 
 API 位于 `http://127.0.0.1:8000/api/v1`，研究界面位于
 `http://127.0.0.1:8000/ui`。服务器保持本机监听，通过 SSH 端口转发访问。若改为非本地监听，必须设置 `PRISMKE_API_TOKEN`。
