@@ -7,11 +7,11 @@ import pytest
 from fastapi.testclient import TestClient
 from validated_fixtures import JSONGraphStore, prepare_fixture_commit
 
-from prismke.api import create_app
-from prismke.core.errors import GraphIntegrityError
-from prismke.core.ids import canonical_hash
-from prismke.core.settings import Settings
-from prismke.domain import (
+from src.api import create_app
+from src.core.errors import GraphIntegrityError
+from src.core.ids import canonical_hash
+from src.core.settings import Settings
+from src.domain import (
     CanonicalEntity,
     Claim,
     EntityEmbedding,
@@ -21,15 +21,15 @@ from prismke.domain import (
     SchemaIndex,
     load_schema,
 )
-from prismke.governance import (
+from src.governance import (
     EntityGovernanceService,
     SemanticEntityResolver,
     rebuild_entity_index,
 )
-from prismke.governance.entity_resolution import entity_embedding_text
-from prismke.persistence import EntityGovernanceRepository
-from prismke.providers import DisabledEmbeddingProvider, MockEmbeddingProvider
-from prismke.workflow import PrismKEService
+from src.governance.entity_resolution import entity_embedding_text
+from src.persistence import EntityGovernanceRepository
+from src.providers import DisabledEmbeddingProvider, MockEmbeddingProvider
+from src.workflow import PrismKEService
 
 
 class ContextEmbeddingProvider:

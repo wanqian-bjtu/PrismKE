@@ -5,12 +5,12 @@ from uuid import uuid4
 import pytest
 from test_review_workspace import paused_source
 
-from prismke.core.ids import canonical_hash
-from prismke.core.settings import Settings
-from prismke.domain import ReviewDecision
-from prismke.persistence import Neo4jGraphStore
-from prismke.persistence.reviews import ReviewRepository
-from prismke.workflow import PrismKEService
+from src.core.ids import canonical_hash
+from src.core.settings import Settings
+from src.domain import ReviewDecision
+from src.persistence import Neo4jGraphStore
+from src.persistence.reviews import ReviewRepository
+from src.workflow import PrismKEService
 
 
 @pytest.mark.asyncio
@@ -195,7 +195,7 @@ async def test_correction_api_requires_confirm_and_preserves_events(
 ) -> None:
     from fastapi.testclient import TestClient
 
-    from prismke.api import create_app
+    from src.api import create_app
 
     service, state = await paused_source(tmp_path / "source", schema_path)
     with TestClient(create_app(service.settings, service, mount_ui=False)) as client:
@@ -312,7 +312,7 @@ async def test_review_write_failures_are_recoverable(
 async def test_correction_preview_stale_and_shared_support(
     tmp_path: Path, schema_path: Path
 ) -> None:
-    from prismke.domain import GraphCommit, GraphRevision
+    from src.domain import GraphCommit, GraphRevision
 
     service, state = await paused_source(tmp_path / "source", schema_path)
     await service.review_entity(state.run_id, "task:entity", "create", reviewer="tester")
@@ -403,7 +403,7 @@ async def test_identity_correction_requires_new_fact_review(
     schema_path: Path,
     backend: str,
 ) -> None:
-    from prismke.domain import CanonicalEntity, EntityCandidate
+    from src.domain import CanonicalEntity, EntityCandidate
 
     if backend == "neo4j" and os.getenv("PRISMKE_TEST_NEO4J") != "1":
         pytest.skip("dedicated Neo4j fixture required")
@@ -505,7 +505,7 @@ async def test_compensation_failure_replays_same_revision(
 
 @pytest.mark.asyncio
 async def test_exact_compensation_and_stale_rollback(tmp_path: Path, schema_path: Path) -> None:
-    from prismke.core.errors import GraphIntegrityError
+    from src.core.errors import GraphIntegrityError
 
     service, state = await paused_source(tmp_path / "source", schema_path)
     await service.review_entity(state.run_id, "task:entity", "create", reviewer="tester")
@@ -542,7 +542,7 @@ async def test_exact_compensation_and_stale_rollback(tmp_path: Path, schema_path
 
 @pytest.mark.asyncio
 async def test_legacy_run_cannot_be_corrected(tmp_path: Path, schema_path: Path) -> None:
-    from prismke.core.errors import LegacyCheckpointError
+    from src.core.errors import LegacyCheckpointError
 
     service, state = await paused_source(tmp_path / "source", schema_path)
     await service.review_entity(state.run_id, "task:entity", "create", reviewer="tester")

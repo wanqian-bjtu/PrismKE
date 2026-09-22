@@ -60,10 +60,10 @@ embedding = [
 ]
 
 [project.scripts]
-prismke = "prismke.cli:app"
+prismke = "src.cli:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/prismke", "frontend"]
+only-include = ["src", "frontend"]
 
 [tool.uv.sources]
 torch = [{ index = "pytorch-cu124", marker = "sys_platform == 'linux'" }]
@@ -94,7 +94,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
-packages = ["prismke"]
+packages = ["src"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]

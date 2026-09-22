@@ -3,8 +3,8 @@ from typing import Any
 
 import pytest
 
-from prismke.domain import CanonicalEntity, EntityMention, EntityTypeDef, OutputSchema, SchemaIndex
-from prismke.governance.entity_resolution import SemanticEntityResolver
+from src.domain import CanonicalEntity, EntityMention, EntityTypeDef, OutputSchema, SchemaIndex
+from src.governance.entity_resolution import SemanticEntityResolver
 
 
 class ControlledProvider:
@@ -140,9 +140,9 @@ async def test_approved_new_entity_can_be_reused_by_later_batch() -> None:
 
 
 def test_legacy_policy_state_is_read_only(tmp_path: Path) -> None:
-    from prismke.core.errors import LegacyCheckpointError
-    from prismke.domain import WorkflowState
-    from prismke.workflow.service import PrismKEService
+    from src.core.errors import LegacyCheckpointError
+    from src.domain import WorkflowState
+    from src.workflow.service import PrismKEService
 
     state = WorkflowState(run_id="legacy", input_path="x", schema_path="x")
     with pytest.raises(LegacyCheckpointError, match="read-only"):

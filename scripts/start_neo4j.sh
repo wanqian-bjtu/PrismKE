@@ -41,7 +41,7 @@ PY
 done
 cd "${PRISMKE_PROJECT_DIR}"
 PASSWORD="$("${PYTHON_BIN}" - <<'PY'
-from prismke.core.settings import Settings
+from src.core.settings import Settings
 
 print(Settings().neo4j_password or "")
 PY

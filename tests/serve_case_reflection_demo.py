@@ -7,11 +7,11 @@ from pathlib import Path
 
 import uvicorn
 
-from prismke.api import create_app
-from prismke.core.ids import canonical_hash
-from prismke.core.settings import Settings
-from prismke.domain import CaseRecord, EntityTypeDef, OutputSchema, RelationDef
-from prismke.workflow import PrismKEService
+from src.api import create_app
+from src.core.ids import canonical_hash
+from src.core.settings import Settings
+from src.domain import CaseRecord, EntityTypeDef, OutputSchema, RelationDef
+from src.workflow import PrismKEService
 
 
 def main() -> None:

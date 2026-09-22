@@ -61,7 +61,7 @@ api_port() {
   (
     cd "${PROJECT_DIR}"
     "${PYTHON_BIN}" -c \
-      'from prismke.core.settings import Settings; print(Settings().api_port)'
+      'from src.core.settings import Settings; print(Settings().api_port)'
   )
 }
 

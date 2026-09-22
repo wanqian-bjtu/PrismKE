@@ -3,7 +3,7 @@
 from typing import Any
 from uuid import uuid4
 
-from prismke.workflow import PrismKEService
+from src.workflow import PrismKEService
 
 
 def build_correction_tab(service: PrismKEService) -> None:

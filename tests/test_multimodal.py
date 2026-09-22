@@ -10,8 +10,8 @@ from docx import Document
 from docx.shared import Inches
 from PIL import Image
 
-from prismke.core.settings import Settings
-from prismke.domain import (
+from src.core.settings import Settings
+from src.domain import (
     BBox,
     CandidateClaim,
     DocumentIR,
@@ -25,10 +25,10 @@ from prismke.domain import (
     TextBlock,
     VisualExtractionRequest,
 )
-from prismke.governance import MultimodalAlignmentService
-from prismke.parsing import ParserRegistry, select_analysis_assets
-from prismke.providers import OpenAICompatibleVLMProvider, PaddleOCRProvider
-from prismke.workflow import PrismKEService
+from src.governance import MultimodalAlignmentService
+from src.parsing import ParserRegistry, select_analysis_assets
+from src.providers import OpenAICompatibleVLMProvider, PaddleOCRProvider
+from src.workflow import PrismKEService
 
 
 def _image(path: Path) -> None:

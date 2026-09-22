@@ -4,7 +4,7 @@ import json
 import httpx
 import pytest
 
-from prismke.evaluation.request_budget import BudgetedTransport, EvaluationBudgetStop, RequestBudget
+from src.evaluation.request_budget import BudgetedTransport, EvaluationBudgetStop, RequestBudget
 
 
 @pytest.mark.asyncio
@@ -150,9 +150,9 @@ async def test_bailian_evaluation_disables_hidden_thinking_only_for_qwen() -> No
 async def test_document_validation_forces_json_without_touching_production(
     tmp_path, monkeypatch
 ) -> None:
-    from prismke.core.settings import Settings
-    from prismke.domain import WorkflowState
-    from prismke.evaluation.document_validation import _EvaluationService, validate_documents
+    from src.core.settings import Settings
+    from src.domain import WorkflowState
+    from src.evaluation.document_validation import _EvaluationService, validate_documents
 
     source = tmp_path / "sample.txt"
     source.write_text("test")
@@ -196,8 +196,8 @@ async def test_document_validation_forces_json_without_touching_production(
 async def test_document_validation_preserves_interrupted_case_without_traceback(
     tmp_path, monkeypatch
 ) -> None:
-    from prismke.core.settings import Settings
-    from prismke.evaluation.document_validation import _EvaluationService, validate_documents
+    from src.core.settings import Settings
+    from src.evaluation.document_validation import _EvaluationService, validate_documents
 
     (tmp_path / "sample.txt").write_text("test")
     (tmp_path / "schema.yaml").write_text("test")

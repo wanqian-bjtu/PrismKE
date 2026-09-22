@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from prismke.domain import (
+from src.domain import (
     CandidateClaim,
     Claim,
     ClaimStatus,
@@ -14,7 +14,7 @@ from prismke.domain import (
     SchemaIndex,
     load_schema,
 )
-from prismke.governance import (
+from src.governance import (
     EntityResolver,
     MultimodalAlignmentService,
     collect_mentions,

@@ -5,9 +5,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from prismke.api import create_app
-from prismke.core.settings import Settings
-from prismke.domain import (
+from src.api import create_app
+from src.core.settings import Settings
+from src.domain import (
     CandidateClaim,
     CaseRecord,
     CaseStatusEvent,
@@ -24,12 +24,12 @@ from prismke.domain import (
     ReviewEvent,
     WorkflowState,
 )
-from prismke.evaluation import evaluate_reflection_manifest
-from prismke.persistence import CaseRepository
-from prismke.providers import MockEmbeddingProvider, MockReflectionProvider
-from prismke.workflow import PrismKEService
-from prismke.workflow.cases import CaseRetriever, CaseService
-from prismke.workflow.reflection import BoundedReflectionService
+from src.evaluation import evaluate_reflection_manifest
+from src.persistence import CaseRepository
+from src.providers import MockEmbeddingProvider, MockReflectionProvider
+from src.workflow import PrismKEService
+from src.workflow.cases import CaseRetriever, CaseService
+from src.workflow.reflection import BoundedReflectionService
 
 
 class MemoryEvidenceStore:

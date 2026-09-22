@@ -1,7 +1,7 @@
 import csv
 import json
 
-from prismke.evaluation.document_review import (
+from src.evaluation.document_review import (
     document_coverage,
     evidence_match,
     export_document_review,

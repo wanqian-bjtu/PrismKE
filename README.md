@@ -138,6 +138,10 @@ uv sync --extra dev --extra neo4j --extra web --extra embedding
 `uv sync` 在项目内创建 `.venv`。启动脚本优先使用该环境中的 `python` 和
 `prismke`；其它安装方式可设置 `PRISMKE_PYTHON_BIN` 与 `PRISMKE_CLI_BIN`。
 
+`dev/v0.10` 的 Python 源码直接放在根目录 `src/`，导入路径为 `src.*`；
+命令行入口仍是 `prismke`。旧的 `prismke.*` 导入不再适用于此开发分支，
+安装或拉取更新后需重新安装项目依赖。历史运行仍由对应发布版本接续。
+
 ## 快速开始
 
 进入实际检出的项目目录并激活环境：
@@ -432,7 +436,7 @@ runtime/
 
 ```bash
 ruff check .
-mypy src/prismke
+mypy src
 pytest
 ```
 

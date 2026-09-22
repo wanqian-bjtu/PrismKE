@@ -7,9 +7,9 @@ from typing import Any, Literal, cast
 
 from PIL import Image
 
-from prismke.core.ids import stable_id
-from prismke.domain import ReviewDecision
-from prismke.workflow import PrismKEService
+from src.core.ids import stable_id
+from src.domain import ReviewDecision
+from src.workflow import PrismKEService
 
 
 class ReviewController:

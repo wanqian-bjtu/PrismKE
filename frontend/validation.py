@@ -3,7 +3,7 @@
 from typing import Any
 
 from frontend.review import ReviewController
-from prismke.workflow import PrismKEService
+from src.workflow import PrismKEService
 
 
 def build_validation_tab(gr: Any, service: PrismKEService) -> None:

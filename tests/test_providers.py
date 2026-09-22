@@ -5,8 +5,8 @@ import json
 import httpx
 import pytest
 
-from prismke.core.errors import ProviderRequestError, ProviderResponseError
-from prismke.domain import (
+from src.core.errors import ProviderRequestError, ProviderResponseError
+from src.domain import (
     DocumentIR,
     EntityCatalogItem,
     EntityTypeDef,
@@ -17,7 +17,7 @@ from prismke.domain import (
     OutputSchema,
     TextBlock,
 )
-from prismke.providers import OpenAICompatibleLLMProvider
+from src.providers import OpenAICompatibleLLMProvider
 
 
 @pytest.mark.asyncio

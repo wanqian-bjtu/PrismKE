@@ -10,11 +10,11 @@ from openpyxl import Workbook, load_workbook
 from PIL import Image
 from typer.testing import CliRunner
 
-from prismke.domain import EntityCandidate, EntityResolutionDecision
-from prismke.evaluation import evaluate_entity_linking_manifest
-from prismke.evaluation.annotations import export_reviewed_annotations
-from prismke.governance.entity_resolution import ResolutionBundle, SemanticEntityResolver
-from prismke.providers import MockEmbeddingProvider
+from src.domain import EntityCandidate, EntityResolutionDecision
+from src.evaluation import evaluate_entity_linking_manifest
+from src.evaluation.annotations import export_reviewed_annotations
+from src.governance.entity_resolution import ResolutionBundle, SemanticEntityResolver
+from src.providers import MockEmbeddingProvider
 
 
 def write_json(path: Path, value: Any) -> None:
@@ -347,7 +347,7 @@ def test_cli_evaluation_does_not_initialize_application_service(
     tmp_path: Path,
     monkeypatch: Any,
 ) -> None:
-    import prismke.cli as cli
+    import src.cli as cli
 
     def forbidden(*args: Any, **kwargs: Any) -> None:
         raise AssertionError("production application must not be initialized")
@@ -373,7 +373,7 @@ def test_cli_evaluation_does_not_initialize_application_service(
 async def test_baseline_report_exports_readable_candidate_table(tmp_path: Path) -> None:
     import csv
 
-    from prismke.evaluation.baseline_report import write_baseline_report
+    from src.evaluation.baseline_report import write_baseline_report
 
     report = await evaluate_entity_linking_manifest(
         evaluation_manifest(tmp_path), MockEmbeddingProvider(), protocol="fixed"

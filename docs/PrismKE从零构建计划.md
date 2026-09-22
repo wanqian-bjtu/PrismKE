@@ -417,7 +417,7 @@ PrismKE/
 ├── docs/
 │   └── PrismKE从零构建计划.md
 ├── examples/
-├── src/prismke/
+├── src/
 │   ├── core/
 │   ├── workflow/
 │   ├── agents/

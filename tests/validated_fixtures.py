@@ -6,8 +6,8 @@ use the unwrapped production GraphStore and deliberately omit this preparation.
 
 from pathlib import Path
 
-from prismke.core.ids import canonical_hash
-from prismke.domain import (
+from src.core.ids import canonical_hash
+from src.domain import (
     CommitValidationContext,
     EntityTypeDef,
     EvidenceKind,
@@ -18,8 +18,8 @@ from prismke.domain import (
     OutputSchema,
     RelationDef,
 )
-from prismke.persistence import FileEvidenceStore
-from prismke.persistence import JSONGraphStore as ProductionJSONGraphStore
+from src.persistence import FileEvidenceStore
+from src.persistence import JSONGraphStore as ProductionJSONGraphStore
 
 SCHEMA = OutputSchema(
     schema_id="storage-fixtures",

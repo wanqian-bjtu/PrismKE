@@ -8,15 +8,15 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from prismke.agents.budget import UnknownAgentUsageError, can_request, record_call
-from prismke.agents.entity_governance_agent import EntityGovernanceAgent
-from prismke.agents.fusion_review_agent import FusionReviewAgent
-from prismke.agents.multimodal_extraction_agent import MultimodalExtractionAgent
-from prismke.agents.trace import safe_reason_code, trace_step
-from prismke.api import create_app
-from prismke.core.errors import ProviderResponseError
-from prismke.core.settings import Settings
-from prismke.domain import (
+from src.agents.budget import UnknownAgentUsageError, can_request, record_call
+from src.agents.entity_governance_agent import EntityGovernanceAgent
+from src.agents.fusion_review_agent import FusionReviewAgent
+from src.agents.multimodal_extraction_agent import MultimodalExtractionAgent
+from src.agents.trace import safe_reason_code, trace_step
+from src.api import create_app
+from src.core.errors import ProviderResponseError
+from src.core.settings import Settings
+from src.domain import (
     AlignmentRecord,
     CandidateClaim,
     CanonicalEntity,
@@ -36,17 +36,17 @@ from prismke.domain import (
     WorkflowState,
     load_schema,
 )
-from prismke.parsing import ParserRegistry
-from prismke.persistence import FileEvidenceStore, JSONGraphStore
-from prismke.providers import (
+from src.parsing import ParserRegistry
+from src.persistence import FileEvidenceStore, JSONGraphStore
+from src.providers import (
     DisabledOCRProvider,
     DisabledVLMProvider,
     MockLLMProvider,
     MockVLMProvider,
 )
-from prismke.providers.embedding import DisabledEmbeddingProvider
-from prismke.providers.semantic import MockSemanticAdvisor, OpenAICompatibleSemanticAdvisor
-from prismke.workflow import PrismKEService
+from src.providers.embedding import DisabledEmbeddingProvider
+from src.providers.semantic import MockSemanticAdvisor, OpenAICompatibleSemanticAdvisor
+from src.workflow import PrismKEService
 
 
 def _mention(name: str, item_id: str) -> EntityMention:

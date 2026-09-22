@@ -6,11 +6,11 @@ from pathlib import Path
 import orjson
 from fastapi.testclient import TestClient
 
-from prismke.api import create_app
-from prismke.core.settings import Settings
-from prismke.domain import RequestReconciliation
-from prismke.domain.execution import ExecutionTask
-from prismke.workflow import PrismKEService
+from src.api import create_app
+from src.core.settings import Settings
+from src.domain import RequestReconciliation
+from src.domain.execution import ExecutionTask
+from src.workflow import PrismKEService
 
 
 def fixture(tmp_path: Path, schema_path: Path) -> tuple[PrismKEService, str]:

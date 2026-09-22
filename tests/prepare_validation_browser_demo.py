@@ -8,8 +8,8 @@ from pathlib import Path
 
 from test_review_workspace import paused_source
 
-from prismke.providers import DisabledOCRProvider, DisabledVLMProvider, MockLLMProvider
-from prismke.workflow.review_workspace import import_review_run
+from src.providers import DisabledOCRProvider, DisabledVLMProvider, MockLLMProvider
+from src.workflow.review_workspace import import_review_run
 
 
 async def main() -> None:

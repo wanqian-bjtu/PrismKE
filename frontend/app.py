@@ -9,9 +9,9 @@ import orjson
 
 from frontend.review import build_review_tabs
 from frontend.validation import build_validation_tab
-from prismke import __version__
-from prismke.domain import CanonicalEntity, ReviewDecision
-from prismke.workflow import PrismKEService
+from src import __version__
+from src.domain import CanonicalEntity, ReviewDecision
+from src.workflow import PrismKEService
 
 
 def _state_summary(state: Any) -> dict[str, Any]:

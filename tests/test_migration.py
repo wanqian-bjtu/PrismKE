@@ -6,15 +6,15 @@ import orjson
 import pytest
 from validated_fixtures import JSONGraphStore
 
-from prismke.core.errors import GraphIntegrityError
-from prismke.domain import (
+from src.core.errors import GraphIntegrityError
+from src.domain import (
     CanonicalEntity,
     Claim,
     GraphChange,
     GraphCommit,
     GraphRevision,
 )
-from prismke.persistence import migrate_json_graph
+from src.persistence import migrate_json_graph
 
 
 def versioned_transaction() -> GraphCommit:

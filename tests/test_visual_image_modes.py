@@ -6,7 +6,7 @@ import httpx
 import pytest
 from PIL import Image
 
-from prismke.domain import (
+from src.domain import (
     BBox,
     Claim,
     DocumentIR,
@@ -15,9 +15,9 @@ from prismke.domain import (
     OutputSchema,
     VisualExtractionRequest,
 )
-from prismke.governance.risk import route_by_risk
-from prismke.persistence.file_evidence import FileEvidenceStore
-from prismke.providers.vlm import OpenAICompatibleVLMProvider
+from src.governance.risk import route_by_risk
+from src.persistence.file_evidence import FileEvidenceStore
+from src.providers.vlm import OpenAICompatibleVLMProvider
 
 
 def test_cmyk_request_copy_preserves_original(tmp_path):

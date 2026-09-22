@@ -8,25 +8,25 @@ import json
 from pathlib import Path
 from typing import Any
 
-from prismke.core.ids import file_sha256
-from prismke.core.settings import Settings
-from prismke.domain import (
+from src.core.ids import file_sha256
+from src.core.settings import Settings
+from src.domain import (
     CanonicalEntity,
     EntityAdviceRequest,
     EntityCandidate,
     EntityMention,
 )
-from prismke.evaluation.request_budget import (
+from src.evaluation.request_budget import (
     BudgetedTransport,
     EvaluationBudgetStop,
     RequestBudget,
 )
-from prismke.persistence.json_graph import JSONGraphStore
-from prismke.providers.base import VLMProvider
-from prismke.providers.openai_compatible import OpenAICompatibleLLMProvider
-from prismke.providers.semantic import OpenAICompatibleSemanticAdvisor
-from prismke.providers.vlm import OpenAICompatibleVLMProvider
-from prismke.workflow.service import PrismKEService
+from src.persistence.json_graph import JSONGraphStore
+from src.providers.base import VLMProvider
+from src.providers.openai_compatible import OpenAICompatibleLLMProvider
+from src.providers.semantic import OpenAICompatibleSemanticAdvisor
+from src.providers.vlm import OpenAICompatibleVLMProvider
+from src.workflow.service import PrismKEService
 
 ROOT = Path(__file__).resolve().parents[1]
 SAMPLES = (

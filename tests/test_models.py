@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from prismke.domain import Claim, GraphChange, GraphRevision
+from src.domain import Claim, GraphChange, GraphRevision
 
 
 def test_claim_requires_exactly_one_object() -> None:

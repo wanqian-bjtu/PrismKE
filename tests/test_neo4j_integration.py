@@ -7,9 +7,9 @@ from uuid import uuid4
 import pytest
 from validated_fixtures import prepare_fixture_commit
 
-from prismke.core.errors import GraphIntegrityError
-from prismke.core.settings import Settings
-from prismke.domain import (
+from src.core.errors import GraphIntegrityError
+from src.core.settings import Settings
+from src.domain import (
     CanonicalEntity,
     Claim,
     EntityEmbedding,
@@ -21,9 +21,9 @@ from prismke.domain import (
     GraphRevision,
     Modality,
 )
-from prismke.governance import EntityGovernanceService
-from prismke.persistence import EntityGovernanceRepository, Neo4jGraphStore
-from prismke.providers import MockEmbeddingProvider
+from src.governance import EntityGovernanceService
+from src.persistence import EntityGovernanceRepository, Neo4jGraphStore
+from src.providers import MockEmbeddingProvider
 
 pytestmark = pytest.mark.neo4j
 
