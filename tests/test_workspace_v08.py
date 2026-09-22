@@ -161,3 +161,45 @@ def test_runtime_settings_reject_sensitive_url_parameters(tmp_path: Path) -> Non
         )
     assert response.status_code == 422
     assert not (settings.runtime_dir / "config" / "overrides.json").exists()
+
+
+def test_workspace_provider_defaults_and_setting_controls(tmp_path: Path) -> None:
+    settings = Settings(
+        _env_file=None,
+        runtime_dir=tmp_path / "runtime",
+        llm_model="custom-llm",
+        ocr_device="gpu:1",
+        neo4j_database="research",
+    )
+    with TestClient(create_app(settings, PrismKEService(settings))) as client:
+        response = client.get("/ui/config")
+    assert response.status_code == 200
+    fields = {
+        component["props"]["label"]: component
+        for component in response.json()["components"]
+        if component["props"].get("label")
+    }
+
+    for label, value in {
+        "文本 Provider": "openai-compatible",
+        "OCR Provider": "paddle",
+        "视觉 Provider": "openai-compatible",
+    }.items():
+        assert fields[label]["type"] == "dropdown"
+        assert fields[label]["props"]["value"] == value
+    assert fields["允许远程资源"]["props"]["value"] is False
+
+    for label, value in {
+        "LLM 模型别名": "custom-llm",
+        "OCR 设备": "gpu:1",
+        "OCR 语言": "ch",
+        "OCR 模型": "PP-OCRv5",
+        "Neo4j 用户": "neo4j",
+        "Neo4j 数据库": "research",
+    }.items():
+        assert fields[label]["type"] == "dropdown"
+        assert fields[label]["props"]["allow_custom_value"] is True
+        assert fields[label]["props"]["value"] == value
+    assert fields["图存储"]["type"] == "dropdown"
+    for label in ("LLM Base URL", "VLM Base URL", "Neo4j URI"):
+        assert fields[label]["type"] == "textbox"

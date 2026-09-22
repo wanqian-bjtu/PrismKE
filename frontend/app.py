@@ -522,19 +522,19 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             with gr.Accordion("构建配置", open=True):
                 schema_input = gr.File(label="Schema", type="filepath")
                 provider_input = gr.Dropdown(
-                    ["mock", "openai-compatible"], value="mock", label="文本 Provider"
+                    ["mock", "openai-compatible"],
+                    value="openai-compatible",
+                    label="文本 Provider",
                 )
                 ocr_input = gr.Dropdown(
-                    ["disabled", "mock", "paddle"], value="disabled", label="OCR Provider"
+                    ["disabled", "mock", "paddle"], value="paddle", label="OCR Provider"
                 )
                 vlm_input = gr.Dropdown(
                     ["disabled", "mock", "openai-compatible"],
-                    value="disabled",
+                    value="openai-compatible",
                     label="视觉 Provider",
                 )
-                allow_remote = gr.Checkbox(
-                    label="允许远程资源", value=service.settings.allow_remote_assets
-                )
+                allow_remote = gr.Checkbox(label="允许远程资源", value=False)
                 case_mode_input = gr.Dropdown(
                     ["none", "good", "good_bad"], value="none", label="案例检索"
                 )
@@ -563,25 +563,58 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 )
             with gr.Accordion("模型与后端设置", open=False):
                 llm_base = gr.Textbox(label="LLM Base URL", value=public_settings["llm_base_url"])
-                llm_model = gr.Textbox(label="LLM 模型别名", value=public_settings["llm_model"])
+                llm_model = gr.Dropdown(
+                    ["qwen3.7-flash"],
+                    value=public_settings["llm_model"],
+                    label="LLM 模型别名",
+                    allow_custom_value=True,
+                )
                 vlm_base = gr.Textbox(label="VLM Base URL", value=public_settings["vlm_base_url"])
-                vlm_model = gr.Textbox(label="VLM 模型别名", value=public_settings["vlm_model"])
+                vlm_model = gr.Dropdown(
+                    ["qwen3.7-flash"],
+                    value=public_settings["vlm_model"],
+                    label="VLM 模型别名",
+                    allow_custom_value=True,
+                )
                 gr.Markdown(
                     "**密钥状态**  "
                     f"LLM：{'已配置' if public_settings['llm_api_key'] else '未配置'} · "
                     f"VLM：{'已配置' if public_settings['vlm_api_key'] else '未配置'}  \n"
                     "API Key 仅在服务器 `.env` 或安全后端中管理，页面不显示或编辑。"
                 )
-                ocr_device = gr.Textbox(label="OCR 设备", value=public_settings["ocr_device"])
-                ocr_lang = gr.Textbox(label="OCR 语言", value=public_settings["ocr_lang"])
-                ocr_model = gr.Textbox(label="OCR 模型", value=public_settings["ocr_model"])
+                ocr_device = gr.Dropdown(
+                    ["cpu", "gpu:0"],
+                    value=public_settings["ocr_device"],
+                    label="OCR 设备",
+                    allow_custom_value=True,
+                )
+                ocr_lang = gr.Dropdown(
+                    ["ch", "en"],
+                    value=public_settings["ocr_lang"],
+                    label="OCR 语言",
+                    allow_custom_value=True,
+                )
+                ocr_model = gr.Dropdown(
+                    ["PP-OCRv5", "PP-OCRv4", "PP-OCRv3"],
+                    value=public_settings["ocr_model"],
+                    label="OCR 模型",
+                    allow_custom_value=True,
+                )
                 graph_store = gr.Dropdown(
                     ["json", "neo4j"], value=public_settings["graph_store"], label="图存储"
                 )
                 neo4j_uri = gr.Textbox(label="Neo4j URI", value=public_settings["neo4j_uri"])
-                neo4j_user = gr.Textbox(label="Neo4j 用户", value=public_settings["neo4j_user"])
-                neo4j_database = gr.Textbox(
-                    label="Neo4j 数据库", value=public_settings["neo4j_database"]
+                neo4j_user = gr.Dropdown(
+                    ["neo4j"],
+                    value=public_settings["neo4j_user"],
+                    label="Neo4j 用户",
+                    allow_custom_value=True,
+                )
+                neo4j_database = gr.Dropdown(
+                    ["neo4j"],
+                    value=public_settings["neo4j_database"],
+                    label="Neo4j 数据库",
+                    allow_custom_value=True,
                 )
                 gr.Markdown(
                     "**Neo4j 密码：** "
