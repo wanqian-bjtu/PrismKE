@@ -25,6 +25,15 @@ from prismke.evaluation import (
 from prismke.evaluation.annotations import export_reviewed_annotations
 from prismke.governance import rebuild_entity_index
 from prismke.persistence import FileEvidenceStore, Neo4jGraphStore, migrate_json_graph
+from prismke.persistence.legacy_evidence import (
+    closure_commit,
+    existing_maintenance,
+    legacy_snapshot,
+    read_manifest,
+    require_isolated_database,
+    restore_sample_evidence,
+    verify_active_claims,
+)
 from prismke.providers import BGEM3EmbeddingProvider, MockEmbeddingProvider
 from prismke.providers.base import EmbeddingProvider
 from prismke.workflow import PrismKEService
@@ -72,6 +81,91 @@ def validate_run(run_id: str) -> None:
     _print_model(result)
     if getattr(result, "blocking_count", 0):
         raise typer.Exit(1)
+
+
+@app.command("repair-legacy-evidence")
+def repair_legacy_evidence(
+    source_evidence: Annotated[
+        Path, typer.Option("--source-evidence", exists=True, file_okay=False)
+    ],
+    target_evidence: Annotated[Path, typer.Option("--target-evidence", file_okay=False)],
+    expected_data_dir: Annotated[
+        Path, typer.Option("--expected-data-dir", exists=True, file_okay=False)
+    ],
+    manifest: Annotated[
+        Path | None, typer.Option("--manifest", exists=True, dir_okay=False)
+    ] = None,
+    apply: Annotated[bool, typer.Option("--apply")] = False,
+) -> None:
+    """Preview or apply the audited legacy-test closure on an isolated Neo4j clone."""
+    settings = Settings()
+    canary_root = (Path.cwd() / "runtime/canary-v092").resolve()
+    if (
+        settings.neo4j_uri != "bolt://127.0.0.1:17687"
+        or not expected_data_dir.resolve().is_relative_to(canary_root)
+        or not target_evidence.resolve().is_relative_to(canary_root)
+        or source_evidence.resolve() == target_evidence.resolve()
+        or (apply and manifest is None)
+    ):
+        raise typer.BadParameter("legacy repair requires the dedicated v0.9.2 clone and a manifest")
+    password = settings.neo4j_password
+    if password is None:
+        raise typer.BadParameter("Neo4j password is not configured")
+
+    async def execute() -> dict[str, object]:
+        source = FileEvidenceStore(source_evidence)
+        store = Neo4jGraphStore(
+            settings.neo4j_uri,
+            settings.neo4j_user,
+            password,
+            settings.neo4j_database,
+        )
+        try:
+            await require_isolated_database(store, expected_data_dir)
+            previous = await existing_maintenance(store)
+            if previous is not None:
+                if not apply or manifest is None:
+                    raise ValueError(
+                        "maintenance already applied; use the original manifest to verify"
+                    )
+                pinned = read_manifest(manifest)
+                expected_ids = [item["id"] for item in pinned["governance"]]
+                claims = {claim.id: claim for claim in await store.list_claims()}
+                if (
+                    previous.parent_id != pinned["parent_id"]
+                    or sorted(previous.claim_ids) != sorted(expected_ids)
+                    or any(claims[claim_id].tx_to is None for claim_id in expected_ids)
+                ):
+                    raise ValueError("existing maintenance revision does not match the manifest")
+                target = FileEvidenceStore(target_evidence)
+                return {
+                    "status": "already_applied",
+                    "active_claims": await verify_active_claims(store, target),
+                }
+
+            snapshot = await legacy_snapshot(store, source)
+            if not apply:
+                return snapshot
+            assert manifest is not None
+            if read_manifest(manifest) != snapshot:
+                raise ValueError("manifest differs from the latest graph snapshot")
+            target = FileEvidenceStore(target_evidence)
+            await restore_sample_evidence(store, source, target)
+            excluded = {item["id"] for item in snapshot["governance"]}
+            await verify_active_claims(store, target, exclude_ids=excluded)
+            transaction = closure_commit(snapshot, await store.list_claims())
+            store.evidence_store = target
+            await store.commit(transaction)
+            return {
+                "status": "applied",
+                "revision_id": transaction.revision.id,
+                "closed_claims": len(transaction.claims),
+                "active_claims": await verify_active_claims(store, target),
+            }
+        finally:
+            await store.close()
+
+    _print_model(asyncio.run(execute()))
 
 
 @app.command()

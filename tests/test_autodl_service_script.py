@@ -130,6 +130,7 @@ case "${command}" in
   new-session)
     [[ "${FAKE_TMUX_FAIL:-0}" != "1" ]] || exit 1
     touch "${FAKE_STATE}/session-${session}" "${FAKE_STATE}/port-${FAKE_API_PORT:-18000}"
+    printf '%s\n' "$*" >"${FAKE_STATE}/command-${session}"
     echo "new-session:${session}" >>"${FAKE_STATE}/events"
     ;;
   send-keys|kill-session)
@@ -279,6 +280,8 @@ def test_two_instances_have_isolated_ports_locks_logs_and_processes(
             "PRISMKE_NEO4J_CONF": str(second_conf),
             "PRISMKE_NEO4J_HTTP_PORT": "17474",
             "PRISMKE_NEO4J_BOLT_PORT": "17687",
+            "PRISMKE_NEO4J_URI": "bolt://127.0.0.1:17687",
+            "PRISMKE_API_PORT": "18001",
             "PRISMKE_TMUX_SESSION": "prismke-v091-canary",
             "PRISMKE_HEALTH_URL": "http://127.0.0.1:18001/api/v1/health",
         }
@@ -291,6 +294,10 @@ def test_two_instances_have_isolated_ports_locks_logs_and_processes(
     assert (first.state / "neo4j-17687").exists()
     assert (first.state / "session-prismke-web").exists()
     assert (first.state / "session-prismke-v091-canary").exists()
+    canary_command = (first.state / "command-prismke-v091-canary").read_text(encoding="utf-8")
+    assert "PRISMKE_API_PORT=18001" in canary_command
+    assert "PRISMKE_NEO4J_URI=bolt://127.0.0.1:17687" in canary_command
+    assert "sk-private-do-not-print" not in canary_command
     assert (first.project / "runtime" / "prismke-autodl.lock").exists()
     assert (second_runtime / "prismke-autodl.lock").exists()
 

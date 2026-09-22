@@ -172,8 +172,11 @@ stop_tmux_session() {
 start_web() {
   local command
   rotate_web_log
-  printf -v command 'cd %q && exec env PRISMKE_RUNTIME_DIR=%q %q run prismke serve >>%q 2>&1' \
-    "${PROJECT_DIR}" "${RUNTIME_DIR}" "${UV_BIN}" "${WEB_LOG}"
+  # tmux may have been started by another instance and retain its old environment.
+  printf -v command 'cd %q && exec env PRISMKE_RUNTIME_DIR=%q PRISMKE_API_HOST=%q PRISMKE_API_PORT=%q PRISMKE_NEO4J_URI=%q %q run prismke serve >>%q 2>&1' \
+    "${PROJECT_DIR}" "${RUNTIME_DIR}" "${PRISMKE_API_HOST:-127.0.0.1}" \
+    "$(api_port)" "${PRISMKE_NEO4J_URI:-bolt://127.0.0.1:${NEO4J_BOLT_PORT}}" \
+    "${UV_BIN}" "${WEB_LOG}"
   tmux new-session -d -s "${TMUX_SESSION}" "${command}" 9>&-
 }
 
