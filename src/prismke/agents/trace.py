@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from prismke.core.ids import stable_id
 from prismke.domain.agents import AgentHandoff, AgentRole, AgentTrace
 from prismke.domain.workflow import WorkflowState
@@ -15,6 +17,13 @@ ALLOWED_TOOLS: dict[AgentRole, frozenset[str]] = {
         {"reflection", "conflict_detector", "semantic_advisor", "risk_router"}
     ),
 }
+
+
+def safe_reason_code(value: str) -> str:
+    normalized = value.strip().lower()
+    if re.fullmatch(r"[a-z][a-z0-9_]{0,63}", normalized):
+        return normalized
+    return "model_reason_untrusted"
 
 
 def trace_step(

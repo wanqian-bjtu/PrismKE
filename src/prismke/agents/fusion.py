@@ -6,7 +6,7 @@ from time import perf_counter
 from typing import TYPE_CHECKING
 
 from prismke.agents.budget import can_request, record_call, record_response_failure
-from prismke.agents.trace import handoff, trace_step
+from prismke.agents.trace import handoff, safe_reason_code, trace_step
 from prismke.core.errors import ProviderResponseError
 from prismke.core.ids import stable_id
 from prismke.domain import (
@@ -138,7 +138,7 @@ class FusionReviewAgent:
                 tools=("semantic_advisor",),
                 input_ids=(left.id, right.id),
                 output_ids=(state.conflicts[-1].id,) if advice.decision == "conflict" else (),
-                reasons=("related_alignment",),
+                reasons=("related_alignment", safe_reason_code(advice.reason_code)),
                 model_fingerprint=self.advisor.fingerprint(),
                 token_usage=record.total_tokens if record else 0,
                 latency_ms=(perf_counter() - started) * 1000,

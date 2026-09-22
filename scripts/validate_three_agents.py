@@ -154,6 +154,10 @@ async def _run(output: Path, env_file: Path) -> dict[str, Any]:
                     "claim_review_count": sum(
                         item.status == "pending" for item in state.review_tasks
                     ),
+                    "blocking_issue_count": state.validation.blocking_count,
+                    "open_issue_codes": sorted(
+                        {item.code for item in state.validation.issues if item.status == "open"}
+                    ),
                     "evidence_valid": evidence_valid,
                     "model_tokens": sum(
                         item.total_tokens or 0 for item in state.provider_calls

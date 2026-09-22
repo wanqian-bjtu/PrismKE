@@ -5,7 +5,7 @@ from __future__ import annotations
 from time import perf_counter
 
 from prismke.agents.budget import can_request, record_call, record_response_failure
-from prismke.agents.trace import handoff, trace_step
+from prismke.agents.trace import handoff, safe_reason_code, trace_step
 from prismke.core.errors import ProviderResponseError
 from prismke.core.ids import canonical_hash
 from prismke.domain import EntityAdviceRequest, EntityMention, SchemaIndex, WorkflowState
@@ -170,6 +170,7 @@ class EntityGovernanceAgent:
             task.advised_action = advice.action
             task.advised_entity_id = selected
             task.reasons.append(f"semantic_advice_{advice.action}")
+            task.reasons.append(f"semantic_reason:{safe_reason_code(advice.reason_code)}")
             decision = decisions.get(mention_id)
             if decision is not None:
                 decision.advised_action = advice.action
@@ -183,7 +184,7 @@ class EntityGovernanceAgent:
                 tools=("semantic_advisor",),
                 input_ids=(mention_id, *tuple(item.entity_id for item in task.candidates)),
                 output_ids=(selected,) if selected else (),
-                reasons=("gray_zone",),
+                reasons=("gray_zone", safe_reason_code(advice.reason_code)),
                 model_fingerprint=self.advisor.fingerprint(),
                 token_usage=record.total_tokens if record else 0,
                 latency_ms=(perf_counter() - started) * 1000,
