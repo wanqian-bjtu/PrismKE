@@ -252,6 +252,7 @@ def test_neo4j_entrypoint_prepares_only_the_isolated_instance(
     )
     assert result.returncode == 0
     assert f"server.directories.data={config.parent.parent / 'data'}" in config.read_text()
+    assert f"server.directories.run={config.parent.parent / 'run'}" in config.read_text()
     assert not (fake_runtime.state / "neo4j-7687").exists()
     config.write_text(config.read_text().replace("/services/v010/", "/neo4j/"))
     rejected = subprocess.run(
