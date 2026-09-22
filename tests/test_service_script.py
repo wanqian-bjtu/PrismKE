@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT = Path(__file__).parents[1] / "scripts" / "prismke_autodl.sh"
-pytestmark = pytest.mark.skipif(os.name != "posix", reason="AutoDL scripts require POSIX")
+SCRIPT = Path(__file__).parents[1] / "scripts" / "prismke.sh"
+pytestmark = pytest.mark.skipif(os.name != "posix", reason="service scripts require POSIX")
 
 
 def _executable(path: Path, content: str) -> None:
@@ -51,16 +51,14 @@ def fake_runtime(tmp_path: Path) -> FakeRuntime:
     ):
         directory.mkdir(parents=True, exist_ok=True)
 
-    (project / ".env").write_text(
-        "PRISMKE_LLM_API_KEY=sk-private-do-not-print\n", encoding="utf-8"
-    )
+    (project / ".env").write_text("PRISMKE_LLM_API_KEY=sk-private-do-not-print\n", encoding="utf-8")
     (project / "runtime" / "neo4j" / "logs" / "neo4j.log").write_text(
         "neo4j ready\n", encoding="utf-8"
     )
     (project / "runtime" / "neo4j" / "current" / "conf" / "neo4j.conf").write_text(
         "server.default_listen_address=127.0.0.1\n", encoding="utf-8"
     )
-    for name in ("service_profile.sh", "start_web.sh", "start_neo4j.sh"):
+    for name in ("service_profile.sh", "start_web.sh", "start_neo4j.sh", "prismke.sh"):
         shutil.copyfile(SCRIPT.parent / name, project / "scripts" / name)
 
     _executable(
@@ -71,14 +69,25 @@ if [[ "$1" == "-c" ]]; then
   echo "${FAKE_API_PORT:-18000}"
   exit 0
 fi
-if [[ "$1" == "-" ]]; then
+if [[ "$1" == "-" && $# -eq 2 ]]; then
   test -f "${FAKE_STATE}/port-$2"
   exit $?
+fi
+if [[ "$1" == "-" ]]; then
+  echo "fake-password"
+  exit 0
 fi
 exit 2
 """,
     )
-    _executable(fake_bin / "uv", "#!/usr/bin/env bash\nexit 0")
+    _executable(
+        project / ".venv" / "bin" / "prismke",
+        '#!/usr/bin/env bash\nprintf \'%s\\n\' "$*" >"${FAKE_STATE}/web-args"',
+    )
+    _executable(
+        project / "runtime" / "neo4j" / "current" / "bin" / "neo4j-admin",
+        "#!/usr/bin/env bash\nexit 0",
+    )
     _executable(
         project / "runtime" / "neo4j" / "current" / "bin" / "neo4j",
         """
@@ -98,22 +107,16 @@ case "$1" in
       "${FAKE_STATE}/port-${PRISMKE_NEO4J_BOLT_PORT:-7687}"
     echo "Neo4j stopped"
     ;;
+  start)
+    [[ "${FAKE_NEO4J_FAIL:-0}" != "1" ]] || exit 1
+    touch \
+      "${FAKE_STATE}/neo4j-${PRISMKE_NEO4J_BOLT_PORT:-7687}" \
+      "${FAKE_STATE}/port-${PRISMKE_NEO4J_HTTP_PORT:-7474}" \
+      "${FAKE_STATE}/port-${PRISMKE_NEO4J_BOLT_PORT:-7687}"
+    echo "Neo4j started"
+    ;;
   *) exit 2 ;;
 esac
-""",
-    )
-    _executable(
-        project / "scripts" / "start_neo4j_autodl.sh",
-        """
-#!/usr/bin/env bash
-if [[ "${FAKE_NEO4J_FAIL:-0}" == "1" ]]; then
-  exit 1
-fi
-touch \
-  "${FAKE_STATE}/neo4j-${PRISMKE_NEO4J_BOLT_PORT:-7687}" \
-  "${FAKE_STATE}/port-${PRISMKE_NEO4J_HTTP_PORT:-7474}" \
-  "${FAKE_STATE}/port-${PRISMKE_NEO4J_BOLT_PORT:-7687}"
-echo "Neo4j started"
 """,
     )
     _executable(
@@ -186,7 +189,6 @@ exec /usr/bin/tail "$@"
             "FAKE_API_PORT": "18000",
             "PRISMKE_PROJECT_DIR": str(project),
             "PRISMKE_RUNTIME_DIR": str(project / "runtime"),
-            "PRISMKE_UV_BIN": str(fake_bin / "uv"),
             "PRISMKE_START_TIMEOUT": "1",
         }
     )
@@ -197,16 +199,34 @@ def test_help_and_unknown_command(fake_runtime: FakeRuntime) -> None:
     help_result = fake_runtime.run("--help")
     unknown_result = fake_runtime.run("unknown")
     assert help_result.returncode == 0
-    assert "prismke_autodl.sh start" in help_result.stdout
+    assert "prismke.sh start" in help_result.stdout
     assert unknown_result.returncode == 2
     assert "Usage:" in unknown_result.stderr
 
 
+def test_project_is_discovered_from_script_path(fake_runtime: FakeRuntime) -> None:
+    env = fake_runtime.env.copy()
+    env.pop("PRISMKE_PROJECT_DIR")
+    env.pop("PRISMKE_RUNTIME_DIR")
+    result = subprocess.run(
+        ["bash", str(fake_runtime.project / "scripts" / "prismke.sh"), "start"],
+        cwd=fake_runtime.state,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 0
+    assert (
+        fake_runtime.project / "runtime" / "services" / "v010" / "neo4j" / "conf" / "neo4j.conf"
+    ).exists()
+    assert "sk-private-do-not-print" not in result.stdout + result.stderr
+
+
 def test_web_entrypoint_is_foreground_and_loopback_only(fake_runtime: FakeRuntime) -> None:
     env = fake_runtime.env.copy()
-    env["PRISMKE_NEO4J_CONF"] = str(
-        fake_runtime.project / "runtime" / "neo4j" / "current" / "conf"
-    )
+    env["PRISMKE_NEO4J_CONF"] = str(fake_runtime.project / "runtime" / "neo4j" / "current" / "conf")
     result = subprocess.run(
         ["bash", str(fake_runtime.project / "scripts" / "start_web.sh")],
         cwd=fake_runtime.state,
@@ -216,6 +236,7 @@ def test_web_entrypoint_is_foreground_and_loopback_only(fake_runtime: FakeRuntim
         check=False,
     )
     assert result.returncode == 0
+    assert (fake_runtime.state / "web-args").read_text() == "serve --host 127.0.0.1 --port 8000\n"
     env["PRISMKE_API_HOST"] = "0.0.0.0"
     rejected = subprocess.run(
         ["bash", str(fake_runtime.project / "scripts" / "start_web.sh")],
@@ -242,13 +263,7 @@ def test_neo4j_entrypoint_prepares_only_the_isolated_instance(
         check=False,
     )
     config = (
-        fake_runtime.project
-        / "runtime"
-        / "services"
-        / "v010"
-        / "neo4j"
-        / "conf"
-        / "neo4j.conf"
+        fake_runtime.project / "runtime" / "services" / "v010" / "neo4j" / "conf" / "neo4j.conf"
     )
     assert result.returncode == 0
     assert f"server.directories.data={config.parent.parent / 'data'}" in config.read_text()
@@ -263,7 +278,35 @@ def test_neo4j_entrypoint_prepares_only_the_isolated_instance(
         check=False,
     )
     assert rejected.returncode == 1
-    assert "isolated v0.10 data" in rejected.stderr
+    assert "selected runtime directory" in rejected.stderr
+
+
+def test_custom_runtime_prepares_its_own_configuration(fake_runtime: FakeRuntime) -> None:
+    env = fake_runtime.env.copy()
+    runtime = fake_runtime.project / "runtime" / "another-instance"
+    env["PRISMKE_RUNTIME_DIR"] = str(runtime)
+    result = subprocess.run(
+        ["bash", str(fake_runtime.project / "scripts" / "start_neo4j.sh"), "--prepare"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    config = (runtime / "neo4j" / "conf" / "neo4j.conf").read_text()
+    assert f"server.directories.data={runtime / 'neo4j' / 'data'}" in config
+    assert f"server.directories.run={runtime / 'neo4j' / 'run'}" in config
+
+
+def test_primary_scripts_have_no_machine_specific_path() -> None:
+    for name in (
+        "prismke.sh",
+        "service_profile.sh",
+        "start_web.sh",
+        "start_neo4j.sh",
+        "install_neo4j.sh",
+    ):
+        assert "/root/autodl-tmp" not in (SCRIPT.parent / name).read_text()
 
 
 def test_full_lifecycle_is_idempotent_and_redacts_environment(
@@ -307,9 +350,7 @@ def test_port_conflict_is_detected_before_starting_neo4j(
 
 
 @pytest.mark.parametrize("failure", ["health", "tmux"])
-def test_failed_web_start_rolls_back_new_neo4j(
-    fake_runtime: FakeRuntime, failure: str
-) -> None:
+def test_failed_web_start_rolls_back_new_neo4j(fake_runtime: FakeRuntime, failure: str) -> None:
     if failure == "health":
         fake_runtime.env["FAKE_HEALTH"] = "degraded"
     else:
@@ -345,9 +386,7 @@ def test_two_instances_have_isolated_ports_locks_logs_and_processes(
         {
             "FAKE_API_PORT": "18001",
             "PRISMKE_RUNTIME_DIR": str(second_runtime),
-            "PRISMKE_NEO4J_HOME": str(
-                fake_runtime.project / "runtime" / "neo4j" / "current"
-            ),
+            "PRISMKE_NEO4J_HOME": str(fake_runtime.project / "runtime" / "neo4j" / "current"),
             "PRISMKE_NEO4J_CONF": str(second_conf),
             "PRISMKE_NEO4J_HTTP_PORT": "17474",
             "PRISMKE_NEO4J_BOLT_PORT": "17687",
@@ -369,8 +408,8 @@ def test_two_instances_have_isolated_ports_locks_logs_and_processes(
     assert "PRISMKE_API_PORT=18001" in canary_command
     assert "PRISMKE_NEO4J_URI=bolt://127.0.0.1:17687" in canary_command
     assert "sk-private-do-not-print" not in canary_command
-    assert (first.project / "runtime" / "prismke-autodl.lock").exists()
-    assert (second_runtime / "prismke-autodl.lock").exists()
+    assert (first.project / "runtime" / "prismke-service.lock").exists()
+    assert (second_runtime / "prismke-service.lock").exists()
 
     default_log = first.project / "runtime" / "logs" / "prismke-web.log"
     canary_log = second_runtime / "logs" / "prismke-web.log"
@@ -396,9 +435,7 @@ def test_custom_instance_reports_its_neo4j_port_conflict(
     fake_runtime.env.update(
         {
             "PRISMKE_RUNTIME_DIR": str(runtime_dir),
-            "PRISMKE_NEO4J_HOME": str(
-                fake_runtime.project / "runtime" / "neo4j" / "current"
-            ),
+            "PRISMKE_NEO4J_HOME": str(fake_runtime.project / "runtime" / "neo4j" / "current"),
             "PRISMKE_NEO4J_CONF": str(conf_dir),
             "PRISMKE_NEO4J_HTTP_PORT": "17474",
             "PRISMKE_NEO4J_BOLT_PORT": "17687",

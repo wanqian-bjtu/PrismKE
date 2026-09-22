@@ -135,19 +135,16 @@ uv sync --extra dev --extra neo4j --extra web
 uv sync --extra dev --extra neo4j --extra web --extra embedding
 ```
 
-在当前 AutoDL 服务器上，环境路径为：
-
-```text
-/root/miniconda3/envs/prismke
-```
+`uv sync` 在项目内创建 `.venv`。启动脚本优先使用该环境中的 `python` 和
+`prismke`；其它安装方式可设置 `PRISMKE_PYTHON_BIN` 与 `PRISMKE_CLI_BIN`。
 
 ## 快速开始
 
-进入项目目录并激活环境：
+进入实际检出的项目目录并激活环境：
 
 ```bash
-cd /root/autodl-tmp/PrismKE
-conda activate prismke
+cd /path/to/PrismKE
+source .venv/bin/activate
 ```
 
 验证示例 Schema：
@@ -264,8 +261,8 @@ PRISMKE_VLM_TIMEOUT=120
 ```
 
 北京地域推荐使用百炼业务空间专属 API Host。`<WorkspaceId>` 可在 API Key 创建结果或
-业务空间管理页面中查看。服务器上的真实配置应写入
-`/root/autodl-tmp/PrismKE/.env`：先复制 `.env.example`，再将同一个 API Key 分别填入
+业务空间管理页面中查看。真实配置应写入项目根目录的 `.env`：先复制
+`.env.example`，再将同一个 API Key 分别填入
 `PRISMKE_LLM_API_KEY` 和 `PRISMKE_VLM_API_KEY`。`.env` 已被 Git 忽略，禁止将密钥
 写入 `.env.example`、命令行参数、日志或运行结果。
 
@@ -370,12 +367,15 @@ GET  /api/v1/entities/{entity_id}/history
 
 Gradio `/ui` 中的“实体治理”页面可以检查 Top-K 候选和评分、处理实体链接审核、创建合并/拆分建议并查看治理结果。合并和拆分始终需要人工批准。
 
-AutoDL 原生部署使用统一控制脚本启动 Neo4j 与 PrismKE Web。`dev/v0.10` 默认使用
-`runtime/services/v010/` 的独立空图谱和运行状态；不会读取旧的 `runtime/neo4j/data`：
+Linux/WSL 部署使用项目内的统一控制脚本启动 Neo4j 与 PrismKE Web，不依赖
+AutoDL 路径或 Conda。需先安装 Java、Neo4j、tmux、curl、flock 和项目虚拟环境；
+`scripts/install_neo4j.sh` 可将 Neo4j 安装到项目的 `runtime/neo4j/current`。
+`dev/v0.10` 默认使用 `runtime/services/v010/` 的隔离图谱和运行状态，不会读取
+旧的 `runtime/neo4j/data`；可用 `PRISMKE_RUNTIME_DIR` 指定另一实例目录：
 
 ```bash
-bash scripts/prismke_autodl.sh start
-bash scripts/prismke_autodl.sh status
+bash scripts/prismke.sh start
+bash scripts/prismke.sh status
 ```
 
 也可以分别启动：`bash scripts/start_neo4j.sh` 启动本机 Neo4j daemon，
@@ -390,14 +390,16 @@ API 位于 `http://127.0.0.1:8000/api/v1`，研究界面位于
 常用运维命令：
 
 ```bash
-bash scripts/prismke_autodl.sh stop
-bash scripts/prismke_autodl.sh restart
-bash scripts/prismke_autodl.sh health
-bash scripts/prismke_autodl.sh logs web --lines 100
-bash scripts/prismke_autodl.sh logs neo4j --follow
+bash scripts/prismke.sh stop
+bash scripts/prismke.sh restart
+bash scripts/prismke.sh health
+bash scripts/prismke.sh logs web --lines 100
+bash scripts/prismke.sh logs neo4j --follow
 ```
 
-脚本不会配置平台级开机自启动。AutoDL 实例启动后执行一次 `start` 即可；重复启动和停止均为幂等操作。本地开发仍可直接执行 `prismke serve`。
+脚本从自身位置定位项目，不要求当前工作目录固定，也不配置平台级开机自启动。
+机器重启后执行一次 `start` 即可；重复启动和停止均为幂等操作。本地开发仍可
+直接执行 `prismke serve`。原 `_autodl.sh` 文件仅作为旧命令兼容入口。
 
 JSON 图谱迁移预检与执行：
 
