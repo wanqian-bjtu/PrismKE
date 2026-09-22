@@ -1,4 +1,4 @@
-"""Multimodal extraction agent with explicit tool choice and evidence handoff."""
+"""MultimodalExtractionAgent with explicit tool choice and evidence handoff."""
 
 from __future__ import annotations
 

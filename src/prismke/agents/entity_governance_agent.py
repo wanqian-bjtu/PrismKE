@@ -1,4 +1,4 @@
-"""Entity and fact governance agent with guarded gray-zone advice."""
+"""EntityGovernanceAgent with guarded gray-zone advice."""
 
 from __future__ import annotations
 

@@ -9,9 +9,9 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from prismke.agents.budget import UnknownAgentUsageError, can_request, record_call
-from prismke.agents.extraction import MultimodalExtractionAgent
-from prismke.agents.fusion import FusionReviewAgent
-from prismke.agents.governance import EntityGovernanceAgent
+from prismke.agents.entity_governance_agent import EntityGovernanceAgent
+from prismke.agents.fusion_review_agent import FusionReviewAgent
+from prismke.agents.multimodal_extraction_agent import MultimodalExtractionAgent
 from prismke.agents.trace import safe_reason_code, trace_step
 from prismke.api import create_app
 from prismke.core.errors import ProviderResponseError

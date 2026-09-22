@@ -1,4 +1,4 @@
-"""Evidence-aware fusion and review agent; graph writes remain outside this agent."""
+"""FusionReviewAgent; graph writes remain outside this agent."""
 
 from __future__ import annotations
 

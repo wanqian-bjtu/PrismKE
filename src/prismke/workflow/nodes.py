@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from prismke.agents.extraction import MultimodalExtractionAgent
-from prismke.agents.fusion import FusionReviewAgent
-from prismke.agents.governance import EntityGovernanceAgent
+from prismke.agents.entity_governance_agent import EntityGovernanceAgent
+from prismke.agents.fusion_review_agent import FusionReviewAgent
+from prismke.agents.multimodal_extraction_agent import MultimodalExtractionAgent
 from prismke.core.errors import EvidenceIntegrityError, GraphIntegrityError
 from prismke.core.execution_control import current_execution
 from prismke.core.ids import canonical_hash, stable_id
