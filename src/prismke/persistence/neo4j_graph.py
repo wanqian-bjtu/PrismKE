@@ -177,7 +177,8 @@ class Neo4jGraphStore:
         current_claims = {
             _load(r["payload"], Claim).id: _load(r["payload"], Claim) async for r in claim_result
         }
-        if transaction.revision.run_id.startswith("rollback:"):
+        exact_maintenance = transaction.revision.run_id == "maintenance:legacy-evidence-v092"
+        if transaction.revision.run_id.startswith("rollback:") or exact_maintenance:
             labels = {
                 "entity": "Entity",
                 "claim": "Claim",
@@ -192,8 +193,15 @@ class Neo4jGraphStore:
                 )
                 row = await result.single()
                 payload = orjson.loads(row["payload"]) if row else None
+                if exact_maintenance and change.resource_type == "claim" and payload is not None:
+                    payload = Claim.model_validate(payload).model_dump(mode="json")
                 if payload != change.before:
-                    raise GraphIntegrityError("STALE_ROLLBACK_RESOURCE")
+                    reason = (
+                        "STALE_MAINTENANCE_RESOURCE"
+                        if exact_maintenance
+                        else "STALE_ROLLBACK_RESOURCE"
+                    )
+                    raise GraphIntegrityError(reason)
         from prismke.governance.review_guards import verify_correction
         from prismke.persistence.json_graph import JSONGraphStore
 
@@ -210,6 +218,7 @@ class Neo4jGraphStore:
             if c.id in current_claims
             and transaction.correction_guard is None
             and not transaction.revision.run_id.startswith("rollback:")
+            and not exact_maintenance
             else c
             for c in transaction.claims
         ]
