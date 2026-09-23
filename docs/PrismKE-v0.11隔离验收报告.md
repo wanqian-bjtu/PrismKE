@@ -58,6 +58,6 @@
 - LibreOffice：服务器安装 Writer/headless `7.3.7.2`，真实合成 DOC 转换测试 1 项通过。
 - 浏览器：服务器桌面、平板、移动与 15 个工作台页面通过；同时修复并行 worktree 测试子进程误载旧前端源码的问题。
 - 服务：服务器 `/root/autodl-tmp/PrismKE` 已切换到 `dev/v0.11`，Web、Neo4j 和工作器健康；新运行目录为空，旧 `runtime/services/v010` 保留。
-- 同步：本地、GitHub 与服务器均使用 `dev/v0.11`；仅保留服务器原有的 Jupyter `.ipynb_checkpoints` 未跟踪目录，不纳入 Git。
+- 同步：本地、GitHub 与服务器均使用 `dev/v0.11`；服务器原有的 Jupyter `.ipynb_checkpoints` 文件继续保留，并由 Git 忽略规则排除。
 
 v0.11 只交付开发分支，不合并 `main`，不创建发布标签；生产 v0.9.2 服务和图谱未替换。
