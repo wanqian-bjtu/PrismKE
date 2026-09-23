@@ -219,7 +219,7 @@ def test_project_is_discovered_from_script_path(fake_runtime: FakeRuntime) -> No
     )
     assert result.returncode == 0
     assert (
-        fake_runtime.project / "runtime" / "services" / "v010" / "neo4j" / "conf" / "neo4j.conf"
+        fake_runtime.project / "runtime" / "services" / "v011" / "neo4j" / "conf" / "neo4j.conf"
     ).exists()
     assert "sk-private-do-not-print" not in result.stdout + result.stderr
 
