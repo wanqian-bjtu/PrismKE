@@ -111,7 +111,7 @@ APP_CSS = r"""
 #workspace-brand {
   box-sizing: border-box;
   width: 100%;
-  min-height: 142px;
+  min-height: 178px;
   margin: 0;
   padding: 18px 28px 14px;
   align-items: center;
@@ -122,8 +122,8 @@ APP_CSS = r"""
 }
 
 #workspace-logo {
-  width: min(360px, 62vw) !important;
-  max-height: 108px !important;
+  width: min(468px, 70vw) !important;
+  max-height: 140px !important;
   margin: 0 auto !important;
   background: transparent !important;
 }
@@ -131,7 +131,7 @@ APP_CSS = r"""
 #workspace-logo img {
   width: 100% !important;
   height: auto !important;
-  max-height: 108px !important;
+  max-height: 140px !important;
   object-fit: contain !important;
   background: transparent !important;
 }
@@ -241,7 +241,7 @@ APP_CSS = r"""
   #workspace-resizer { display: none; }
   #workspace-brand {
     width: 100%;
-    min-height: 128px;
+    min-height: 160px;
     margin-left: 0;
     padding: 14px 18px 12px;
   }
@@ -259,9 +259,9 @@ APP_CSS = r"""
   #workspace-sidebar:not(.open) {
     left: calc(12px - min(320px, 88vw)) !important;
   }
-  #workspace-brand { min-height: 118px; padding: 12px 12px 10px; }
-  #workspace-logo { width: min(250px, 78vw) !important; max-height: 84px !important; }
-  #workspace-logo img { max-height: 84px !important; }
+  #workspace-brand { min-height: 148px; padding: 12px 12px 10px; }
+  #workspace-logo { width: min(325px, 84vw) !important; max-height: 109px !important; }
+  #workspace-logo img { max-height: 109px !important; }
   .workspace-tagline { max-width: 330px; font-size: 12px; }
   .workspace-version { font-size: 11px; }
   #workspace-tabs { width: calc(100% - 16px); padding-bottom: 24px; }

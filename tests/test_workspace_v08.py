@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sqlite3
 from pathlib import Path
 
@@ -163,17 +164,77 @@ def test_runtime_settings_reject_sensitive_url_parameters(tmp_path: Path) -> Non
     assert not (settings.runtime_dir / "config" / "overrides.json").exists()
 
 
+def test_neo4j_password_is_private_clearable_and_conflict_safe(tmp_path: Path) -> None:
+    secret = "neo4j-private-password-922"
+    settings = Settings(_env_file=None, runtime_dir=tmp_path / "runtime")
+    service = PrismKEService(settings)
+    with TestClient(create_app(settings, service, mount_ui=False)) as client:
+        saved = client.patch(
+            "/api/v1/settings",
+            json={"values": {"neo4j_password": secret}, "operator": "管理员"},
+        )
+        assert saved.status_code == 200
+        assert saved.json()["settings"]["neo4j_password"] is True
+        assert saved.json()["restart_required"] is True
+        assert secret not in orjson.dumps(saved.json()).decode()
+
+        conflict = client.patch(
+            "/api/v1/settings",
+            json={
+                "values": {"neo4j_password": "replacement"},
+                "clear_secrets": ["neo4j_password"],
+                "operator": "管理员",
+            },
+        )
+        assert conflict.status_code == 422
+        assert service.settings.neo4j_password == secret
+
+        cleared = client.patch(
+            "/api/v1/settings",
+            json={
+                "values": {},
+                "clear_secrets": ["neo4j_password"],
+                "operator": "管理员",
+            },
+        )
+        assert cleared.status_code == 200
+        assert cleared.json()["settings"]["neo4j_password"] is False
+
+    private_path = settings.runtime_dir / "config" / "overrides.json"
+    if os.name != "nt":
+        assert private_path.stat().st_mode & 0o777 == 0o600
+    audit = settings.audit_path.read_text(encoding="utf-8")
+    assert secret not in audit
+    assert "replacement" not in audit
+    assert PrismKEService(
+        Settings(_env_file=None, runtime_dir=settings.runtime_dir)
+    ).settings.neo4j_password is None
+
+
 def test_workspace_provider_defaults_and_setting_controls(tmp_path: Path) -> None:
     settings = Settings(
         _env_file=None,
         runtime_dir=tmp_path / "runtime",
         llm_model="custom-llm",
-        ocr_device="gpu:1",
+        ocr_device="gpu:0",
+        ocr_lang="zh",
         neo4j_database="research",
     )
-    with TestClient(create_app(settings, PrismKEService(settings))) as client:
+    service = PrismKEService(settings)
+    with TestClient(create_app(settings, service)) as client:
         response = client.get("/ui/config")
+        public = client.get("/api/v1/settings")
+        immutable = client.patch(
+            "/api/v1/settings",
+            json={
+                "values": {"ocr_device_resolved": "cpu"},
+                "operator": "tester",
+            },
+        )
     assert response.status_code == 200
+    assert public.status_code == 200
+    assert public.json()["ocr_device_resolved"] == "gpu:0"
+    assert immutable.status_code == 422
     fields = {
         component["props"]["label"]: component
         for component in response.json()["components"]
@@ -193,15 +254,19 @@ def test_workspace_provider_defaults_and_setting_controls(tmp_path: Path) -> Non
     assert fields["LLM 模型别名"]["props"]["value"] == "custom-llm"
 
     for label, value in {
-        "OCR 设备": "gpu:1",
-        "OCR 语言": "ch",
+        "OCR 设备": "gpu:0",
+        "OCR 语言": "zh",
         "OCR 模型": "PP-OCRv5",
         "Neo4j 用户": "neo4j",
         "Neo4j 数据库": "research",
     }.items():
         assert fields[label]["type"] == "dropdown"
-        assert fields[label]["props"]["allow_custom_value"] is True
+        if label not in {"OCR 设备", "OCR 语言"}:
+            assert fields[label]["props"]["allow_custom_value"] is True
         assert fields[label]["props"]["value"] == value
+    assert fields["Neo4j 密码"]["props"]["type"] == "password"
+    assert not fields["Neo4j 密码"]["props"].get("value")
+    assert fields["清除已保存 Neo4j 密码"]["props"]["value"] is False
     assert fields["图存储"]["type"] == "dropdown"
     for label in ("LLM Base URL", "VLM Base URL", "Neo4j URI"):
         assert fields[label]["type"] == "textbox"

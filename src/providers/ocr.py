@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import re
+from functools import lru_cache
 from importlib import import_module
 from typing import Any
 
@@ -22,6 +24,42 @@ from src.domain import (
 from src.parsing.visual_assets import select_analysis_assets
 
 
+@lru_cache(maxsize=1)
+def detect_ocr_device() -> str:
+    """Resolve automatic OCR placement using Paddle's own CUDA capability."""
+
+    try:
+        paddle = import_module("paddle")
+        device = paddle.device
+        compiled_check = getattr(device, "is_compiled_with_cuda", None) or getattr(
+            paddle, "is_compiled_with_cuda", None
+        )
+        cuda = device.cuda
+        if compiled_check is not None and compiled_check() and int(cuda.device_count()) > 0:
+            return "gpu:0"
+    except Exception:
+        pass
+    return "cpu"
+
+
+def resolve_ocr_device(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized == "auto":
+        return detect_ocr_device()
+    if normalized == "cpu" or re.fullmatch(r"gpu:\d+", normalized):
+        return normalized
+    raise ValueError("ocr_device must be auto, cpu or gpu:<index>")
+
+
+def resolve_ocr_language(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized in {"ch", "mixed", "zh"}:
+        return "ch"
+    if normalized == "en":
+        return "en"
+    raise ValueError("ocr_lang must be mixed, zh, en or legacy ch")
+
+
 class DisabledOCRProvider:
     def fingerprint(self) -> str:
         return "disabled"
@@ -38,7 +76,11 @@ class MockOCRProvider(DisabledOCRProvider):
 
 class PaddleOCRProvider:
     def __init__(self, device: str = "cpu", lang: str = "ch", model: str = "PP-OCRv5") -> None:
-        self.device, self.lang, self.model = device, lang, model
+        self.requested_device = device
+        self.requested_language = lang
+        self.device = resolve_ocr_device(device)
+        self.lang = resolve_ocr_language(lang)
+        self.model = model
         self._engine: Any = None
 
     def fingerprint(self) -> str:

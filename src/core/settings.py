@@ -18,8 +18,8 @@ class Settings(BaseSettings):
     vlm_model: str | None = None
     vlm_timeout: float = 120.0
     vlm_max_image_edge: int = 2048
-    ocr_device: str = "cpu"
-    ocr_lang: str = "ch"
+    ocr_device: str = "auto"
+    ocr_lang: str = "mixed"
     ocr_model: str = "PP-OCRv5"
     allow_remote_assets: bool = False
     runtime_dir: Path = Path("runtime")

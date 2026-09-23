@@ -527,8 +527,12 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         neo4j_uri: str,
         neo4j_user: str,
         neo4j_database: str,
+        neo4j_password: str,
+        clear_neo4j_password: bool,
         operator: str,
-    ) -> str:
+    ) -> tuple[str, Any, Any]:
+        if neo4j_password.strip() and clear_neo4j_password:
+            raise ValueError("不能同时设置和清除 Neo4j 密码")
         values: dict[str, Any] = {
             "llm_base_url": llm_base_url,
             "llm_model": llm_model or None,
@@ -541,17 +545,26 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             "neo4j_uri": neo4j_uri,
             "neo4j_user": neo4j_user,
             "neo4j_database": neo4j_database,
+            "neo4j_password": neo4j_password or None,
         }
-        result = service.update_settings(values, [], operator)
+        clear_secrets = ["neo4j_password"] if clear_neo4j_password else []
+        result = service.update_settings(values, clear_secrets, operator)
         settings = result["settings"]
         restart_note = " · 需要重启服务" if result["restart_required"] else ""
         return (
             f"设置已保存 · 图存储 {settings['graph_store']} · "
-            f"LLM {settings['llm_model']}{restart_note}"
+            f"LLM {settings['llm_model']}{restart_note}",
+            gr.update(value=""),
+            gr.update(value=False),
         )
 
     claim_headers = ["Claim ID", "主语", "关系", "宾语", "置信度", "状态", "证据"]
     public_settings = service.settings_view()
+    configured_ocr_lang = public_settings["ocr_lang"]
+    if configured_ocr_lang == "ch":
+        configured_ocr_lang = "mixed"
+    resolved_ocr_device = public_settings["ocr_device_resolved"]
+    resolved_ocr_device_label = "GPU 0" if resolved_ocr_device == "gpu:0" else "CPU"
     with gr.Blocks(
         title="PrismKE 研究工作台",
         fill_height=True,
@@ -612,11 +625,11 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 case_mode_input = gr.Dropdown(
                     ["none", "good", "good_bad"], value="none", label="案例检索"
                 )
-            with gr.Accordion("高级策略", open=False):
-                reflection_enabled_input = gr.Checkbox(label="启用 Reflection", value=False)
+            with gr.Accordion("高级策略", open=True):
+                reflection_enabled_input = gr.Checkbox(label="启用 Reflection", value=True)
                 reflection_provider_input = gr.Dropdown(
                     ["disabled", "mock", "openai-compatible"],
-                    value="disabled",
+                    value="openai-compatible",
                     label="Reflection Provider",
                 )
                 reflection_attempts_input = gr.Slider(
@@ -630,11 +643,16 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 )
                 semantic_advisor_input = gr.Dropdown(
                     ["disabled", "mock", "openai-compatible"],
-                    value="disabled",
+                    value="openai-compatible",
                     label="治理/融合语义建议",
                 )
                 agent_tokens_input = gr.Number(
                     value=20_000, precision=0, label="Agent 建议 Token 预算"
+                )
+                gr.Markdown(
+                    "默认启用受预算限制的 Reflection 与语义建议，"
+                    "会产生额外模型调用；缺少 LLM Key 时将在调用前阻断。",
+                    elem_classes="sidebar-status",
                 )
             with gr.Accordion("模型与图存储", open=False):
                 llm_base = gr.Textbox(label="LLM Base URL", value=public_settings["llm_base_url"])
@@ -664,16 +682,18 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     "页面输入的 API Key 仅保存在当前服务进程内，不写入运行文件或日志。"
                 )
                 ocr_device = gr.Dropdown(
-                    ["cpu", "gpu:0"],
+                    [
+                        (f"自动（当前：{resolved_ocr_device_label}）", "auto"),
+                        ("CPU", "cpu"),
+                        ("GPU 0", "gpu:0"),
+                    ],
                     value=public_settings["ocr_device"],
                     label="OCR 设备",
-                    allow_custom_value=True,
                 )
                 ocr_lang = gr.Dropdown(
-                    [("中英混合", "ch"), ("英文", "en")],
-                    value=public_settings["ocr_lang"],
+                    [("中英混合", "mixed"), ("英文", "en"), ("中文", "zh")],
+                    value=configured_ocr_lang,
                     label="OCR 语言",
-                    allow_custom_value=True,
                 )
                 ocr_model = gr.Dropdown(
                     ["PP-OCRv5", "PP-OCRv4", "PP-OCRv3"],
@@ -697,10 +717,16 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     label="Neo4j 数据库",
                     allow_custom_value=True,
                 )
+                neo4j_password = gr.Textbox(
+                    label="Neo4j 密码",
+                    type="password",
+                    placeholder="留空则保持已有密码",
+                )
+                clear_neo4j_password = gr.Checkbox(label="清除已保存 Neo4j 密码", value=False)
                 gr.Markdown(
                     "**Neo4j 密码：** "
                     f"{'已配置' if public_settings['neo4j_password'] else '未配置'}  \n"
-                    "密码仅在服务器配置中管理。"
+                    "页面不回显旧密码；新值保存到权限为 600 的私密运行配置。"
                 )
                 config_operator = gr.Textbox(label="配置操作者", value="管理员")
                 save_config = gr.Button("保存设置", variant="primary")
@@ -1169,9 +1195,11 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 neo4j_uri,
                 neo4j_user,
                 neo4j_database,
+                neo4j_password,
+                clear_neo4j_password,
                 config_operator,
             ],
-            config_outcome,
+            [config_outcome, neo4j_password, clear_neo4j_password],
         )
 
     return gr.mount_gradio_app(app, demo, path="/ui", css=APP_CSS)

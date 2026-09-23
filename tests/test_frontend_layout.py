@@ -79,8 +79,6 @@ def test_workspace_uses_dropdown_navigation_and_no_radio_components(tmp_path: Pa
     assert by_id["navigation-page"]["type"] == "dropdown"
     assert by_id["workspace-logo"]["type"] == "image"
 
-    labels = [component["props"].get("label") for component in components]
-    assert "Neo4j 密码" not in labels
     assert TAGLINE in response.text
 
     by_label = {
@@ -95,7 +93,34 @@ def test_workspace_uses_dropdown_navigation_and_no_radio_components(tmp_path: Pa
     assert by_label["VLM API Key（当前会话）"]["props"]["type"] == "password"
     assert not by_label["LLM API Key（当前会话）"]["props"].get("value")
     assert not by_label["VLM API Key（当前会话）"]["props"].get("value")
+    assert by_label["Neo4j 密码"]["props"]["type"] == "password"
+    assert not by_label["Neo4j 密码"]["props"].get("value")
+    assert by_label["清除已保存 Neo4j 密码"]["props"]["value"] is False
+    assert by_label["启用 Reflection"]["props"]["value"] is True
+    assert by_label["Reflection Provider"]["props"]["value"] == "openai-compatible"
+    assert by_label["单候选最大修复次数"]["props"]["value"] == 2
+    assert by_label["单运行 Token 预算"]["props"]["value"] == 20_000
+    assert by_label["单运行时间预算（秒）"]["props"]["value"] == 180
+    assert by_label["治理/融合语义建议"]["props"]["value"] == "openai-compatible"
+    assert by_label["Agent 建议 Token 预算"]["props"]["value"] == 20_000
     assert by_label["配置操作者"]["props"]["value"] == "管理员"
+    assert [choice[1] for choice in by_label["OCR 设备"]["props"]["choices"]] == [
+        "auto",
+        "cpu",
+        "gpu:0",
+    ]
+    assert [choice[1] for choice in by_label["OCR 语言"]["props"]["choices"]] == [
+        "mixed",
+        "en",
+        "zh",
+    ]
+
+    advanced = next(
+        component
+        for component in components
+        if component["type"] == "accordion" and component["props"].get("label") == "高级策略"
+    )
+    assert advanced["props"]["open"] is True
 
     decision_labels = {"审核决定", "替代决定", "核对结论", "审核动作"}
     for component in components:

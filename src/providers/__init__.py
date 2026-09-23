@@ -6,7 +6,14 @@ from src.providers.embedding import (
     MockEmbeddingProvider,
 )
 from src.providers.mock import MockLLMProvider, MockVLMProvider
-from src.providers.ocr import DisabledOCRProvider, MockOCRProvider, PaddleOCRProvider
+from src.providers.ocr import (
+    DisabledOCRProvider,
+    MockOCRProvider,
+    PaddleOCRProvider,
+    detect_ocr_device,
+    resolve_ocr_device,
+    resolve_ocr_language,
+)
 from src.providers.openai_compatible import OpenAICompatibleLLMProvider
 from src.providers.reflection import (
     DisabledReflectionProvider,
@@ -27,6 +34,9 @@ __all__ = [
     "OpenAICompatibleLLMProvider",
     "OpenAICompatibleVLMProvider",
     "PaddleOCRProvider",
+    "detect_ocr_device",
+    "resolve_ocr_device",
+    "resolve_ocr_language",
     "DisabledReflectionProvider",
     "MockReflectionProvider",
     "OpenAICompatibleReflectionProvider",

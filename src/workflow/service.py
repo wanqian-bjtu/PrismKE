@@ -58,6 +58,8 @@ from src.providers import (
     OpenAICompatibleReflectionProvider,
     OpenAICompatibleVLMProvider,
     PaddleOCRProvider,
+    resolve_ocr_device,
+    resolve_ocr_language,
 )
 from src.providers.base import (
     EmbeddingProvider,
@@ -135,7 +137,9 @@ class PrismKEService:
         self.executions = ExecutionManager(self)
 
     def settings_view(self) -> dict[str, Any]:
-        return self.runtime_config.public_view(self.settings)
+        view = self.runtime_config.public_view(self.settings)
+        view["ocr_device_resolved"] = resolve_ocr_device(self.settings.ocr_device)
+        return view
 
     def update_settings(
         self,
@@ -143,13 +147,30 @@ class PrismKEService:
         clear_secrets: list[str],
         operator: str,
     ) -> dict[str, Any]:
-        from src.persistence.runtime_config import RESTART_FIELDS, SECRET_FIELDS
+        from src.persistence.runtime_config import EDITABLE_FIELDS, RESTART_FIELDS, SECRET_FIELDS
 
         if not operator.strip():
             raise ValueError("operator is required")
+        invalid_values = set(values) - EDITABLE_FIELDS
+        if invalid_values:
+            raise ValueError(
+                "unsupported runtime settings: " + ", ".join(sorted(invalid_values))
+            )
         invalid_clear = set(clear_secrets) - SECRET_FIELDS
         if invalid_clear:
             raise ValueError("only secret fields can be cleared")
+        conflicting_secrets = {
+            field
+            for field in clear_secrets
+            if field in values
+            and values[field] is not None
+            and str(values[field]).strip()
+        }
+        if conflicting_secrets:
+            raise ValueError(
+                "cannot set and clear secret fields together: "
+                + ", ".join(sorted(conflicting_secrets))
+            )
         clean = {key: value for key, value in values.items() if value is not None}
         for field in SECRET_FIELDS:
             if field in clean and not str(clean[field]).strip():
@@ -169,6 +190,10 @@ class PrismKEService:
                 raise ValueError("invalid neo4j_uri")
         if clean.get("graph_store", self.settings.graph_store) not in {"json", "neo4j"}:
             raise ValueError("graph_store must be json or neo4j")
+        if "ocr_device" in clean:
+            resolve_ocr_device(str(clean["ocr_device"]))
+        if "ocr_lang" in clean:
+            resolve_ocr_language(str(clean["ocr_lang"]))
         if clean.get("embedding_provider", self.settings.embedding_provider) not in {
             "disabled",
             "mock",

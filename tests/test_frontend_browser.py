@@ -7,6 +7,7 @@ import sys
 import time
 from collections.abc import Iterator
 from pathlib import Path
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -70,7 +71,20 @@ def _select_next_option(page: Page, elem_id: str) -> None:
 
 
 def _write_screenshot(page: Page, path: Path, *, full_page: bool) -> None:
-    path.write_bytes(page.screenshot(full_page=full_page))
+    payload = page.screenshot(full_page=full_page)
+    last_error: OSError | None = None
+    for _ in range(5):
+        temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+        try:
+            temporary.write_bytes(payload)
+            os.replace(temporary, path)
+            return
+        except OSError as exc:
+            last_error = exc
+            temporary.unlink(missing_ok=True)
+            time.sleep(0.05)
+    assert last_error is not None
+    raise last_error
 
 
 @pytest.mark.browser
@@ -99,6 +113,9 @@ def test_workspace_navigation_branding_and_responsive_layout(
         logo = page.locator("#workspace-logo img")
         logo.wait_for(state="visible")
         assert logo.evaluate("element => element.naturalWidth") > 0
+        logo_box = logo.bounding_box()
+        assert logo_box is not None
+        assert logo_box["width"] >= (300 if name == "mobile" else 410)
         assert "An auditable and traceable" in page.locator("#workspace-brand").inner_text()
         assert page.locator("#workspace-brand").evaluate(
             "element => getComputedStyle(element).backgroundColor"
