@@ -42,7 +42,8 @@ def workspace_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     )
     base_url = f"http://127.0.0.1:{port}"
     try:
-        for _ in range(100):
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
             try:
                 if httpx.get(f"{base_url}/api/v1/health", timeout=0.5).status_code == 200:
                     break
