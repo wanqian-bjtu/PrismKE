@@ -33,6 +33,7 @@ evaluation = [
 ]
 dev = [
   "mypy>=1.14,<2",
+  "playwright>=1.55,<2",
   "pytest>=8.3,<10",
   "pytest-asyncio>=0.25,<2",
   "pytest-cov>=6,<8",
@@ -63,7 +64,7 @@ embedding = [
 prismke = "src.cli:app"
 
 [tool.hatch.build.targets.wheel]
-only-include = ["src", "frontend"]
+only-include = ["src", "frontend", "assets/branding/prismke-logo-4k.png"]
 
 [tool.uv.sources]
 torch = [{ index = "pytorch-cu124", marker = "sys_platform == 'linux'" }]
@@ -82,7 +83,10 @@ default = true
 addopts = "-q"
 asyncio_mode = "auto"
 testpaths = ["tests"]
-markers = ["neo4j: requires a live dedicated Neo4j database"]
+markers = [
+  "browser: requires a locally installed Playwright Chromium browser",
+  "neo4j: requires a live dedicated Neo4j database",
+]
 
 [tool.ruff]
 line-length = 100

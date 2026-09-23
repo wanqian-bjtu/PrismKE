@@ -7,7 +7,15 @@ from typing import Any, Literal, cast
 
 import orjson
 
+from frontend.layout import (
+    build_brand_header,
+    first_page,
+    group_choices,
+    page_choices,
+    page_header,
+)
 from frontend.review import build_review_tabs
+from frontend.theme import APP_CSS
 from frontend.validation import build_validation_tab
 from src import __version__
 from src.domain import CanonicalEntity, ReviewDecision
@@ -23,6 +31,17 @@ def _state_summary(state: Any) -> dict[str, Any]:
         "errors": state.errors,
         "provider_calls": [item.model_dump(mode="json") for item in state.provider_calls],
     }
+
+
+def _state_status(state: Any, execution: dict[str, Any] | None = None) -> str:
+    execution_status = (execution or {}).get("status", "未启动")
+    warning_count = len(getattr(state, "warnings", []))
+    error_count = len(getattr(state, "errors", []))
+    return (
+        f"**业务状态** `{state.status}` · **执行状态** `{execution_status}` · "
+        f"**当前节点** `{state.current_node or '等待中'}`  \n"
+        f"警告 {warning_count} · 错误 {error_count}"
+    )
 
 
 def _claim_rows(state: Any) -> list[list[Any]]:
@@ -61,7 +80,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         reflection_time_budget: int,
         semantic_advisor: str,
         agent_token_budget: int,
-    ) -> tuple[dict[str, Any], list[list[Any]], str]:
+    ) -> tuple[str, dict[str, Any], list[list[Any]], str]:
         state, created = service.create_run(
             Path(document),
             Path(schema),
@@ -80,11 +99,18 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         )
         if created:
             service.executions.enqueue(state.run_id, "execute")
-        return _state_summary(state), _claim_rows(state), state.run_id
+        execution = service.executions.view(state.run_id)
+        return (
+            _state_status(state, execution),
+            _state_summary(state),
+            _claim_rows(state),
+            state.run_id,
+        )
 
-    def load_run(run_id: str) -> tuple[dict[str, Any], list[list[Any]]]:
+    def load_run(run_id: str) -> tuple[str, dict[str, Any], list[list[Any]]]:
         state = service.show_run(run_id)
-        return _state_summary(state), _claim_rows(state)
+        execution = service.executions.view(run_id)
+        return _state_status(state, execution), _state_summary(state), _claim_rows(state)
 
     def agent_report(run_id: str | None) -> tuple[list[list[Any]], dict[str, Any]]:
         if not run_id:
@@ -459,7 +485,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         neo4j_user: str,
         neo4j_database: str,
         operator: str,
-    ) -> dict[str, Any]:
+    ) -> str:
         values: dict[str, Any] = {
             "llm_base_url": llm_base_url,
             "llm_model": llm_model or None,
@@ -473,53 +499,46 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             "neo4j_user": neo4j_user,
             "neo4j_database": neo4j_database,
         }
-        return service.update_settings(values, [], operator)
+        result = service.update_settings(values, [], operator)
+        settings = result["settings"]
+        restart_note = " · 需要重启服务" if result["restart_required"] else ""
+        return (
+            f"设置已保存 · 图存储 {settings['graph_store']} · "
+            f"LLM {settings['llm_model']}{restart_note}"
+        )
 
     claim_headers = ["Claim ID", "主语", "关系", "宾语", "置信度", "状态", "证据"]
     public_settings = service.settings_view()
-    css = """
-    #workspace-tabs > .tab-wrapper > .tab-container[role="tablist"],
-    #workspace-tabs > .tab-wrapper > .overflow-menu { display: none !important; }
-    #workspace-sidebar { border-right: 1px solid #e5e7eb; background: #fafafa; }
-    #workspace-sidebar .wrap { gap: 8px; }
-    .workspace-title h1 { font-size: 24px !important; margin: 0 0 4px; letter-spacing: 0; }
-    .workspace-section { max-width: 1500px; margin: 0 auto; }
-    .technical-detail { border: 1px solid #e5e7eb; border-radius: 6px; }
-    @media (max-width: 768px) {
-      .workspace-title h1 { font-size: 20px !important; }
-      .gradio-container { padding: 10px !important; }
-    }
-    """
-    with gr.Blocks(title="PrismKE 研究工作台", fill_height=True, analytics_enabled=False) as demo:
+    with gr.Blocks(
+        title="PrismKE 研究工作台",
+        fill_height=True,
+        analytics_enabled=False,
+        elem_id="prismke-workspace",
+    ) as demo:
         with gr.Sidebar(open=True, elem_id="workspace-sidebar"):
-            gr.Markdown(f"## PrismKE\n`{__version__}`")
+            gr.Markdown(
+                f"**工作区**  \nDevelopment · `{__version__}`",
+                elem_classes="sidebar-status",
+            )
             if service.review_metadata:
                 gr.Markdown("**隔离审核工作区**\n\n原评测只读，抽取调用禁用。")
-            navigation = gr.Radio(
-                [
-                    ("总览", "overview"),
-                    ("新建构建", "build"),
-                    ("执行任务", "execution"),
-                    ("实体审核", "entity-review"),
-                    ("事实审核", "claim-review"),
-                    ("校验问题", "validation"),
-                    ("审核历史与纠正", "corrections"),
-                    ("证据", "evidence"),
-                    ("图谱", "graph"),
-                    ("实体治理", "governance"),
-                    ("案例库", "cases"),
-                    ("Reflection", "reflection"),
-                    ("Agent 协作", "agents"),
-                    ("版本管理", "revisions"),
-                    ("系统状态", "health"),
-                ],
+            navigation_group = gr.Dropdown(
+                group_choices(),
                 value="overview",
-                label="导航",
+                label="功能分组",
+                elem_id="navigation-group",
+            )
+            navigation_page = gr.Dropdown(
+                page_choices("overview"),
+                value="overview",
+                label="具体页面",
+                visible=False,
+                elem_id="navigation-page",
             )
             current_run = gr.Dropdown(label="当前运行", choices=[])
-            run_context = gr.Textbox(label="运行上下文", lines=5, interactive=False)
+            run_context = gr.Markdown("尚无运行", elem_classes="sidebar-status")
             refresh_context = gr.Button("刷新运行")
-            with gr.Accordion("构建配置", open=True):
+            with gr.Accordion("任务配置", open=True):
                 schema_input = gr.File(label="Schema", type="filepath")
                 provider_input = gr.Dropdown(
                     ["mock", "openai-compatible"],
@@ -538,6 +557,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 case_mode_input = gr.Dropdown(
                     ["none", "good", "good_bad"], value="none", label="案例检索"
                 )
+            with gr.Accordion("高级策略", open=False):
                 reflection_enabled_input = gr.Checkbox(label="启用 Reflection", value=False)
                 reflection_provider_input = gr.Dropdown(
                     ["disabled", "mock", "openai-compatible"],
@@ -561,7 +581,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 agent_tokens_input = gr.Number(
                     value=20_000, precision=0, label="Agent 建议 Token 预算"
                 )
-            with gr.Accordion("模型与后端设置", open=False):
+            with gr.Accordion("模型与图存储", open=False):
                 llm_base = gr.Textbox(label="LLM Base URL", value=public_settings["llm_base_url"])
                 llm_model = gr.Dropdown(
                     ["qwen3.7-flash"],
@@ -623,12 +643,14 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 )
                 config_operator = gr.Textbox(label="配置操作者")
                 save_config = gr.Button("保存设置", variant="primary")
-                config_outcome = gr.JSON(label="设置结果")
+                config_outcome = gr.Textbox(label="设置结果", interactive=False)
+
+        build_brand_header(gr, __version__)
 
         with gr.Tabs(selected="overview", elem_id="workspace-tabs") as workspace_tabs:
             with gr.Tab("总览", id="overview"):
-                gr.Markdown(f"# PrismKE 研究工作台 · {__version__}", elem_classes="workspace-title")
-                overview = gr.Markdown()
+                page_header(gr, "overview")
+                overview = gr.Markdown(elem_classes="workspace-metrics")
                 refresh_overview = gr.Button("刷新总览")
                 recent_runs = gr.Dataframe(
                     headers=["文档", "业务状态", "执行状态", "节点", "更新时间"],
@@ -639,16 +661,27 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 graph_health = gr.Markdown(label="图存储健康状态")
 
             with gr.Tab("新建构建", id="build"):
-                gr.Markdown("## 新建知识构建")
-                document_input = gr.File(label="文档", type="filepath")
-                gr.Markdown("Schema 与 Provider 配置位于左侧。开始前请确认预算和远程资源策略。")
-                run_button = gr.Button("开始构建", variant="primary")
-                run_id_output = gr.Textbox(label="Run ID")
-                run_summary = gr.JSON(label="运行状态")
+                page_header(gr, "build")
+                with gr.Row(equal_height=False):
+                    with gr.Column(scale=2, min_width=300):
+                        document_input = gr.File(label="文档", type="filepath")
+                        run_button = gr.Button("开始构建", variant="primary")
+                        reload_button = gr.Button("刷新运行状态")
+                    with gr.Column(scale=3, min_width=320):
+                        run_status = gr.Markdown(
+                            "尚未启动构建",
+                            elem_classes="workspace-metrics",
+                        )
+                        with gr.Accordion(
+                            "技术详情",
+                            open=False,
+                            elem_classes="technical-detail",
+                        ):
+                            run_summary = gr.JSON(label="完整运行状态")
+                run_id_output = gr.State()
                 claim_table = gr.Dataframe(
                     headers=claim_headers, interactive=False, label="Claim", wrap=True
                 )
-                reload_button = gr.Button("刷新运行状态")
 
             build_review_tabs(service)
             from frontend.execution import build_execution_tab
@@ -656,14 +689,15 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             build_execution_tab(service)
 
             with gr.Tab("证据", id="evidence"):
-                gr.Markdown("## 证据查看")
+                page_header(gr, "evidence")
                 with gr.Row():
                     evidence_run = gr.Dropdown(label="运行", choices=[])
                     evidence_claim = gr.Dropdown(label="Claim", choices=[])
                 evidence_id = gr.Dropdown(label="证据", choices=[])
                 evidence_button = gr.Button("读取证据")
-                evidence_metadata = gr.JSON(label="证据元数据")
                 evidence_preview = gr.Image(label="证据定位", type="filepath")
+                with gr.Accordion("技术详情", open=False, elem_classes="technical-detail"):
+                    evidence_metadata = gr.JSON(label="证据元数据")
                 evidence_run.change(run_claims, evidence_run, evidence_claim).then(
                     claim_evidence,
                     [evidence_run, evidence_claim],
@@ -679,7 +713,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 )
 
             with gr.Tab("图谱", id="graph"):
-                gr.Markdown("## 图谱浏览")
+                page_header(gr, "graph")
                 with gr.Row():
                     graph_query = gr.Textbox(label="实体名称或别名")
                     graph_entity_type = gr.Textbox(label="实体类型")
@@ -700,17 +734,19 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 )
                 graph_button = gr.Button("查询邻域")
                 graph_plot = gr.Plot(label="实体邻域图")
-                graph_output = gr.JSON(label="实体邻域")
+                with gr.Accordion("技术详情", open=False, elem_classes="technical-detail"):
+                    graph_output = gr.JSON(label="实体邻域")
                 graph_button.click(neighborhood, [entity_id, depth], [graph_plot, graph_output])
 
             with gr.Tab("实体治理", id="governance"):
-                gr.Markdown("## 实体治理")
+                page_header(gr, "governance")
                 with gr.Row():
                     entity_query = gr.Textbox(label="名称、别名或上下文")
                     entity_type = gr.Textbox(label="实体类型")
                     entity_limit = gr.Slider(1, 20, value=10, step=1, label="候选数")
                 entity_search_button = gr.Button("检索候选")
-                entity_search_output = gr.JSON(label="候选及评分分解")
+                with gr.Accordion("候选评分详情", open=False):
+                    entity_search_output = gr.JSON(label="候选及评分分解")
                 entity_search_button.click(
                     search_entities,
                     [entity_query, entity_type, entity_limit],
@@ -738,57 +774,60 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                         [candidate_entity_id, gr.State(1)],
                         [candidate_neighborhood_plot, candidate_neighborhood_output],
                     )
-                gr.Markdown("### 合并与拆分审核（原有高级操作）")
-                with gr.Row():
-                    entity_task_id = gr.Textbox(label="Task ID")
-                    entity_run_id = gr.Textbox(label="Run ID（链接审核时填写）")
-                    entity_review_action = gr.Dropdown(
-                        ["link", "create", "reject", "approve", "reject_operation"],
-                        value="link",
-                        label="审核动作",
+                with gr.Accordion("高级治理操作", open=False):
+                    gr.Markdown("### 合并与拆分审核")
+                    with gr.Row():
+                        entity_task_id = gr.Textbox(label="Task ID")
+                        entity_run_id = gr.Textbox(label="Run ID（链接审核时填写）")
+                        entity_review_action = gr.Dropdown(
+                            ["link", "create", "reject", "approve", "reject_operation"],
+                            value="link",
+                            label="审核动作",
+                        )
+                    with gr.Row():
+                        selected_entity_id = gr.Textbox(label="选择的 Entity ID")
+                        entity_reviewer = gr.Textbox(label="审核人")
+                    entity_review_button = gr.Button("提交实体审核", variant="primary")
+                    entity_review_output = gr.JSON(label="审核结果")
+                    entity_review_button.click(
+                        review_entity_task,
+                        [
+                            entity_task_id,
+                            entity_run_id,
+                            entity_review_action,
+                            selected_entity_id,
+                            entity_reviewer,
+                        ],
+                        [entity_review_output],
                     )
-                with gr.Row():
-                    selected_entity_id = gr.Textbox(label="选择的 Entity ID")
-                    entity_reviewer = gr.Textbox(label="审核人")
-                entity_review_button = gr.Button("提交实体审核", variant="primary")
-                entity_review_output = gr.JSON(label="审核结果")
-                entity_review_button.click(
-                    review_entity_task,
-                    [
-                        entity_task_id,
-                        entity_run_id,
-                        entity_review_action,
-                        selected_entity_id,
-                        entity_reviewer,
-                    ],
-                    [entity_review_output],
-                )
-                gr.Markdown("### 实体合并建议")
-                merge_sources = gr.Textbox(label="源 Entity ID，逗号分隔")
-                merge_target = gr.Textbox(label="保留的 Entity ID")
-                merge_reasons = gr.Textbox(label="理由，分号分隔")
-                merge_button = gr.Button("创建合并审核任务")
-                merge_output = gr.JSON(label="合并建议")
-                merge_button.click(
-                    propose_merge,
-                    [merge_sources, merge_target, merge_reasons],
-                    [merge_output],
-                )
-                gr.Markdown("### 实体拆分建议")
-                split_source = gr.Textbox(label="原 Entity ID")
-                split_targets = gr.Code(label="新实体 JSON 数组", language="json", value="[]")
-                split_assignments = gr.Code(
-                    label="Claim 到新 Entity 的映射 JSON", language="json", value="{}"
-                )
-                split_reasons = gr.Textbox(label="理由，分号分隔")
-                split_button = gr.Button("创建拆分审核任务")
-                split_output = gr.JSON(label="拆分建议")
-                split_button.click(
-                    propose_split,
-                    [split_source, split_targets, split_assignments, split_reasons],
-                    [split_output],
-                )
-                with gr.Accordion("实体治理历史", open=False):
+                    gr.Markdown("### 实体合并建议")
+                    merge_sources = gr.Textbox(label="源 Entity ID，逗号分隔")
+                    merge_target = gr.Textbox(label="保留的 Entity ID")
+                    merge_reasons = gr.Textbox(label="理由，分号分隔")
+                    merge_button = gr.Button("创建合并审核任务")
+                    merge_output = gr.JSON(label="合并建议")
+                    merge_button.click(
+                        propose_merge,
+                        [merge_sources, merge_target, merge_reasons],
+                        [merge_output],
+                    )
+                    gr.Markdown("### 实体拆分建议")
+                    split_source = gr.Textbox(label="原 Entity ID")
+                    split_targets = gr.Code(
+                        label="新实体 JSON 数组", language="json", value="[]"
+                    )
+                    split_assignments = gr.Code(
+                        label="Claim 到新 Entity 的映射 JSON", language="json", value="{}"
+                    )
+                    split_reasons = gr.Textbox(label="理由，分号分隔")
+                    split_button = gr.Button("创建拆分审核任务")
+                    split_output = gr.JSON(label="拆分建议")
+                    split_button.click(
+                        propose_split,
+                        [split_source, split_targets, split_assignments, split_reasons],
+                        [split_output],
+                    )
+                    gr.Markdown("### 实体治理历史")
                     history_entity_id = gr.Textbox(label="实体 Entity ID")
                     history_button = gr.Button("查询治理与回滚历史")
                     history_output = gr.JSON(label="实体 Revision 历史")
@@ -797,7 +836,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             build_validation_tab(gr, service)
 
             with gr.Tab("版本", id="revisions"):
-                gr.Markdown("## 版本管理")
+                page_header(gr, "revisions")
                 revision_button = gr.Button("刷新版本")
                 revision_table = gr.Dataframe(
                     headers=["Revision ID", "父版本", "Run ID", "时间", "变更数"],
@@ -808,20 +847,22 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     from_revision = gr.Textbox(label="起始 Revision")
                     to_revision = gr.Textbox(label="目标 Revision")
                 diff_button = gr.Button("比较版本")
-                diff_output = gr.JSON(label="版本差异")
+                with gr.Accordion("版本差异", open=False, elem_classes="technical-detail"):
+                    diff_output = gr.JSON(label="完整差异")
                 diff_button.click(revision_diff, [from_revision, to_revision], [diff_output])
-                rollback_revision_id = gr.Textbox(label="要回滚的 Revision")
-                rollback_confirm = gr.Checkbox(label="我确认创建补偿 Revision")
-                rollback_button = gr.Button("执行回滚", variant="stop")
-                rollback_output = gr.JSON(label="补偿 Revision")
-                rollback_button.click(
-                    rollback,
-                    [rollback_revision_id, rollback_confirm],
-                    [rollback_output],
-                )
+                with gr.Accordion("补偿回滚", open=False):
+                    rollback_revision_id = gr.Textbox(label="要回滚的 Revision")
+                    rollback_confirm = gr.Checkbox(label="我确认创建补偿 Revision")
+                    rollback_button = gr.Button("执行回滚", variant="stop")
+                    rollback_output = gr.JSON(label="补偿 Revision")
+                    rollback_button.click(
+                        rollback,
+                        [rollback_revision_id, rollback_confirm],
+                        [rollback_output],
+                    )
 
             with gr.Tab("案例库", id="cases"):
-                gr.Markdown("## 审核案例库")
+                page_header(gr, "cases")
                 with gr.Row():
                     case_type_filter = gr.Dropdown(
                         ["全部", "good", "bad"], value="全部", label="案例类型"
@@ -840,7 +881,8 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     wrap=True,
                 )
                 case_selector = gr.Dropdown(label="选择案例", choices=[])
-                case_detail_output = gr.JSON(label="案例、证据与停用历史")
+                with gr.Accordion("案例详情", open=False, elem_classes="technical-detail"):
+                    case_detail_output = gr.JSON(label="案例、证据与停用历史")
                 with gr.Accordion("停用案例", open=False):
                     case_operator = gr.Textbox(label="操作者")
                     case_reason = gr.Textbox(label="停用原因")
@@ -879,18 +921,15 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 case_rebuild_button.click(rebuild_cases, case_dry_run, case_rebuild_output)
 
             with gr.Tab("Reflection", id="reflection"):
-                gr.Markdown("## Reflection 记录")
+                page_header(gr, "reflection")
                 reflection_run = gr.Dropdown(label="运行", choices=[])
                 reflection_refresh = gr.Button("查看检索与修复记录")
-                gr.Markdown(
-                    "这里只展示触发问题、使用案例、前后候选、校验结果和预算；"
-                    "完整模型请求与向量不会进入页面。"
-                )
-                reflection_output = gr.JSON(label="Reflection 摘要")
+                with gr.Accordion("Reflection 详情", open=False, elem_classes="technical-detail"):
+                    reflection_output = gr.JSON(label="Reflection 摘要")
                 reflection_refresh.click(reflection_report, reflection_run, reflection_output)
 
             with gr.Tab("Agent 协作", id="agents"):
-                gr.Markdown("## Agent 决策轨迹")
+                page_header(gr, "agents")
                 agent_run = gr.Dropdown(label="运行", choices=[])
                 agent_refresh = gr.Button("查看轨迹")
                 agent_table = gr.Dataframe(
@@ -905,12 +944,40 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 agent_refresh.click(agent_report, agent_run, [agent_table, agent_details])
 
             with gr.Tab("健康状态", id="health"):
-                gr.Markdown("## 系统状态")
+                page_header(gr, "health")
                 health_button = gr.Button("检查连接")
-                health_output = gr.JSON(label="服务状态")
+                with gr.Accordion("服务详情", open=False, elem_classes="technical-detail"):
+                    health_output = gr.JSON(label="服务状态")
                 health_button.click(health, outputs=[health_output])
 
-        navigation.change(lambda page: gr.Tabs(selected=page), navigation, workspace_tabs)
+        def switch_group(group_id: str) -> tuple[Any, Any]:
+            choices = page_choices(group_id)
+            target = first_page(group_id)
+            return (
+                gr.update(choices=choices, value=target, visible=len(choices) > 1),
+                gr.Tabs(selected=target),
+            )
+
+        navigation_group.change(
+            switch_group,
+            navigation_group,
+            [navigation_page, workspace_tabs],
+        )
+        navigation_page.change(
+            lambda page: gr.Tabs(selected=page),
+            navigation_page,
+            workspace_tabs,
+        )
+        demo.load(
+            fn=None,
+            js="""() => {
+              const sidebar = document.querySelector('#workspace-sidebar');
+              const toggle = sidebar?.querySelector('button[aria-label="Toggle Sidebar"]');
+              if (window.innerWidth <= 520 && sidebar?.classList.contains('open')) {
+                toggle?.click();
+              }
+            }""",
+        )
         refresh_context.click(sidebar_run, [current_run], [current_run, run_context])
         current_run.change(sidebar_run, [current_run], [current_run, run_context])
         demo.load(sidebar_run, [current_run], [current_run, run_context])
@@ -949,9 +1016,13 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 semantic_advisor_input,
                 agent_tokens_input,
             ],
-            [run_summary, claim_table, run_id_output],
+            [run_status, run_summary, claim_table, run_id_output],
         ).then(sidebar_run, [run_id_output], [current_run, run_context])
-        reload_button.click(load_run, [run_id_output], [run_summary, claim_table])
+        reload_button.click(
+            load_run,
+            [run_id_output],
+            [run_status, run_summary, claim_table],
+        )
         save_config.click(
             save_settings,
             [
@@ -971,4 +1042,4 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             config_outcome,
         )
 
-    return gr.mount_gradio_app(app, demo, path="/ui", css=css)
+    return gr.mount_gradio_app(app, demo, path="/ui", css=APP_CSS)

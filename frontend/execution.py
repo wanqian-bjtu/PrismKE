@@ -3,6 +3,7 @@
 from typing import Any
 from uuid import uuid4
 
+from frontend.layout import page_header
 from src.domain import RequestReconciliation
 from src.workflow import PrismKEService
 
@@ -129,7 +130,7 @@ def build_execution_tab(service: PrismKEService) -> None:
             return f"核对未执行：{exc}；请刷新后重试"
 
     with gr.Tab("执行任务", id="execution"):
-        gr.Markdown("## 执行任务")
+        page_header(gr, "execution")
         with gr.Row():
             run = gr.Dropdown(label="运行", choices=[], scale=4)
             refresh_button = gr.Button("刷新", scale=1)
@@ -165,7 +166,7 @@ def build_execution_tab(service: PrismKEService) -> None:
                 wrap=True,
             )
             request_id = gr.Dropdown(label="待核对请求", choices=[])
-            outcome = gr.Radio(
+            outcome = gr.Dropdown(
                 [
                     ("确认未发送", "confirmed_not_sent"),
                     ("确认未计费", "confirmed_not_billed"),

@@ -3,6 +3,7 @@
 from typing import Any
 from uuid import uuid4
 
+from frontend.layout import page_header
 from src.workflow import PrismKEService
 
 
@@ -13,26 +14,30 @@ def build_correction_tab(service: PrismKEService) -> None:
 
     controller = ReviewController(service)
     with gr.Tab("审核历史与纠正", id="corrections"):
+        page_header(gr, "corrections")
         run = gr.Dropdown(controller.runs(), label="纠正运行", value=None)
         refresh = gr.Button("刷新审核历史")
         task = gr.Dropdown(label="历史任务", choices=[], value=None)
         event = gr.Dropdown(label="原审核事件", choices=[], value=None)
-        history = gr.JSON(label="审核历史")
-        current = gr.JSON(label="当前决定与证据")
+        with gr.Accordion("审核历史", open=False, elem_classes="technical-detail"):
+            history = gr.JSON(label="审核历史")
+            current = gr.JSON(label="当前决定与证据")
         evidence_id = gr.Dropdown(label="纠正关联证据", choices=[], value=None)
         evidence_text = gr.Textbox(label="纠正证据原文", lines=6, interactive=False)
         evidence_image = gr.Image(label="纠正证据区域", type="filepath", visible=False)
         version = gr.State(None)
-        action = gr.Radio(label="替代决定", choices=[], value=None)
+        action = gr.Dropdown(label="替代决定", choices=[], value=None)
         candidate = gr.Dropdown(label="替代候选实体", choices=[], value=None)
         person = gr.Textbox(label="纠正审核人")
         reason = gr.Textbox(label="纠正原因", lines=3)
         preview_button = gr.Button("预览纠正影响")
-        preview = gr.JSON(label="纠正影响与版本差异")
+        with gr.Accordion("纠正影响", open=False, elem_classes="technical-detail"):
+            preview = gr.JSON(label="纠正影响与版本差异")
         correction = gr.State(None)
         confirmed = gr.Checkbox(label="确认应用纠正并保留历史", value=False)
         apply_button = gr.Button("确认应用纠正", variant="stop")
-        outcome = gr.JSON(label="纠正状态")
+        with gr.Accordion("技术详情", open=False, elem_classes="technical-detail"):
+            outcome = gr.JSON(label="纠正状态")
 
         async def load_tasks(rid: str | None) -> Any:
             if not rid:

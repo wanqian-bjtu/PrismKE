@@ -7,6 +7,7 @@ from typing import Any, Literal, cast
 
 from PIL import Image
 
+from frontend.layout import page_header
 from src.core.ids import stable_id
 from src.domain import ReviewDecision
 from src.workflow import PrismKEService
@@ -159,6 +160,7 @@ def build_review_tabs(service: PrismKEService) -> None:
 
 def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
     service = controller.service
+    page_header(gr, "entity-review" if kind == "entity" else "claim-review")
     with gr.Row():
         run = gr.Dropdown(controller.runs(), label="运行", value=None)
         status = gr.Dropdown(
@@ -207,7 +209,13 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
                 label="链接候选", choices=[], value=None, visible=kind == "entity"
             )
             neighbor_button = gr.Button("查看所选候选邻域", visible=kind == "entity")
-            neighbor = gr.JSON(label="候选邻域", visible=kind == "entity")
+            with gr.Accordion(
+                "候选邻域详情",
+                open=False,
+                visible=kind == "entity",
+                elem_classes="technical-detail",
+            ):
+                neighbor = gr.JSON(label="候选邻域", visible=kind == "entity")
             evidence_choice = gr.Dropdown(label="当前对象证据", choices=[], value=None)
             evidence_text = gr.Textbox(label="证据原文与位置", lines=8, interactive=False)
             evidence_image = gr.Image(label="证据区域", type="filepath", visible=False)
@@ -222,7 +230,7 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
                 label="对方原文与位置", lines=8, interactive=False, visible=kind == "claim"
             )
             peer_image = gr.Image(label="对方证据区域", type="filepath", visible=kind == "claim")
-            action = gr.Radio(
+            action = gr.Dropdown(
                 [
                     ("链接候选", "link"),
                     ("创建新实体", "create"),
@@ -239,7 +247,8 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
             impact = gr.Textbox(label="操作影响", lines=4, interactive=False)
             submit = gr.Button("提交当前审核", variant="primary", interactive=False)
             resume = gr.Button("继续处理", interactive=False)
-            preview = gr.JSON(label="隔离图谱提交摘要")
+            with gr.Accordion("提交预览", open=False, elem_classes="technical-detail"):
+                preview = gr.JSON(label="隔离图谱提交摘要")
             confirm = gr.Checkbox(label="确认将预览内容写入隔离图谱", value=False)
             commit = gr.Button("确认写入隔离图谱", variant="stop", interactive=False)
             outcome = gr.Textbox(label="操作结果", interactive=False)
