@@ -2,7 +2,7 @@
 # Project-relative defaults. Override paths and ports for another installation.
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 export PRISMKE_PROJECT_DIR="${PRISMKE_PROJECT_DIR:-$(cd -- "${SCRIPT_DIR}/.." && pwd)}"
-export PRISMKE_RUNTIME_DIR="${PRISMKE_RUNTIME_DIR:-${PRISMKE_PROJECT_DIR}/runtime/services/v010}"
+export PRISMKE_RUNTIME_DIR="${PRISMKE_RUNTIME_DIR:-${PRISMKE_PROJECT_DIR}/runtime/services/v011}"
 if [[ "${PRISMKE_RUNTIME_DIR}" != /* ]]; then
   export PRISMKE_RUNTIME_DIR="${PRISMKE_PROJECT_DIR}/${PRISMKE_RUNTIME_DIR}"
 fi
@@ -31,7 +31,7 @@ prepare_neo4j_config() {
   mkdir -p "${PRISMKE_NEO4J_CONF}" "${isolated}/neo4j/data" "${isolated}/neo4j/logs" "${isolated}/neo4j/run"
   if [[ ! -f "${config}" ]]; then
     cat >"${config}" <<EOF
-# PrismKE v0.10 isolated instance
+# PrismKE v0.11 isolated instance
 server.default_listen_address=127.0.0.1
 server.bolt.listen_address=127.0.0.1:${PRISMKE_NEO4J_BOLT_PORT}
 server.http.listen_address=127.0.0.1:${PRISMKE_NEO4J_HTTP_PORT}
