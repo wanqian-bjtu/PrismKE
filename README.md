@@ -4,6 +4,8 @@ PrismKE 是一个面向通用多模态知识图谱构建的研究型项目，目
 
 当前稳定版本为 `v0.10.0`。v0.8 将研究工作台重构为左侧导航与右侧主工作区；v0.9 新增不可变审核案例库、BGE-M3 案例检索和受预算约束的 Reflection；v0.9.2 增加历史测试事实的受控治理与 Neo4j 测试实例守卫；v0.10 建立三个语义 Agent，并完成研究工作台的视觉与配置收尾。系统同时保留持久化任务管理、安全取消、审核纠正、统一校验、语义实体治理、Neo4j 与补偿回滚。软件版本与流程协议版本独立管理；旧运行继续使用对应发布版本处理，生产服务升级需单独执行。
 
+当前开发分支为 `dev/v0.11`，软件版本 `0.11.0.dev0`、流程协议 `0.11.0`。它新增多文件批次、JSONPath 证据、旧 DOC 隔离转换，以及六种独立抽取/构建任务。该版本已经进入开发验收，但尚未发布，也没有替换生产 v0.9.2 服务。
+
 `v0.10.0` 包含三个有结构化交接与决策轨迹的语义 Agent：多模态抽取、实体与事实治理、知识融合与审核。LangGraph 仍是确定性协调器，GraphStore 仍执行硬校验和事务提交；灰区模型建议受显式开关和预算约束。研究工作台提供可调宽侧栏、Schema 文件/文本输入、会话级模型配置、OCR 自动设备选择和中英混合识别，具体边界见 [v0.10 前端视觉验收](docs/PrismKE-v0.10前端视觉验收.md)。本次 Git 发布不替换生产服务。职责、命令和边界见 [v0.10 三 Agent 架构说明](docs/PrismKE-v0.10三Agent架构与验收.md)。
 
 `v0.6.0` 软件版本与流程协议均为 `0.6.0`。新增审核人/原因校验、暂缓、不可变候选与审核事件、可重放投影、纠正预览及精确补偿提交。使用边界见 [v0.6 审核纠正说明](docs/v0.6审核纠正说明.md)，快速检查问题保留在 [问题清单](docs/v0.6.0问题记录与改进清单.md)。旧运行不能由新流程纠正或恢复。
@@ -22,7 +24,9 @@ PrismKE 是一个面向通用多模态知识图谱构建的研究型项目，目
 
 ### 文档解析
 
-- 支持 TXT、Markdown、HTML、DOCX、PDF、PNG、JPEG 和 WebP。
+- `dev/v0.11` 支持 TXT、Markdown、HTML、DOC、DOCX、PDF、普通 JSON、PrismKE DocumentIR JSON，以及 PNG、JPEG、WebP、TIFF、BMP 图片。
+- 旧 DOC 先由 LibreOffice headless 在隔离配置目录中转换为 DOCX；原文件与派生文件分别记录哈希和工具版本。缺少转换器、转换超时或派生文件异常时明确失败。
+- 普通 JSON 按 JSONPath 展开标量并保留数组顺序，Evidence 同时校验原文件哈希、JSONPath 和字段值哈希。
 - Markdown、HTML 和 DOCX 中的图片会与邻近文字、alt 或图注一同进入 `DocumentIR`。
 - PDF 保留文本页码和 bbox，抽取内嵌光栅图片，并为扫描页或矢量较重页面生成页面图。
 - PaddleOCR 3.x 将扫描页和图片文字转为带像素 bbox 的 OCR 文本块。
@@ -36,6 +40,15 @@ PrismKE 是一个面向通用多模态知识图谱构建的研究型项目，目
 - 提供 OpenAI-compatible 文本模型接口。
 - 提供独立的 OpenAI-compatible 多模态 VLM 接口，每次处理一个可追溯视觉资产。
 - 只有显式选择 `mock` 才会使用 Mock Provider；真实模型配置缺失时直接报错。
+
+### 多任务与批次
+
+- Web、API 和 CLI 可选择实体抽取、关系抽取、Schema 信息抽取、端到端实体关系抽取、实体关系抽取与消歧、完整知识构建六种模式。
+- 前五种模式只生成可审核、可导出的 `TaskExtractionResult`，不会创建 Graph Revision；提交请求返回 `TASK_MODE_NO_GRAPH_COMMIT`。
+- 完整知识构建保持 v0.10 的默认行为，只有该模式允许跨文档治理和显式批次图提交。
+- 一个批次默认最多 20 个文件、单文件 200 MiB、总计 500 MiB。每个文件拥有独立子运行、证据、Token、状态和失败原因。
+- 同批次内容哈希相同的文件复用同一子运行。单个文件失败不会丢弃其他结果，但会阻断批次融合，直到重试成功或由操作者带原因排除。
+- 批次提交会合并重复事实与多来源证据，并再次检查跨文档基数冲突。冲突不会写图，需先人工排除冲突来源。
 
 ### 实体与事实治理
 
@@ -104,7 +117,7 @@ ingest
   -> commit_graph
 ```
 
-工作流由 LangGraph 组织。文本与视觉抽取并行执行并分别保存检查点；某一分支失败时，恢复任务不会重跑已完成分支。稳定版的治理与融合主要依靠确定性规则。开发中的 v0.10 将现有节点委托给三个语义 Agent；仅显式启用时在实体灰区和复杂事实组调用文本模型，最终校验、审核与写图仍由原有硬边界负责。
+工作流由 LangGraph 组织。文本与视觉抽取并行执行并分别保存检查点；某一分支失败时，恢复任务不会重跑已完成分支。v0.10 将现有节点委托给三个语义 Agent；仅显式启用时在实体灰区和复杂事实组调用文本模型，最终校验、审核与写图仍由原有硬边界负责。v0.11 在 `align_modalities` 后按任务模式路由：抽取模式直接生成结果，联合消歧模式在实体规范化后停止，只有完整知识构建继续进入事实融合和图提交。
 
 ## 环境安装
 
@@ -138,7 +151,7 @@ uv sync --extra dev --extra neo4j --extra web --extra embedding
 `uv sync` 在项目内创建 `.venv`。启动脚本优先使用该环境中的 `python` 和
 `prismke`；其它安装方式可设置 `PRISMKE_PYTHON_BIN` 与 `PRISMKE_CLI_BIN`。
 
-`dev/v0.10` 的 Python 源码直接放在根目录 `src/`，导入路径为 `src.*`；
+`v0.10` 及后续版本的 Python 源码直接放在根目录 `src/`，导入路径为 `src.*`；
 命令行入口仍是 `prismke`。旧的 `prismke.*` 导入不再适用于此开发分支，
 安装或拉取更新后需重新安装项目依赖。历史运行仍由对应发布版本接续。
 
@@ -170,6 +183,24 @@ prismke run examples/sample.md \
 ```bash
 prismke show-run RUN_ID
 ```
+
+选择独立任务或运行多文件批次：
+
+```bash
+prismke run examples/sample.md \
+  --schema configs/schemas/example.yaml \
+  --provider mock \
+  --task-mode entity_extraction \
+  --output runtime/results/entities.json
+
+prismke run-batch examples/a.pdf examples/b.docx examples/c.json \
+  --schema configs/schemas/example.yaml \
+  --provider mock \
+  --task-mode joint_entity_relation_extraction \
+  --output runtime/results/batch.json
+```
+
+关系抽取可通过 `--entity-source provided --entities entities.json` 使用给定实体；未指定时先自动识别实体。Web 页面提供相同任务选择，并按文件显示批次状态和统一抽取结果。
 
 对等待审核的 Claim 作出决定：
 
@@ -233,6 +264,11 @@ PRISMKE_LLM_API_KEY=
 PRISMKE_LLM_MODEL=qwen3.7-flash
 PRISMKE_RUNTIME_DIR=runtime
 PRISMKE_REQUEST_TIMEOUT=120
+PRISMKE_LIBREOFFICE_BIN=
+PRISMKE_DOCUMENT_CONVERSION_TIMEOUT_SECONDS=120
+PRISMKE_MAX_BATCH_FILES=20
+PRISMKE_MAX_FILE_BYTES=209715200
+PRISMKE_MAX_BATCH_BYTES=524288000
 ```
 
 `.env` 已被 Git 忽略，禁止将 API Key 提交到仓库。
@@ -374,7 +410,7 @@ Gradio `/ui` 中的“实体治理”页面可以检查 Top-K 候选和评分、
 Linux/WSL 部署使用项目内的统一控制脚本启动 Neo4j 与 PrismKE Web，不依赖
 AutoDL 路径或 Conda。需先安装 Java、Neo4j、tmux、curl、flock 和项目虚拟环境；
 `scripts/install_neo4j.sh` 可将 Neo4j 安装到项目的 `runtime/neo4j/current`。
-`dev/v0.10` 默认使用 `runtime/services/v010/` 的隔离图谱和运行状态，不会读取
+开发服务默认使用显式指定的隔离运行目录，不会读取
 旧的 `runtime/neo4j/data`；可用 `PRISMKE_RUNTIME_DIR` 指定另一实例目录：
 
 ```bash

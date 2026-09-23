@@ -13,7 +13,9 @@ from PIL import Image
 from src.core.errors import GraphIntegrityError, SchemaValidationError
 from src.core.ids import canonical_hash, stable_id
 from src.domain import (
+    CandidateAttribute,
     CandidateClaim,
+    CandidateEvent,
     CanonicalEntity,
     DocumentIR,
     EntityMention,
@@ -22,6 +24,7 @@ from src.domain import (
     SchemaIndex,
     ValidationIssue,
     ValidationResult,
+    normalize_label,
 )
 from src.governance.claim_normalization import normalize_claims
 from src.persistence.base import EvidenceStore
@@ -106,6 +109,12 @@ class ValidationService:
 
     @staticmethod
     def location_error(ref: EvidenceRef, document: DocumentIR | None = None) -> str | None:
+        if (ref.json_path is None) != (ref.json_value_hash is None):
+            return "JSONPath 证据缺少路径或字段值哈希"
+        if ref.kind == "json_value" and not ref.json_path:
+            return "JSON 字段证据缺少 JSONPath"
+        if ref.json_path is not None and not ref.json_path.startswith("$"):
+            return "JSONPath 必须从根路径开始"
         if (ref.char_start is None) != (ref.char_end is None):
             return "字符范围缺少起点或终点"
         if (
@@ -274,6 +283,189 @@ class ValidationService:
                             "relation",
                             "关系方向或 domain/range 与实体类型不匹配",
                         )
+        return issues
+
+    async def extraction_items(
+        self,
+        entities: list[EntityMention],
+        attributes: list[CandidateAttribute],
+        events: list[CandidateEvent],
+        schema: SchemaIndex,
+        document: DocumentIR,
+        evidence_store: EvidenceStore,
+    ) -> list[ValidationIssue]:
+        issues: list[ValidationIssue] = []
+        refs = {item.id: item for item in document.evidence}
+
+        async def evidence_issues(
+            target_type: Any, target_id: str, evidence_ids: list[str]
+        ) -> None:
+            for evidence_id in evidence_ids:
+                ref = refs.get(evidence_id)
+                if ref is None:
+                    issues.append(
+                        self.issue(
+                            "UNKNOWN_EVIDENCE",
+                            "reference",
+                            target_type,
+                            target_id,
+                            "evidence_ids",
+                            "抽取结果引用未知证据",
+                            [evidence_id],
+                        )
+                    )
+                    continue
+                location_error = self.location_error(ref, document)
+                if location_error or not await evidence_store.verify(evidence_id):
+                    issues.append(
+                        self.issue(
+                            "INVALID_EVIDENCE",
+                            "evidence",
+                            target_type,
+                            target_id,
+                            "evidence_ids",
+                            location_error or "证据内容或哈希校验失败",
+                            [evidence_id],
+                        )
+                    )
+
+        for entity in entities:
+            if schema.entity_type(entity.entity_type) is None:
+                issues.append(
+                    self.issue(
+                        "UNKNOWN_ENTITY_TYPE",
+                        "schema",
+                        "entity",
+                        entity.id,
+                        "entity_type",
+                        "实体类型未在 Schema 中声明",
+                        entity.evidence_ids,
+                    )
+                )
+            await evidence_issues("entity", entity.id, entity.evidence_ids)
+
+        attributes_by_id = {normalize_label(item.id): item for item in schema.schema.attributes}
+        value_types: dict[str, tuple[type[Any], ...]] = {
+            "string": (str,),
+            "number": (int, float),
+            "integer": (int,),
+            "boolean": (bool,),
+            "object": (dict,),
+            "array": (list,),
+        }
+        for attribute in attributes:
+            definition = attributes_by_id.get(normalize_label(attribute.field))
+            if definition is None:
+                issues.append(
+                    self.issue(
+                        "UNKNOWN_ATTRIBUTE",
+                        "schema",
+                        "attribute",
+                        attribute.id,
+                        "field",
+                        "属性未在 Schema 中声明",
+                        attribute.evidence_ids,
+                    )
+                )
+            else:
+                subject_type = schema.entity_type(attribute.subject.entity_type)
+                if definition.subject_types and subject_type not in definition.subject_types:
+                    issues.append(
+                        self.issue(
+                            "ATTRIBUTE_SUBJECT_TYPE",
+                            "schema",
+                            "attribute",
+                            attribute.id,
+                            "subject.entity_type",
+                            "属性主体类型不满足 Schema 约束",
+                            attribute.evidence_ids,
+                        )
+                    )
+                expected = value_types.get(definition.value_type.casefold())
+                if expected and not isinstance(attribute.value, expected):
+                    issues.append(
+                        self.issue(
+                            "ATTRIBUTE_VALUE_TYPE",
+                            "schema",
+                            "attribute",
+                            attribute.id,
+                            "value",
+                            "属性值类型不满足 Schema 约束",
+                            attribute.evidence_ids,
+                        )
+                    )
+            await evidence_issues("attribute", attribute.id, attribute.evidence_ids)
+
+        event_index = {
+            normalize_label(name): event
+            for event in schema.schema.events
+            for name in [event.id, *event.aliases]
+        }
+        for event in events:
+            event_definition = event_index.get(normalize_label(event.event_type))
+            if event_definition is None:
+                issues.append(
+                    self.issue(
+                        "UNKNOWN_EVENT_TYPE",
+                        "schema",
+                        "event",
+                        event.id,
+                        "event_type",
+                        "事件类型未在 Schema 中声明",
+                        event.evidence_ids,
+                    )
+                )
+            else:
+                role_index = {
+                    normalize_label(role.id): role for role in event_definition.roles
+                }
+                present_roles = {normalize_label(argument.role) for argument in event.arguments}
+                missing = {
+                    role.id
+                    for role in event_definition.roles
+                    if role.required and normalize_label(role.id) not in present_roles
+                }
+                if missing:
+                    issues.append(
+                        self.issue(
+                            "EVENT_ROLE_REQUIRED",
+                            "schema",
+                            "event",
+                            event.id,
+                            "arguments",
+                            f"事件缺少必填角色: {sorted(missing)}",
+                            event.evidence_ids,
+                        )
+                    )
+                for argument in event.arguments:
+                    role = role_index.get(normalize_label(argument.role))
+                    if role is None:
+                        issues.append(
+                            self.issue(
+                                "UNKNOWN_EVENT_ROLE",
+                                "schema",
+                                "event",
+                                event.id,
+                                "arguments.role",
+                                "事件角色未在 Schema 中声明",
+                                argument.evidence_ids or event.evidence_ids,
+                            )
+                        )
+                    elif isinstance(argument.value, EntityMention) and role.entity_types:
+                        entity_type = schema.entity_type(argument.value.entity_type)
+                        if entity_type not in role.entity_types:
+                            issues.append(
+                                self.issue(
+                                    "EVENT_ROLE_TYPE",
+                                    "schema",
+                                    "event",
+                                    event.id,
+                                    "arguments.value.entity_type",
+                                    "事件角色实体类型不满足 Schema 约束",
+                                    argument.evidence_ids or event.evidence_ids,
+                                )
+                            )
+            await evidence_issues("event", event.id, event.evidence_ids)
         return issues
 
     async def commit(

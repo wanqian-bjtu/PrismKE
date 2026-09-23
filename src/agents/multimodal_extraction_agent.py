@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from time import perf_counter
 
 from src.agents.trace import handoff, trace_step
@@ -9,12 +10,15 @@ from src.core.errors import ProviderResponseError
 from src.core.execution_control import cached_operation, check_execution
 from src.core.ids import stable_id
 from src.domain import (
+    EntityMention,
+    EntitySourceMode,
     ExtractionRequest,
     ExtractionResult,
     LocalizationLevel,
     OCRRequest,
     OCRResult,
     SchemaIndex,
+    TaskMode,
     VisualExtractionRequest,
     WorkflowState,
 )
@@ -47,6 +51,73 @@ class MultimodalExtractionAgent:
         self.ocr_provider = ocr_provider
         self.vlm_provider = vlm_provider
         self.evidence_store = evidence_store
+
+    @staticmethod
+    def _ground_provided_entities(state: WorkflowState) -> list[EntityMention]:
+        """Resolve user-provided entities to document evidence before model use."""
+        assert state.document is not None
+        grounded: list[EntityMention] = []
+        for provided in state.provided_entities:
+            matches: list[tuple[str, int, int, str]] = []
+            for block in state.document.text_blocks:
+                if provided.char_start is not None and provided.char_end is not None:
+                    if block.char_start is None:
+                        continue
+                    local_start = provided.char_start - block.char_start
+                    local_end = provided.char_end - block.char_start
+                    if (
+                        0 <= local_start < local_end <= len(block.text)
+                        and block.text[local_start:local_end].casefold()
+                        == provided.name.casefold()
+                    ):
+                        matches.append(
+                            (block.evidence_id, provided.char_start, provided.char_end, block.text)
+                        )
+                    continue
+                for match in re.finditer(re.escape(provided.name), block.text, re.IGNORECASE):
+                    base = block.char_start or 0
+                    matches.append(
+                        (
+                            block.evidence_id,
+                            base + match.start(),
+                            base + match.end(),
+                            block.text,
+                        )
+                    )
+            if not matches:
+                code = (
+                    "PROVIDED_ENTITY_SPAN_INVALID"
+                    if provided.char_start is not None
+                    else "PROVIDED_ENTITY_NOT_FOUND"
+                )
+                raise ValueError(f"{code}:{provided.name}")
+            evidence_ids = list(dict.fromkeys(item[0] for item in matches))
+            mention_id = stable_id(
+                "provided-entity",
+                state.document.id,
+                provided.name,
+                provided.entity_type,
+                *(f"{item[0]}:{item[1]}:{item[2]}" for item in matches),
+            )
+            is_ambiguous = len(matches) > 1
+            if is_ambiguous:
+                state.extraction_review_required_ids.append(mention_id)
+                state.warnings.append(
+                    f"provided_entity_ambiguous:{mention_id}:{len(matches)}"
+                )
+            grounded.append(
+                EntityMention(
+                    id=mention_id,
+                    name=provided.name,
+                    entity_type=provided.entity_type,
+                    context=" | ".join(dict.fromkeys(item[3] for item in matches))[:1000],
+                    evidence_ids=evidence_ids,
+                    confidence=None if is_ambiguous else 1.0,
+                    char_start=matches[0][1] if len(matches) == 1 else None,
+                    char_end=matches[0][2] if len(matches) == 1 else None,
+                )
+            )
+        return grounded
 
     async def recognize(self, state: WorkflowState) -> WorkflowState:
         assert state.document is not None
@@ -106,10 +177,29 @@ class MultimodalExtractionAgent:
             state.warnings.append("text_extraction_skipped:no_text_blocks")
             trace_step(state, "extraction", "text", "no_text_blocks", status="skipped")
             return state
-        request = ExtractionRequest(document=state.document, output_schema=state.output_schema)
+        provided_mentions: list[EntityMention] = []
+        if (
+            state.task_mode == TaskMode.RELATION_EXTRACTION
+            and state.entity_source_mode == EntitySourceMode.PROVIDED
+        ):
+            provided_mentions = self._ground_provided_entities(state)
+        request = ExtractionRequest(
+            document=state.document,
+            output_schema=state.output_schema,
+            task_mode=state.task_mode,
+            entity_source_mode=state.entity_source_mode,
+            provided_entities=state.provided_entities,
+        )
         try:
             result = await cached_operation(
-                stable_id("text-result", self.provider.fingerprint(), state.document.id),
+                stable_id(
+                    "text-result",
+                    self.provider.fingerprint(),
+                    state.document.id,
+                    state.task_mode,
+                    state.entity_source_mode,
+                    *(item.model_dump_json() for item in state.provided_entities),
+                ),
                 ExtractionResult,
                 lambda: self.provider.extract(request),
             )
@@ -125,7 +215,43 @@ class MultimodalExtractionAgent:
                 status="failed",
             )
             return state
+        if (
+            state.task_mode == TaskMode.RELATION_EXTRACTION
+            and state.entity_source_mode == EntitySourceMode.PROVIDED
+        ):
+            allowed = {
+                (item.name.casefold(), item.entity_type.casefold())
+                for item in state.provided_entities
+            }
+
+            def permitted(candidate: object) -> bool:
+                if not hasattr(candidate, "subject") or not hasattr(candidate, "object"):
+                    return False
+                subject = candidate.subject
+                obj = candidate.object
+                if (subject.name.casefold(), subject.entity_type.casefold()) not in allowed:
+                    return False
+                return not isinstance(obj, EntityMention) or (
+                    obj.name.casefold(), obj.entity_type.casefold()
+                ) in allowed
+
+            result.candidates = [item for item in result.candidates if permitted(item)]
+        if state.task_mode == TaskMode.ENTITY_EXTRACTION:
+            result.candidates = []
         state.text_candidates = result.candidates
+        provided_keys = {
+            (item.name.casefold(), item.entity_type.casefold()) for item in provided_mentions
+        }
+        state.extracted_entities = [
+            *provided_mentions,
+            *[
+                item
+                for item in result.entities
+                if (item.name.casefold(), item.entity_type.casefold()) not in provided_keys
+            ],
+        ]
+        state.candidate_attributes = result.attributes
+        state.candidate_events = result.events
         state.warnings.extend(result.warnings)
         state.provider_calls.extend(result.call_records)
         from src.governance.validation import ValidationService
@@ -169,6 +295,9 @@ class MultimodalExtractionAgent:
                 output_schema=state.output_schema,
                 asset=asset,
                 ocr_blocks=ocr_blocks,
+                task_mode=state.task_mode,
+                entity_source_mode=state.entity_source_mode,
+                provided_entities=state.provided_entities,
             )
 
             async def visual_call(req: VisualExtractionRequest = request) -> ExtractionResult:
@@ -176,7 +305,13 @@ class MultimodalExtractionAgent:
 
             try:
                 result = await cached_operation(
-                    stable_id("visual-result", self.vlm_provider.fingerprint(), asset.id),
+                    stable_id(
+                        "visual-result",
+                        self.vlm_provider.fingerprint(),
+                        asset.id,
+                        state.task_mode,
+                        state.entity_source_mode,
+                    ),
                     ExtractionResult,
                     visual_call,
                 )
@@ -195,6 +330,12 @@ class MultimodalExtractionAgent:
                 ):
                     candidate.coarse_visual_evidence = True
             state.visual_candidates.extend(result.candidates)
+            known_mentions = {item.id for item in state.extracted_entities}
+            state.extracted_entities.extend(
+                item for item in result.entities if item.id not in known_mentions
+            )
+            state.candidate_attributes.extend(result.attributes)
+            state.candidate_events.extend(result.events)
             state.document.visual_observations.extend(result.observations)
             for evidence in result.evidence:
                 await self.evidence_store.put_ref(evidence)

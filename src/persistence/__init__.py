@@ -1,6 +1,7 @@
 """Persistent graph, evidence, checkpoint, and run stores."""
 
 from src.persistence.audit import AuditLog
+from src.persistence.batches import BatchRepository
 from src.persistence.cases import CaseRepository
 from src.persistence.entity_governance import EntityGovernanceRepository
 from src.persistence.file_evidence import FileEvidenceStore
@@ -12,6 +13,7 @@ from src.persistence.runtime_config import RuntimeConfigRepository
 
 __all__ = [
     "AuditLog",
+    "BatchRepository",
     "CaseRepository",
     "EntityGovernanceRepository",
     "FileEvidenceStore",

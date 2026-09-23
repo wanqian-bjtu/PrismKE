@@ -21,6 +21,7 @@ from src.domain.knowledge import (
     CanonicalEntity,
     Claim,
     ConflictSet,
+    EntityMention,
     EntityResolutionDecision,
     EntityReviewTask,
     GraphCommit,
@@ -28,12 +29,23 @@ from src.domain.knowledge import (
     ReviewTask,
 )
 from src.domain.schema import OutputSchema
+from src.domain.tasks import (
+    CandidateAttribute,
+    CandidateEvent,
+    EntitySourceMode,
+    ProvidedEntity,
+    TaskExtractionResult,
+    TaskMode,
+)
 from src.domain.validation import ValidationResult, ValidationReviewDecision
 
 
 class ExtractionRequest(BaseModel):
     document: DocumentIR
     output_schema: OutputSchema = Field(alias="schema")
+    task_mode: TaskMode = TaskMode.KNOWLEDGE_GRAPH_CONSTRUCTION
+    entity_source_mode: EntitySourceMode = EntitySourceMode.AUTO
+    provided_entities: list[ProvidedEntity] = Field(default_factory=list)
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -66,6 +78,9 @@ class ProviderCallRecord(BaseModel):
 
 class ExtractionResult(BaseModel):
     candidates: list[CandidateClaim] = Field(default_factory=list)
+    entities: list[EntityMention] = Field(default_factory=list)
+    attributes: list[CandidateAttribute] = Field(default_factory=list)
+    events: list[CandidateEvent] = Field(default_factory=list)
     observations: list[VisualObservation] = Field(default_factory=list)
     evidence: list[EvidenceRef] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
@@ -100,8 +115,14 @@ class WorkflowState(BaseModel):
     correction_tail_only: bool = False
 
     run_id: str
+    batch_id: str | None = None
     input_path: str
     schema_path: str
+    task_mode: TaskMode = TaskMode.KNOWLEDGE_GRAPH_CONSTRUCTION
+    entity_source_mode: EntitySourceMode = EntitySourceMode.AUTO
+    provided_entities: list[ProvidedEntity] = Field(default_factory=list)
+    extraction_review_required_ids: list[str] = Field(default_factory=list)
+    extraction_result: TaskExtractionResult | None = None
     provider_name: str = "mock"
     provider_fingerprint: str = "legacy"
     llm_base_url: str | None = None
@@ -136,6 +157,9 @@ class WorkflowState(BaseModel):
     candidates: list[CandidateClaim] = Field(default_factory=list)
     text_candidates: list[CandidateClaim] = Field(default_factory=list)
     visual_candidates: list[CandidateClaim] = Field(default_factory=list)
+    extracted_entities: list[EntityMention] = Field(default_factory=list)
+    candidate_attributes: list[CandidateAttribute] = Field(default_factory=list)
+    candidate_events: list[CandidateEvent] = Field(default_factory=list)
     alignment_records: list[AlignmentRecord] = Field(default_factory=list)
     entities: list[CanonicalEntity] = Field(default_factory=list)
     mention_to_entity: dict[str, str] = Field(default_factory=dict)

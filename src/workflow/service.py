@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -16,24 +17,43 @@ from src.core.errors import (
 from src.core.ids import canonical_hash, file_sha256, stable_id
 from src.core.settings import Settings
 from src.domain import (
+    BatchItem,
+    BatchItemStatus,
+    BatchResult,
+    BatchRun,
+    BatchStatus,
     CanonicalEntity,
+    ClaimStatus,
     CommitValidationContext,
     EntityCandidate,
     EntityReviewTask,
+    EntitySourceMode,
+    ExtractionReviewEvent,
+    GraphChange,
     GraphCommit,
+    GraphDocument,
     GraphRevision,
+    ProvidedEntity,
     ReviewDecision,
+    SchemaIndex,
+    TaskExtractionResult,
+    TaskMode,
     ValidationResult,
     ValidationReviewDecision,
     WorkflowState,
     load_schema,
 )
-from src.governance import EntityGovernanceService
+from src.governance import (
+    EntityGovernanceService,
+    detect_conflicts,
+    merge_supporting_claims,
+)
 from src.governance.entity_resolution import ENTITY_RESOLUTION_POLICY_VERSION
 from src.governance.validation import ValidationService
 from src.parsing import ParserRegistry
 from src.persistence import (
     AuditLog,
+    BatchRepository,
     CaseRepository,
     EntityGovernanceRepository,
     FileEvidenceStore,
@@ -83,7 +103,7 @@ from src.workflow.graph import PrismKEWorkflow
 from src.workflow.reflection import REFLECTION_POLICY_VERSION, BoundedReflectionService
 from src.workflow.review_workspace import validate_workspace_run, workspace_metadata
 
-PIPELINE_VERSION = "0.10.0"
+PIPELINE_VERSION = "0.11.0"
 ASSET_POLICY_VERSION = "assets-v3"
 ALIGNMENT_POLICY_VERSION = "alignment-v1"
 
@@ -109,6 +129,7 @@ class PrismKEService:
         if self.review_metadata and self.settings.graph_store != "json" and graph_store is None:
             raise ValueError("imported review workspace must use its isolated JSON graph")
         self.runs = RunRepository(self.settings.runs_dir)
+        self.batches = BatchRepository(self.settings.batches_dir)
         self.evidence_store = FileEvidenceStore(self.settings.evidence_dir)
         self.graph_store = graph_store or self._create_graph_store()
         if isinstance(self.graph_store, (JSONGraphStore, Neo4jGraphStore)):
@@ -893,6 +914,9 @@ class PrismKEService:
             ParserRegistry(
                 asset_dir=self.settings.assets_dir,
                 allow_remote_assets=allow_remote_assets,
+                derived_dir=self.settings.derived_documents_dir,
+                libreoffice_bin=self.settings.libreoffice_bin,
+                conversion_timeout_seconds=self.settings.document_conversion_timeout_seconds,
             ),
             embedding_provider=self.embedding_provider(),
             entity_top_k=self.settings.entity_top_k,
@@ -928,6 +952,10 @@ class PrismKEService:
         vlm_base_url: str | None = None,
         vlm_model: str | None = None,
         credentials: TransientProviderCredentials | None = None,
+        task_mode: TaskMode = TaskMode.KNOWLEDGE_GRAPH_CONSTRUCTION,
+        entity_source_mode: EntitySourceMode = EntitySourceMode.AUTO,
+        provided_entities: list[ProvidedEntity] | None = None,
+        batch_id: str | None = None,
     ) -> WorkflowState:
         state, created = self.create_run(
             input_path,
@@ -949,6 +977,10 @@ class PrismKEService:
             vlm_base_url,
             vlm_model,
             credentials,
+            task_mode,
+            entity_source_mode,
+            provided_entities,
+            batch_id,
         )
         if not created:
             return state
@@ -975,6 +1007,10 @@ class PrismKEService:
         vlm_base_url: str | None = None,
         vlm_model: str | None = None,
         credentials: TransientProviderCredentials | None = None,
+        task_mode: TaskMode = TaskMode.KNOWLEDGE_GRAPH_CONSTRUCTION,
+        entity_source_mode: EntitySourceMode = EntitySourceMode.AUTO,
+        provided_entities: list[ProvidedEntity] | None = None,
+        batch_id: str | None = None,
     ) -> tuple[WorkflowState, bool]:
         """Validate a request and persist its initial state without executing it."""
         self.executions.ensure_accepting()
@@ -983,6 +1019,12 @@ class PrismKEService:
         input_path = input_path.resolve()
         schema_path = schema_path.resolve()
         runtime_credentials = credentials or TransientProviderCredentials()
+        provided_entities = provided_entities or []
+        if task_mode != TaskMode.RELATION_EXTRACTION:
+            entity_source_mode = EntitySourceMode.AUTO
+            provided_entities = []
+        elif entity_source_mode == EntitySourceMode.PROVIDED and not provided_entities:
+            raise ValueError("provided relation extraction requires an entity list")
         resolved_llm_base = (llm_base_url or self.settings.llm_base_url).strip()
         resolved_llm_model = (llm_model or self.settings.llm_model or "").strip() or None
         resolved_vlm_base = (vlm_base_url or self.settings.vlm_base_url).strip()
@@ -1098,6 +1140,10 @@ class PrismKEService:
             self.settings.entity_review_threshold,
             self.settings.entity_min_margin,
             allow_remote_assets,
+            task_mode,
+            entity_source_mode,
+            *(item.model_dump_json() for item in provided_entities),
+            batch_id or "single",
             PIPELINE_VERSION,
         )
         if self.runs.exists(run_id):
@@ -1107,8 +1153,12 @@ class PrismKEService:
             return existing, False
         state = WorkflowState(
             run_id=run_id,
+            batch_id=batch_id,
             input_path=str(input_path),
             schema_path=str(schema_path),
+            task_mode=task_mode,
+            entity_source_mode=entity_source_mode,
+            provided_entities=provided_entities,
             provider_name=provider_name,
             provider_fingerprint=provider.fingerprint(),
             llm_base_url=resolved_llm_base,
@@ -1174,6 +1224,552 @@ class PrismKEService:
 
     def show_run(self, run_id: str) -> WorkflowState:
         return self.runs.load(run_id)
+
+    def run_result(self, run_id: str) -> TaskExtractionResult:
+        state = self.show_run(run_id)
+        if state.extraction_result is None:
+            raise ValueError("RUN_RESULT_NOT_READY")
+        return state.extraction_result
+
+    def review_extraction_result(
+        self,
+        run_id: str,
+        target_type: str,
+        target_id: str,
+        decision: str,
+        reviewer: str,
+        reason: str,
+        request_id: str,
+        expected_version: int,
+    ) -> TaskExtractionResult:
+        if decision not in {"approve", "reject", "defer"}:
+            raise ValueError("INVALID_EXTRACTION_REVIEW_DECISION")
+        if not reviewer.strip() or not request_id.strip():
+            raise ValueError("EXTRACTION_REVIEW_IDENTITY_REQUIRED")
+        if decision in {"reject", "defer"} and not reason.strip():
+            raise ValueError("EXTRACTION_REVIEW_REASON_REQUIRED")
+        with self.runs.mutation_lock(run_id):
+            state = self.show_run(run_id)
+            result = state.extraction_result
+            if result is None:
+                raise ValueError("RUN_RESULT_NOT_READY")
+            previous = next(
+                (event for event in result.review_events if event.request_id == request_id),
+                None,
+            )
+            if previous:
+                if (
+                    previous.target_type != target_type
+                    or previous.target_id != target_id
+                    or previous.decision != decision
+                ):
+                    raise ValueError("REQUEST_ID_REUSED")
+                return result
+            if result.version != expected_version:
+                raise ValueError("STALE_RESULT_VERSION")
+            collections: dict[str, list[Any]] = {
+                "entity": list(result.entities),
+                "relation": list(result.relations),
+                "attribute": list(result.attributes),
+                "event": list(result.events),
+            }
+            if target_type not in collections or target_id not in {
+                item.id for item in collections[target_type]
+            }:
+                raise KeyError(target_id)
+            result.review_events.append(
+                ExtractionReviewEvent(
+                    id=stable_id(
+                        "extraction-review",
+                        run_id,
+                        target_type,
+                        target_id,
+                        request_id,
+                    ),
+                    request_id=request_id,
+                    target_type=target_type,
+                    target_id=target_id,
+                    decision=decision,
+                    reviewer=reviewer.strip(),
+                    reason=reason.strip(),
+                )
+            )
+            result.version += 1
+            state.extraction_result = result
+            latest_decisions = {
+                event.target_id: event.decision for event in result.review_events
+            }
+            pending_review_ids = {
+                target_id
+                for target_id in result.review_required_ids
+                if latest_decisions.get(target_id) not in {"approve", "reject"}
+            }
+            if not pending_review_ids and state.status == "awaiting_review":
+                state.status = "completed"
+            self.runs.save(state)
+            if not pending_review_ids and state.status == "completed":
+                with suppress(KeyError):
+                    self.executions.set_status(run_id, "completed")
+            self.audit.record(
+                "review_extraction_result",
+                target_id,
+                {
+                    "event_id": result.review_events[-1].id,
+                    "run_id": run_id,
+                    "target_type": target_type,
+                    "decision": decision,
+                    "reviewer": reviewer.strip(),
+                },
+            )
+            return result
+
+    def create_batch(
+        self,
+        documents: list[Path],
+        schema_path: Path,
+        *,
+        task_mode: TaskMode = TaskMode.KNOWLEDGE_GRAPH_CONSTRUCTION,
+        entity_source_mode: EntitySourceMode = EntitySourceMode.AUTO,
+        provided_entities: list[ProvidedEntity] | None = None,
+        provider_name: str = "mock",
+        ocr_provider_name: str = "disabled",
+        vlm_provider_name: str = "disabled",
+        allow_remote_assets: bool = False,
+        case_mode: Literal["none", "good", "good_bad"] = "none",
+        reflection_enabled: bool = False,
+        reflection_provider_name: str = "disabled",
+        reflection_max_attempts: int | None = None,
+        reflection_token_budget: int | None = None,
+        reflection_time_budget_seconds: int | None = None,
+        semantic_advisor_name: str = "disabled",
+        agent_token_budget: int | None = None,
+        operator: str | None = None,
+        llm_base_url: str | None = None,
+        llm_model: str | None = None,
+        vlm_base_url: str | None = None,
+        vlm_model: str | None = None,
+        credentials: TransientProviderCredentials | None = None,
+    ) -> tuple[BatchRun, bool]:
+        if not documents:
+            raise ValueError("BATCH_EMPTY")
+        if len(documents) > self.settings.max_batch_files:
+            raise ValueError("BATCH_FILE_LIMIT_EXCEEDED")
+        paths = [path.resolve() for path in documents]
+        sizes = [path.stat().st_size for path in paths]
+        if any(size > self.settings.max_file_bytes for size in sizes):
+            raise ValueError("BATCH_FILE_SIZE_EXCEEDED")
+        if sum(sizes) > self.settings.max_batch_bytes:
+            raise ValueError("BATCH_TOTAL_SIZE_EXCEEDED")
+        hashes = [file_sha256(path) for path in paths]
+        filenames = []
+        for path in paths:
+            prefix, separator, extracted_name = path.name.partition("--")
+            filenames.append(
+                extracted_name
+                if separator
+                and len(prefix) == 32
+                and all(character in "0123456789abcdef" for character in prefix)
+                else path.name
+            )
+        batch_id = stable_id(
+            "batch",
+            file_sha256(schema_path.resolve()),
+            task_mode,
+            entity_source_mode,
+            provider_name,
+            ocr_provider_name,
+            vlm_provider_name,
+            allow_remote_assets,
+            case_mode,
+            reflection_enabled,
+            reflection_provider_name,
+            reflection_max_attempts,
+            reflection_token_budget,
+            reflection_time_budget_seconds,
+            semantic_advisor_name,
+            agent_token_budget,
+            llm_base_url,
+            llm_model,
+            vlm_base_url,
+            vlm_model,
+            *(item.model_dump_json() for item in provided_entities or []),
+            *[f"{name}:{digest}" for name, digest in zip(filenames, hashes, strict=True)],
+        )
+        if self.batches.exists(batch_id):
+            return self.refresh_batch(batch_id), False
+        batch = BatchRun(
+            id=batch_id,
+            task_mode=task_mode,
+            entity_source_mode=entity_source_mode,
+            schema_path=str(schema_path.resolve()),
+            operator=operator,
+        )
+        first_by_hash: dict[str, BatchItem] = {}
+        for index, (path, filename, digest, size) in enumerate(
+            zip(paths, filenames, hashes, sizes, strict=True)
+        ):
+            item = BatchItem(
+                id=stable_id("batch-item", batch_id, index, filename, digest),
+                filename=filename,
+                source_path=str(path),
+                content_hash=digest,
+                size_bytes=size,
+            )
+            reused_item = first_by_hash.get(digest)
+            if reused_item is not None:
+                item.status = BatchItemStatus.REUSED
+                item.reused_from_item_id = reused_item.id
+                item.run_id = reused_item.run_id
+                batch.items.append(item)
+                continue
+            state, created = self.create_run(
+                path,
+                schema_path,
+                provider_name,
+                ocr_provider_name,
+                vlm_provider_name,
+                allow_remote_assets,
+                case_mode,
+                reflection_enabled,
+                reflection_provider_name,
+                reflection_max_attempts,
+                reflection_token_budget,
+                reflection_time_budget_seconds,
+                semantic_advisor_name,
+                agent_token_budget,
+                llm_base_url,
+                llm_model,
+                vlm_base_url,
+                vlm_model,
+                credentials,
+                task_mode=task_mode,
+                entity_source_mode=entity_source_mode,
+                provided_entities=provided_entities,
+                batch_id=batch_id,
+            )
+            item.run_id = state.run_id
+            item.status = BatchItemStatus.QUEUED if created else BatchItemStatus.REUSED
+            batch.items.append(item)
+            first_by_hash[digest] = item
+            if created:
+                self.executions.enqueue(state.run_id, "execute")
+        batch.status = BatchStatus.RUNNING
+        self.batches.save(batch)
+        return batch, True
+
+    def refresh_batch(self, batch_id: str) -> BatchRun:
+        batch = self.batches.load(batch_id)
+        statuses: list[BatchItemStatus] = []
+        for item in batch.items:
+            if item.status == BatchItemStatus.EXCLUDED or not item.run_id:
+                statuses.append(item.status)
+                continue
+            state = self.show_run(item.run_id)
+            execution = self.executions.view(item.run_id)
+            if state.status == "failed" or execution["status"] == "failed":
+                item.status = BatchItemStatus.FAILED
+                item.failure_code = execution.get("error_code") or state.failed_node
+                item.failure_reason = state.errors[-1] if state.errors else None
+            elif state.status == "awaiting_review":
+                item.status = BatchItemStatus.AWAITING_REVIEW
+            elif state.status == "completed":
+                if item.reused_from_item_id:
+                    item.status = BatchItemStatus.REUSED
+                else:
+                    item.status = BatchItemStatus.COMPLETED
+                item.token_usage = sum(call.total_tokens or 0 for call in state.provider_calls)
+            else:
+                item.status = BatchItemStatus.RUNNING
+            statuses.append(item.status)
+        active_statuses = [
+            status for status in statuses if status != BatchItemStatus.EXCLUDED
+        ]
+        cross_document_blocked = any(
+            error.startswith("cross_document_conflict:") for error in batch.errors
+        )
+        if cross_document_blocked or BatchItemStatus.FAILED in active_statuses:
+            batch.status = BatchStatus.BLOCKED
+        elif BatchItemStatus.AWAITING_REVIEW in active_statuses:
+            batch.status = BatchStatus.AWAITING_REVIEW
+        elif any(
+            status in {BatchItemStatus.QUEUED, BatchItemStatus.RUNNING}
+            for status in active_statuses
+        ):
+            batch.status = BatchStatus.RUNNING
+        elif batch.task_mode.permits_graph_commit and batch.revision_id is None:
+            batch.status = BatchStatus.AWAITING_COMMIT
+        else:
+            batch.status = BatchStatus.COMPLETED
+        from src.domain.knowledge import utc_now
+
+        batch.updated_at = utc_now()
+        self.batches.save(batch)
+        return batch
+
+    def batch_results(self, batch_id: str) -> list[BatchResult]:
+        batch = self.refresh_batch(batch_id)
+        results = []
+        for item in batch.items:
+            result = None
+            error = item.failure_reason
+            if item.run_id and item.status not in {
+                BatchItemStatus.FAILED,
+                BatchItemStatus.EXCLUDED,
+            }:
+                state = self.show_run(item.run_id)
+                result = state.extraction_result
+            results.append(
+                BatchResult(
+                    batch_id=batch.id,
+                    item_id=item.id,
+                    run_id=item.run_id,
+                    status=item.status,
+                    result=result,
+                    error=error,
+                )
+            )
+        return results
+
+    def retry_batch_item(self, batch_id: str, item_id: str) -> BatchRun:
+        batch = self.refresh_batch(batch_id)
+        item = next((item for item in batch.items if item.id == item_id), None)
+        if item is None:
+            raise KeyError(item_id)
+        if item.status != BatchItemStatus.FAILED or not item.run_id:
+            raise ValueError("BATCH_ITEM_NOT_RETRYABLE")
+        self.executions.enqueue(item.run_id, "resume")
+        item.status = BatchItemStatus.QUEUED
+        item.failure_code = None
+        item.failure_reason = None
+        batch.status = BatchStatus.RUNNING
+        self.batches.save(batch)
+        return batch
+
+    def exclude_batch_item(
+        self, batch_id: str, item_id: str, operator: str, reason: str
+    ) -> BatchRun:
+        if not operator.strip() or not reason.strip():
+            raise ValueError("BATCH_EXCLUSION_REQUIRES_OPERATOR_REASON")
+        batch = self.refresh_batch(batch_id)
+        item = next((item for item in batch.items if item.id == item_id), None)
+        if item is None:
+            raise KeyError(item_id)
+        conflict_blocked = batch.status == BatchStatus.BLOCKED and any(
+            error.startswith("cross_document_conflict:") for error in batch.errors
+        )
+        if item.status not in {BatchItemStatus.FAILED, BatchItemStatus.QUEUED} and not (
+            conflict_blocked and item.status in {BatchItemStatus.COMPLETED, BatchItemStatus.REUSED}
+        ):
+            raise ValueError("BATCH_ITEM_NOT_EXCLUDABLE")
+        item.status = BatchItemStatus.EXCLUDED
+        item.excluded_by = operator.strip()
+        item.exclusion_reason = reason.strip()
+        batch.errors = []
+        self.batches.save(batch)
+        return self.refresh_batch(batch_id)
+
+    async def confirm_batch_commit(self, batch_id: str, reviewer: str) -> BatchRun:
+        if not reviewer.strip():
+            raise ValueError("BATCH_COMMIT_REVIEWER_REQUIRED")
+        batch = self.refresh_batch(batch_id)
+        if batch.task_mode != TaskMode.KNOWLEDGE_GRAPH_CONSTRUCTION:
+            from src.core.errors import TaskModeCommitError
+
+            raise TaskModeCommitError(TaskModeCommitError.code)
+        if batch.status != BatchStatus.AWAITING_COMMIT or batch.revision_id:
+            raise ValueError("BATCH_NOT_READY_FOR_COMMIT")
+        states = {
+            item.run_id: self.show_run(item.run_id)
+            for item in batch.items
+            if item.status != BatchItemStatus.EXCLUDED and item.run_id
+        }
+        if not states:
+            raise ValueError("BATCH_HAS_NO_ACTIVE_ITEMS")
+        if any(
+            state.validation.blocking_count
+            or any(task.status == "pending" for task in state.entity_review_tasks)
+            or any(task.status == "pending" for task in state.review_tasks)
+            for state in states.values()
+        ):
+            raise ValueError("BATCH_REVIEW_PENDING")
+        schemas = {
+            state.output_schema.schema_id: state.output_schema
+            for state in states.values()
+            if state.output_schema is not None
+        }
+        if len(schemas) != 1:
+            raise ValueError("BATCH_SCHEMA_CHANGED")
+        schema = next(iter(schemas.values()))
+        schema_id = canonical_hash(schema.model_dump(mode="json"))
+        merged_claims = merge_supporting_claims(
+            [
+                claim.model_copy(
+                    deep=True,
+                    update={
+                        "source_run_ids": sorted(
+                            set([*claim.source_run_ids, state.run_id])
+                        )
+                    },
+                )
+                for state in states.values()
+                for claim in state.claims
+                if claim.status in {ClaimStatus.AUTO_APPROVED, ClaimStatus.APPROVED}
+            ]
+        )
+        cross_document_conflicts = [
+            conflict
+            for conflict in detect_conflicts(
+                merged_claims,
+                await self.graph_store.list_claims(),
+                SchemaIndex(schema),
+            )
+            if len(set(conflict.claim_ids) & {claim.id for claim in merged_claims}) > 1
+        ]
+        if cross_document_conflicts:
+            batch.status = BatchStatus.BLOCKED
+            batch.errors = [
+                f"cross_document_conflict:{conflict.id}"
+                for conflict in cross_document_conflicts
+            ]
+            self.batches.save(batch)
+            raise ValueError("BATCH_CROSS_DOCUMENT_CONFLICT")
+        claims = {
+            claim.id: claim
+            for claim in merged_claims
+        }
+        if not claims:
+            raise ValueError("BATCH_NO_APPROVED_CLAIMS")
+        referenced_entities = {
+            entity_id
+            for claim in claims.values()
+            for entity_id in (claim.subject_id, claim.object_entity_id)
+            if entity_id
+        }
+        entities = {
+            entity.id: entity.model_copy(update={"active": True})
+            for state in states.values()
+            for entity in state.entities
+            if entity.id in referenced_entities
+        }
+        conflicts = {
+            conflict.id: conflict
+            for state in states.values()
+            for conflict in state.conflicts
+            if set(conflict.claim_ids) <= set(claims)
+        }
+        documents = {
+            state.document.id: GraphDocument(
+                id=state.document.id,
+                filename=state.document.source_filename
+                or Path(state.document.source_path).name,
+                content_hash=state.document.source_hash,
+                media_type=state.document.media_type,
+            )
+            for state in states.values()
+            if state.document is not None
+        }
+        evidence_ids = {
+            evidence_id for claim in claims.values() for evidence_id in claim.evidence_ids
+        }
+        evidence = {
+            item.id: item
+            for state in states.values()
+            if state.document is not None
+            for item in state.document.evidence
+            if item.id in evidence_ids
+        }
+        existing_claims = {claim.id: claim for claim in await self.graph_store.list_claims()}
+        existing_entities = {
+            entity.id: entity for entity in await self.graph_store.list_entities()
+        }
+        parent = await self.graph_store.latest_revision()
+        changes = [
+            GraphChange(
+                resource_type="entity",
+                resource_id=entity.id,
+                action="update" if entity.id in existing_entities else "create",
+                before=(
+                    existing_entities[entity.id].model_dump(mode="json")
+                    if entity.id in existing_entities
+                    else None
+                ),
+                after=entity.model_dump(mode="json"),
+            )
+            for entity in entities.values()
+        ]
+        changes.extend(
+            GraphChange(
+                resource_type="claim",
+                resource_id=claim.id,
+                action="update" if claim.id in existing_claims else "create",
+                before=(
+                    existing_claims[claim.id].model_dump(mode="json")
+                    if claim.id in existing_claims
+                    else None
+                ),
+                after=claim.model_dump(mode="json"),
+            )
+            for claim in claims.values()
+        )
+        changes.extend(
+            GraphChange(
+                resource_type="conflict",
+                resource_id=conflict.id,
+                action="create",
+                after=conflict.model_dump(mode="json"),
+            )
+            for conflict in conflicts.values()
+        )
+        revision = GraphRevision(
+            id=stable_id(
+                "batch-revision",
+                batch.id,
+                parent.id if parent else "root",
+                *sorted(claims),
+            ),
+            run_id=batch.id,
+            parent_id=parent.id if parent else None,
+            entity_ids=sorted(entities),
+            claim_ids=sorted(claims),
+            conflict_ids=sorted(conflicts),
+            changes=changes,
+        )
+        context = CommitValidationContext(
+            schemas={schema_id: schema},
+            claim_schema_ids={claim_id: schema_id for claim_id in claims},
+            document_asset_ids={
+                state.document.id: [asset.id for asset in state.document.media_assets]
+                for state in states.values()
+                if state.document is not None
+            },
+        )
+        revision.validation_context = context
+        commit = GraphCommit(
+            documents=list(documents.values()),
+            evidence=list(evidence.values()),
+            entities=list(entities.values()),
+            claims=list(claims.values()),
+            conflicts=list(conflicts.values()),
+            revision=revision,
+            validation_context=context,
+        )
+        await ValidationService().commit(
+            commit,
+            {**existing_entities, **entities},
+            evidence,
+            set(documents),
+            self.evidence_store,
+        )
+        await self.graph_store.commit(commit)
+        batch.revision_id = revision.id
+        batch.status = BatchStatus.COMPLETED
+        self.batches.save(batch)
+        self.audit.record(
+            "confirm_batch_commit",
+            batch.id,
+            {"reviewer": reviewer.strip(), "revision_id": revision.id},
+        )
+        return batch
 
     async def entity_review_detail(self, run_id: str, task_id: str) -> dict[str, Any]:
         from src.workflow.review_details import entity_task_base

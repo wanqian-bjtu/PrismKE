@@ -9,7 +9,7 @@ from typing import Any, TypedDict, cast
 from langgraph.graph import END, START, StateGraph
 
 from src.core.execution_control import ExecutionPaused, current_execution
-from src.domain import WorkflowState
+from src.domain import TaskMode, WorkflowState
 from src.governance.validation import ValidationService
 from src.parsing import ParserRegistry
 from src.persistence.base import EvidenceStore, GraphStore
@@ -160,6 +160,31 @@ class PrismKEWorkflow:
         visual_state = WorkflowState.model_validate(graph_state["visual_branch"])
         state.text_candidates = text_state.text_candidates
         state.visual_candidates = visual_state.visual_candidates
+        state.extracted_entities = list(
+            {
+                item.id: item
+                for item in [
+                    *text_state.extracted_entities,
+                    *visual_state.extracted_entities,
+                ]
+            }.values()
+        )
+        state.extraction_review_required_ids = list(
+            dict.fromkeys(
+                [
+                    *text_state.extraction_review_required_ids,
+                    *visual_state.extraction_review_required_ids,
+                ]
+            )
+        )
+        state.candidate_attributes = [
+            *text_state.candidate_attributes,
+            *visual_state.candidate_attributes,
+        ]
+        state.candidate_events = [
+            *text_state.candidate_events,
+            *visual_state.candidate_events,
+        ]
         state.modality_status = {
             **state.modality_status,
             **text_state.modality_status,
@@ -210,12 +235,30 @@ class PrismKEWorkflow:
     @staticmethod
     def _after_risk(graph_state: GraphState) -> str:
         state = PrismKEWorkflow._state(graph_state)
-        return "review" if state.status == "awaiting_review" else "continue"
+        if state.status == "awaiting_review":
+            return "review"
+        return "batch" if state.batch_id else "continue"
 
     @staticmethod
     def _after_entity_resolution(graph_state: GraphState) -> str:
         state = PrismKEWorkflow._state(graph_state)
-        return "review" if state.status == "awaiting_review" else "continue"
+        if state.status == "awaiting_review":
+            return "review"
+        if state.task_mode == TaskMode.JOINT_ENTITY_RELATION_DISAMBIGUATION:
+            return "finish"
+        return "continue"
+
+    @staticmethod
+    def _after_alignment(graph_state: GraphState) -> str:
+        state = PrismKEWorkflow._state(graph_state)
+        if state.task_mode in {
+            TaskMode.ENTITY_EXTRACTION,
+            TaskMode.RELATION_EXTRACTION,
+            TaskMode.SCHEMA_INFORMATION_EXTRACTION,
+            TaskMode.JOINT_ENTITY_RELATION_EXTRACTION,
+        }:
+            return "finish"
+        return "govern"
 
     def _build_graph(self, checkpointer: Any) -> Any:
         if self.review_only:
@@ -266,6 +309,16 @@ class PrismKEWorkflow:
             cast(Any, self._node("reflect_candidates", self.nodes.reflect_candidates)),
         )
         builder.add_node(
+            "finalize_extraction_result",
+            cast(
+                Any,
+                self._node(
+                    "finalize_extraction_result",
+                    self.nodes.finalize_extraction_result,
+                ),
+            ),
+        )
+        builder.add_node(
             "prepare_graph_commit",
             cast(Any, self._node("prepare_graph_commit", self.nodes.prepare_graph_commit)),
         )
@@ -278,19 +331,32 @@ class PrismKEWorkflow:
         builder.add_edge("load_schema", "extract_text_claims")
         builder.add_edge("load_schema", "extract_visual_claims")
         builder.add_edge(["extract_text_claims", "extract_visual_claims"], "align_modalities")
-        builder.add_edge("align_modalities", "reflect_candidates")
+        builder.add_conditional_edges(
+            "align_modalities",
+            self._after_alignment,
+            {"finish": "finalize_extraction_result", "govern": "reflect_candidates"},
+        )
         builder.add_edge("reflect_candidates", "resolve_entities")
         builder.add_conditional_edges(
             "resolve_entities",
             self._after_entity_resolution,
-            {"review": END, "continue": "normalize_claims"},
+            {
+                "review": END,
+                "finish": "finalize_extraction_result",
+                "continue": "normalize_claims",
+            },
         )
+        builder.add_edge("finalize_extraction_result", END)
         for (left, _), (right, _) in zip(after_resolution, after_resolution[1:], strict=False):
             builder.add_edge(left, right)
         builder.add_conditional_edges(
             "route_by_risk",
             self._after_risk,
-            {"review": END, "continue": "prepare_graph_commit"},
+            {
+                "review": END,
+                "batch": "finalize_extraction_result",
+                "continue": "prepare_graph_commit",
+            },
         )
         builder.add_edge("prepare_graph_commit", "commit_graph")
         builder.add_edge("commit_graph", END)
@@ -304,6 +370,16 @@ class PrismKEWorkflow:
             raise ValueError("review workspace cannot execute entity resolution or extraction")
 
         builder.add_node("resolve_entities", cast(Any, forbidden))
+        builder.add_node(
+            "finalize_extraction_result",
+            cast(
+                Any,
+                self._node(
+                    "finalize_extraction_result",
+                    self.nodes.finalize_extraction_result,
+                ),
+            ),
+        )
         for name in (
             "normalize_claims",
             "detect_conflicts",
@@ -316,14 +392,23 @@ class PrismKEWorkflow:
         builder.add_conditional_edges(
             "resolve_entities",
             self._after_entity_resolution,
-            {"review": END, "continue": "normalize_claims"},
+            {
+                "review": END,
+                "finish": "finalize_extraction_result",
+                "continue": "normalize_claims",
+            },
         )
+        builder.add_edge("finalize_extraction_result", END)
         builder.add_edge("normalize_claims", "detect_conflicts")
         builder.add_edge("detect_conflicts", "route_by_risk")
         builder.add_conditional_edges(
             "route_by_risk",
             self._after_risk,
-            {"review": END, "continue": "prepare_graph_commit"},
+            {
+                "review": END,
+                "batch": "finalize_extraction_result",
+                "continue": "prepare_graph_commit",
+            },
         )
         builder.add_conditional_edges(
             "prepare_graph_commit",

@@ -1,7 +1,13 @@
 """Deterministic providers for tests and offline demonstrations."""
 
 from src.core.ids import stable_id
-from src.domain import ExtractionRequest, ExtractionResult, VisualExtractionRequest
+from src.domain import (
+    EntityMention,
+    ExtractionRequest,
+    ExtractionResult,
+    TaskMode,
+    VisualExtractionRequest,
+)
 from src.providers.common import candidate_from_payload
 
 
@@ -31,7 +37,16 @@ class MockLLMProvider:
                 candidates.append(candidate_from_payload(payload, block.evidence_id, block.text))
             except (ValueError, KeyError) as exc:
                 warnings.append(f"mock_parse_failed:block={block.id}:{exc}")
-        return ExtractionResult(candidates=candidates, warnings=warnings)
+        entities: list[EntityMention] = []
+        known: set[str] = set()
+        for candidate in candidates:
+            for mention in (candidate.subject, candidate.object):
+                if isinstance(mention, EntityMention) and mention.id not in known:
+                    entities.append(mention)
+                    known.add(mention.id)
+        if request.task_mode == TaskMode.ENTITY_EXTRACTION:
+            candidates = []
+        return ExtractionResult(candidates=candidates, entities=entities, warnings=warnings)
 
 
 class MockVLMProvider:

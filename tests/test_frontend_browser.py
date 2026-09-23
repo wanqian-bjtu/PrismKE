@@ -138,7 +138,7 @@ def test_workspace_navigation_branding_and_responsive_layout(
         _select_next_option(page, "navigation-group")
         page.locator("#navigation-page").wait_for(state="visible")
         page.locator(".workspace-page-header:visible h1").wait_for(state="visible")
-        assert page.locator(".workspace-page-header:visible h1").inner_text() == "新建知识构建"
+        assert page.locator(".workspace-page-header:visible h1").inner_text() == "新建抽取与构建"
 
         if name == "mobile":
             if "open" in (sidebar.get_attribute("class") or ""):

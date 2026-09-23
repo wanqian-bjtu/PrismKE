@@ -51,6 +51,25 @@ class EntityCatalogItem(BaseModel):
     aliases: list[str] = Field(default_factory=list)
 
 
+class AttributeDef(BaseModel):
+    id: str
+    subject_types: list[str] = Field(default_factory=list)
+    value_type: str = "string"
+    required: bool = False
+
+
+class EventRoleDef(BaseModel):
+    id: str
+    entity_types: list[str] = Field(default_factory=list)
+    required: bool = False
+
+
+class EventDef(BaseModel):
+    id: str
+    aliases: list[str] = Field(default_factory=list)
+    roles: list[EventRoleDef] = Field(default_factory=list)
+
+
 class OutputSchema(BaseModel):
     schema_id: str
     version: str
@@ -58,6 +77,8 @@ class OutputSchema(BaseModel):
     entity_types: list[EntityTypeDef]
     relations: list[RelationDef]
     entity_catalog: list[EntityCatalogItem] = Field(default_factory=list)
+    attributes: list[AttributeDef] = Field(default_factory=list)
+    events: list[EventDef] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_references(self) -> OutputSchema:
@@ -86,6 +107,23 @@ class OutputSchema(BaseModel):
         for entity in self.entity_catalog:
             if entity.type not in known_types:
                 raise ValueError(f"catalog entity {entity.id} has unknown type {entity.type}")
+        for attribute in self.attributes:
+            unknown_types = set(attribute.subject_types) - known_types
+            if unknown_types:
+                raise ValueError(
+                    f"attribute {attribute.id} references unknown types: {sorted(unknown_types)}"
+                )
+        for event in self.events:
+            role_ids = [role.id for role in event.roles]
+            if len(role_ids) != len(set(role_ids)):
+                raise ValueError(f"event {event.id} role ids must be unique")
+            for role in event.roles:
+                unknown_types = set(role.entity_types) - known_types
+                if unknown_types:
+                    raise ValueError(
+                        f"event {event.id} role {role.id} references unknown types: "
+                        f"{sorted(unknown_types)}"
+                    )
         return self
 
 

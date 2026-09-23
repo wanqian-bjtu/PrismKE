@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import hmac
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Annotated, Literal, cast
 from uuid import uuid4
 
+import orjson
 from fastapi import (
     APIRouter,
     Depends,
@@ -27,11 +29,14 @@ from filelock import Timeout
 
 from src import __version__
 from src.api.models import (
+    BatchCommitRequest,
+    BatchExcludeRequest,
     CancelRequest,
     CaseDisableRequest,
     CaseIndexRequest,
     CorrectionRequest,
     EntityReviewRequest,
+    ExtractionReviewRequest,
     MergeProposalRequest,
     RequestReconciliationRequest,
     ResumeRequest,
@@ -46,13 +51,15 @@ from src.core.errors import (
     GraphIntegrityError,
     LegacyCheckpointError,
     ProviderConfigurationError,
+    TaskModeCommitError,
 )
 from src.core.settings import Settings
+from src.domain import EntitySourceMode, ProvidedEntity, TaskMode
 from src.persistence.execution import ExecutionConflict
 from src.workflow import PrismKEService
 
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
-MAX_UPLOAD_BYTES = 64 * 1024 * 1024
+UPLOAD_CHUNK_BYTES = 1024 * 1024
 
 
 def _safe_suffix(filename: str | None) -> str:
@@ -60,14 +67,48 @@ def _safe_suffix(filename: str | None) -> str:
     return suffix if suffix and len(suffix) <= 12 else ".bin"
 
 
-async def _save_upload(upload: UploadFile, directory: Path) -> Path:
-    content = await upload.read(MAX_UPLOAD_BYTES + 1)
-    if len(content) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="upload exceeds 64 MiB")
+def _safe_filename(filename: str | None) -> str:
+    name = Path(filename or f"upload{_safe_suffix(filename)}").name
+    sanitized = "".join(
+        character for character in name if character.isalnum() or character in "._-"
+    )
+    return sanitized[:180] or f"upload{_safe_suffix(filename)}"
+
+
+async def _save_upload(upload: UploadFile, directory: Path, max_bytes: int) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{uuid4().hex}{_safe_suffix(upload.filename)}"
-    path.write_bytes(content)
+    path = directory / f"{uuid4().hex}--{_safe_filename(upload.filename)}"
+    total = 0
+    try:
+        with path.open("wb") as stream:
+            while chunk := await upload.read(UPLOAD_CHUNK_BYTES):
+                total += len(chunk)
+                if total > max_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail={"code": "UPLOAD_FILE_SIZE_EXCEEDED", "limit": max_bytes},
+                    )
+                stream.write(chunk)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
     return path
+
+
+def _provided_entities(value: str | None) -> list[ProvidedEntity]:
+    if not value or not value.strip():
+        return []
+    try:
+        payload = orjson.loads(value)
+        if not isinstance(payload, list):
+            raise TypeError
+        return [ProvidedEntity.model_validate(item) for item in payload]
+    except (TypeError, ValueError, orjson.JSONDecodeError) as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": "INVALID_ENTITY_LIST"}
+        ) from exc
 
 
 def create_app(
@@ -137,12 +178,19 @@ def create_app(
         reflection_time_budget_seconds: Annotated[int, Form(gt=0)] = 180,
         semantic_advisor: Annotated[str, Form()] = "disabled",
         agent_token_budget: Annotated[int, Form(gt=0)] = 20_000,
+        task_mode: Annotated[TaskMode, Form()] = TaskMode.KNOWLEDGE_GRAPH_CONSTRUCTION,
+        entity_source_mode: Annotated[EntitySourceMode, Form()] = EntitySourceMode.AUTO,
+        provided_entities_json: Annotated[str | None, Form()] = None,
     ) -> RunAccepted:
         service.executions.ensure_accepting()
         if service.review_metadata:
             raise HTTPException(status_code=409, detail="review workspace forbids extraction")
-        document_path = await _save_upload(document, settings.uploads_dir / "documents")
-        schema_path = await _save_upload(schema_file, settings.uploads_dir / "schemas")
+        document_path = await _save_upload(
+            document, settings.uploads_dir / "documents", settings.max_file_bytes
+        )
+        schema_path = await _save_upload(
+            schema_file, settings.uploads_dir / "schemas", settings.max_file_bytes
+        )
         state, created = service.create_run(
             document_path,
             schema_path,
@@ -158,6 +206,9 @@ def create_app(
             reflection_time_budget_seconds,
             semantic_advisor,
             agent_token_budget,
+            task_mode=task_mode,
+            entity_source_mode=entity_source_mode,
+            provided_entities=_provided_entities(provided_entities_json),
         )
         if created:
             service.executions.enqueue(state.run_id, "execute")
@@ -167,6 +218,156 @@ def create_app(
             created=created,
             execution=service.executions.view(state.run_id),
         )
+
+    @api.get("/runs/{run_id}/results")
+    async def run_results(run_id: str) -> object:
+        try:
+            return service.run_result(run_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="run not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail={"code": str(exc)}) from exc
+
+    @api.post("/runs/{run_id}/results/{target_type}/{target_id}/review")
+    async def review_extraction_result(
+        run_id: str,
+        target_type: str,
+        target_id: str,
+        request: ExtractionReviewRequest,
+    ) -> object:
+        try:
+            return service.review_extraction_result(
+                run_id,
+                target_type,
+                target_id,
+                **request.model_dump(),
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="run not found") from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="result item not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail={"code": str(exc)}) from exc
+
+    @api.post("/batches", status_code=202)
+    async def create_batch(
+        documents: Annotated[list[UploadFile], File()],
+        schema_file: Annotated[UploadFile, File(alias="schema")],
+        provider: Annotated[str, Form()] = "mock",
+        ocr_provider: Annotated[str, Form()] = "disabled",
+        vlm_provider: Annotated[str, Form()] = "disabled",
+        allow_remote_assets: Annotated[bool, Form()] = False,
+        case_mode: Annotated[Literal["none", "good", "good_bad"], Form()] = "none",
+        reflection_enabled: Annotated[bool, Form()] = False,
+        reflection_provider: Annotated[str, Form()] = "disabled",
+        reflection_max_attempts: Annotated[int, Form(ge=0, le=2)] = 2,
+        reflection_token_budget: Annotated[int, Form(gt=0)] = 20_000,
+        reflection_time_budget_seconds: Annotated[int, Form(gt=0)] = 180,
+        semantic_advisor: Annotated[str, Form()] = "disabled",
+        agent_token_budget: Annotated[int, Form(gt=0)] = 20_000,
+        task_mode: Annotated[TaskMode, Form()] = TaskMode.KNOWLEDGE_GRAPH_CONSTRUCTION,
+        entity_source_mode: Annotated[EntitySourceMode, Form()] = EntitySourceMode.AUTO,
+        provided_entities_json: Annotated[str | None, Form()] = None,
+        operator: Annotated[str | None, Form()] = None,
+    ) -> object:
+        if len(documents) > settings.max_batch_files:
+            raise HTTPException(
+                status_code=413,
+                detail={"code": "BATCH_FILE_LIMIT_EXCEEDED", "limit": settings.max_batch_files},
+            )
+        upload_group = settings.uploads_dir / "batches" / uuid4().hex
+        saved: list[Path] = []
+        total = 0
+        for upload in documents:
+            path = await _save_upload(upload, upload_group, settings.max_file_bytes)
+            saved.append(path)
+            total += path.stat().st_size
+            if total > settings.max_batch_bytes:
+                raise HTTPException(
+                    status_code=413,
+                    detail={
+                        "code": "BATCH_TOTAL_SIZE_EXCEEDED",
+                        "limit": settings.max_batch_bytes,
+                    },
+                )
+        schema_path = await _save_upload(
+            schema_file, settings.uploads_dir / "schemas", settings.max_file_bytes
+        )
+        try:
+            batch, created = service.create_batch(
+                saved,
+                schema_path,
+                task_mode=task_mode,
+                entity_source_mode=entity_source_mode,
+                provided_entities=_provided_entities(provided_entities_json),
+                provider_name=provider,
+                ocr_provider_name=ocr_provider,
+                vlm_provider_name=vlm_provider,
+                allow_remote_assets=allow_remote_assets,
+                case_mode=case_mode,
+                reflection_enabled=reflection_enabled,
+                reflection_provider_name=reflection_provider,
+                reflection_max_attempts=reflection_max_attempts,
+                reflection_token_budget=reflection_token_budget,
+                reflection_time_budget_seconds=reflection_time_budget_seconds,
+                semantic_advisor_name=semantic_advisor,
+                agent_token_budget=agent_token_budget,
+                operator=operator,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail={"code": str(exc)}) from exc
+        return {"created": created, "batch": batch}
+
+    @api.get("/batches/{batch_id}")
+    async def get_batch(batch_id: str) -> object:
+        try:
+            return service.refresh_batch(batch_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="batch not found") from exc
+
+    @api.get("/batches/{batch_id}/results")
+    async def batch_results(batch_id: str) -> object:
+        try:
+            return service.batch_results(batch_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="batch not found") from exc
+
+    @api.post("/batches/{batch_id}/items/{item_id}/retry", status_code=202)
+    async def retry_batch_item(batch_id: str, item_id: str) -> object:
+        try:
+            return service.retry_batch_item(batch_id, item_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="batch not found") from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="batch item not found") from exc
+        except (ValueError, ExecutionConflict) as exc:
+            raise HTTPException(status_code=409, detail={"code": str(exc)}) from exc
+
+    @api.post("/batches/{batch_id}/items/{item_id}/exclude")
+    async def exclude_batch_item(
+        batch_id: str, item_id: str, request: BatchExcludeRequest
+    ) -> object:
+        try:
+            return service.exclude_batch_item(
+                batch_id, item_id, request.operator, request.reason
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="batch not found") from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="batch item not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail={"code": str(exc)}) from exc
+
+    @api.post("/batches/{batch_id}/confirm-commit")
+    async def confirm_batch_commit(
+        batch_id: str, request: BatchCommitRequest
+    ) -> object:
+        try:
+            return await service.confirm_batch_commit(batch_id, request.reviewer)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="batch not found") from exc
+        except (ValueError, GraphIntegrityError, TaskModeCommitError) as exc:
+            raise HTTPException(status_code=409, detail={"code": str(exc)}) from exc
 
     @api.get("/runs")
     async def list_runs() -> object:
@@ -201,7 +402,11 @@ def create_app(
         run_id: str, request: RollbackRequest, reviewer: str = Query(min_length=1)
     ) -> object:
         try:
+            if not service.show_run(run_id).task_mode.permits_graph_commit:
+                raise TaskModeCommitError(TaskModeCommitError.code)
             return await service.confirm_review_commit(run_id, reviewer)
+        except TaskModeCommitError as exc:
+            raise HTTPException(status_code=409, detail={"code": str(exc)}) from exc
         except (ValueError, GraphIntegrityError, Timeout) as exc:
             raise HTTPException(
                 status_code=409, detail="submission unavailable or graph changed"

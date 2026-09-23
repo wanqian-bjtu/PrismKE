@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import json
 import mimetypes
 import re
+import shutil
+import tempfile
 from hashlib import sha256
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -15,10 +19,12 @@ from bs4 import BeautifulSoup, Tag
 from docx import Document
 from PIL import Image
 
-from src.core.ids import file_sha256, stable_id
+from src.core.errors import DocumentConversionError
+from src.core.ids import canonical_hash, file_sha256, stable_id
 from src.domain import (
     BBox,
     CoordinateSpace,
+    DocumentDerivation,
     DocumentIR,
     DocumentPage,
     EvidenceKind,
@@ -31,10 +37,12 @@ from src.domain import (
 )
 
 TEXT_TYPES = {"text/plain"}
-IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp"}
+IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp", "image/tiff", "image/bmp"}
 MARKDOWN_TYPES = {"text/markdown"}
 HTML_TYPES = {"text/html"}
+JSON_TYPES = {"application/json", "application/prismke.document-ir+json"}
 DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+DOC_TYPE = "application/msword"
 MIN_ASSET_EDGE = 64
 MAX_HTML_CONTEXT_CHARS = 500
 MARKDOWN_IMAGE = re.compile(r"!\[(?P<alt>[^]]*)]\((?P<src>[^ )]+)(?:\s+['\"][^'\"]*['\"])?\)")
@@ -50,6 +58,15 @@ def detect_media_type(path: Path, explicit: str | None = None) -> str:
         ".html": "text/html",
         ".htm": "text/html",
         ".docx": DOCX_TYPE,
+        ".doc": DOC_TYPE,
+        ".json": "application/json",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+        ".tif": "image/tiff",
+        ".tiff": "image/tiff",
+        ".bmp": "image/bmp",
     }
     return suffix_map.get(path.suffix.lower()) or mimetypes.guess_type(path.name)[0] or ""
 
@@ -356,6 +373,181 @@ class MarkdownParser:
             evidence=evidence,
             warnings=warnings,
         )
+
+
+def _json_path_child(path: str, key: str) -> str:
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+        return f"{path}.{key}"
+    return f"{path}[{json.dumps(key, ensure_ascii=False)}]"
+
+
+def _json_scalars(value: object, path: str = "$") -> list[tuple[str, object]]:
+    if isinstance(value, dict):
+        output: list[tuple[str, object]] = []
+        for key, item in value.items():
+            output.extend(_json_scalars(item, _json_path_child(path, str(key))))
+        return output
+    if isinstance(value, list):
+        output = []
+        for index, item in enumerate(value):
+            output.extend(_json_scalars(item, f"{path}[{index}]"))
+        return output
+    return [(path, value)]
+
+
+class JSONParser:
+    def supports(self, media_type: str) -> bool:
+        return media_type in JSON_TYPES
+
+    async def parse(self, source: SourceDocument) -> DocumentIR:
+        path = source.path.resolve()
+        source_hash = file_sha256(path)
+        document_id = stable_id("doc", source_hash)
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"invalid JSON document: {path.name}") from exc
+        document_ir = isinstance(payload, dict) and {
+            "id",
+            "text_blocks",
+            "evidence",
+        }.issubset(payload)
+        scalars = _json_scalars(payload)
+        if document_ir:
+            scalars = [
+                (f"$.text_blocks[{index}].text", block.get("text"))
+                for index, block in enumerate(payload.get("text_blocks", []))
+                if isinstance(block, dict) and block.get("text") is not None
+            ]
+        blocks: list[TextBlock] = []
+        evidence: list[EvidenceRef] = []
+        for json_path, value in scalars:
+            serialized = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+            display = value if isinstance(value, str) else serialized
+            value_hash = canonical_hash(value)
+            evidence_id = stable_id("ev", document_id, "json", json_path, value_hash)
+            blocks.append(
+                TextBlock(
+                    id=stable_id("block", document_id, json_path, value_hash),
+                    text=f"{json_path}: {display}",
+                    evidence_id=evidence_id,
+                )
+            )
+            evidence.append(
+                EvidenceRef(
+                    id=evidence_id,
+                    kind=EvidenceKind.JSON_VALUE,
+                    document_id=document_id,
+                    source_hash=source_hash,
+                    modality=Modality.TEXT,
+                    localization_level=LocalizationLevel.TEXT_SPAN,
+                    json_path=json_path,
+                    json_value_hash=value_hash,
+                )
+            )
+        return DocumentIR(
+            id=document_id,
+            source_path=str(path),
+            source_filename=path.name,
+            source_hash=source_hash,
+            media_type=(
+                "application/prismke.document-ir+json" if document_ir else "application/json"
+            ),
+            text_blocks=blocks,
+            evidence=evidence,
+        )
+
+
+class LegacyDOCParser:
+    def __init__(
+        self,
+        asset_dir: Path | None = None,
+        derived_dir: Path | None = None,
+        libreoffice_bin: Path | None = None,
+        timeout_seconds: int = 120,
+    ) -> None:
+        self.docx = DOCXParser(asset_dir)
+        self.derived_dir = derived_dir or Path("runtime/derived-documents")
+        self.libreoffice_bin = libreoffice_bin
+        self.timeout_seconds = timeout_seconds
+
+    def supports(self, media_type: str) -> bool:
+        return media_type == DOC_TYPE
+
+    def _executable(self) -> Path:
+        configured = self.libreoffice_bin
+        if configured and configured.is_file():
+            return configured.resolve()
+        found = shutil.which("soffice") or shutil.which("libreoffice")
+        if found:
+            return Path(found).resolve()
+        raise DocumentConversionError(
+            "LIBREOFFICE_NOT_FOUND: configure PRISMKE_LIBREOFFICE_BIN or install LibreOffice"
+        )
+
+    async def _version(self, executable: Path) -> str:
+        process = await asyncio.create_subprocess_exec(
+            str(executable),
+            "--version",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(process.communicate(), timeout=15)
+        return stdout.decode("utf-8", errors="replace").strip() or "unknown"
+
+    async def parse(self, source: SourceDocument) -> DocumentIR:
+        path = source.path.resolve()
+        source_hash = file_sha256(path)
+        executable = self._executable()
+        target_dir = self.derived_dir / source_hash[:2] / source_hash
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / f"{path.stem}.docx"
+        with tempfile.TemporaryDirectory(prefix="prismke-lo-") as profile:
+            command = [
+                str(executable),
+                "--headless",
+                f"-env:UserInstallation={Path(profile).resolve().as_uri()}",
+                "--convert-to",
+                "docx",
+                "--outdir",
+                str(target_dir),
+                str(path),
+            ]
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(), timeout=self.timeout_seconds
+                )
+            except TimeoutError as exc:
+                process.kill()
+                await process.wait()
+                raise DocumentConversionError("LIBREOFFICE_TIMEOUT") from exc
+        if process.returncode or not target.is_file():
+            detail = (stderr or stdout).decode("utf-8", errors="replace").strip()
+            raise DocumentConversionError(
+                f"LIBREOFFICE_CONVERSION_FAILED: {detail[:300] or 'no output'}"
+            )
+        derived_hash = file_sha256(target)
+        parsed = await self.docx.parse(SourceDocument(path=target, media_type=DOCX_TYPE))
+        parsed.source_path = str(path)
+        parsed.source_filename = path.name
+        parsed.source_hash = source_hash
+        parsed.media_type = DOC_TYPE
+        parsed.derivations.append(
+            DocumentDerivation(
+                tool="libreoffice",
+                tool_version=await self._version(executable),
+                source_hash=source_hash,
+                derived_hash=derived_hash,
+                derived_media_type=DOCX_TYPE,
+                derived_path=str(target.resolve()),
+            )
+        )
+        return parsed
 
 
 class HTMLParser:

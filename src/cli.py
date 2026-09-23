@@ -15,7 +15,15 @@ from rich.console import Console
 from src import __version__
 from src.core.errors import ProviderConfigurationError
 from src.core.settings import Settings
-from src.domain import ReviewDecision, load_schema
+from src.domain import (
+    BatchResult,
+    BatchRun,
+    EntitySourceMode,
+    ProvidedEntity,
+    ReviewDecision,
+    TaskMode,
+    load_schema,
+)
 from src.evaluation import (
     EntityLinkingEvaluationReport,
     evaluate_entity_linking_manifest,
@@ -184,8 +192,23 @@ def run(
     reflection_time_budget: Annotated[int, typer.Option("--reflection-time-budget")] = 180,
     semantic_advisor: Annotated[str, typer.Option("--semantic-advisor")] = "disabled",
     agent_token_budget: Annotated[int, typer.Option("--agent-token-budget")] = 20_000,
+    task_mode: Annotated[TaskMode, typer.Option("--task-mode")] = (
+        TaskMode.KNOWLEDGE_GRAPH_CONSTRUCTION
+    ),
+    entity_source_mode: Annotated[EntitySourceMode, typer.Option("--entity-source")] = (
+        EntitySourceMode.AUTO
+    ),
+    entities: Annotated[
+        Path | None, typer.Option("--entities", exists=True, dir_okay=False)
+    ] = None,
+    output: Annotated[Path | None, typer.Option("--output", dir_okay=False)] = None,
 ) -> None:
-    """Run the complete PrismKE workflow for one document."""
+    """Run one document in the selected extraction or construction mode."""
+    provided = (
+        [ProvidedEntity.model_validate(item) for item in orjson.loads(entities.read_bytes())]
+        if entities
+        else []
+    )
     state = asyncio.run(
         PrismKEService().run(
             input_path,
@@ -202,10 +225,84 @@ def run(
             reflection_time_budget,
             semantic_advisor,
             agent_token_budget,
+            task_mode=task_mode,
+            entity_source_mode=entity_source_mode,
+            provided_entities=provided,
         )
     )
     console.print(f"run_id={state.run_id} status={state.status}")
-    _print_model(state)
+    result: object = state.extraction_result or state
+    if output:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        payload = result.model_dump(mode="json") if isinstance(result, BaseModel) else result
+        output.write_bytes(orjson.dumps(payload, option=orjson.OPT_INDENT_2))
+        console.print(f"result={output.resolve()}")
+    else:
+        _print_model(result)
+
+
+@app.command("run-batch")
+def run_batch(
+    documents: Annotated[list[Path], typer.Argument(exists=True, dir_okay=False)],
+    schema: Annotated[Path, typer.Option("--schema", exists=True, dir_okay=False)],
+    task_mode: Annotated[TaskMode, typer.Option("--task-mode")] = (
+        TaskMode.KNOWLEDGE_GRAPH_CONSTRUCTION
+    ),
+    provider: Annotated[str, typer.Option("--provider")] = "mock",
+    ocr_provider: Annotated[str, typer.Option("--ocr-provider")] = "disabled",
+    vlm_provider: Annotated[str, typer.Option("--vlm-provider")] = "disabled",
+    entity_source_mode: Annotated[EntitySourceMode, typer.Option("--entity-source")] = (
+        EntitySourceMode.AUTO
+    ),
+    entities: Annotated[
+        Path | None, typer.Option("--entities", exists=True, dir_okay=False)
+    ] = None,
+    operator: Annotated[str, typer.Option("--operator")] = "CLI",
+    output: Annotated[Path | None, typer.Option("--output", dir_okay=False)] = None,
+) -> None:
+    """Run a bounded multi-document batch and export per-file results."""
+    provided = (
+        [ProvidedEntity.model_validate(item) for item in orjson.loads(entities.read_bytes())]
+        if entities
+        else []
+    )
+    service = PrismKEService()
+
+    async def execute() -> tuple[BatchRun, list[BatchResult]]:
+        try:
+            batch, _ = service.create_batch(
+                documents,
+                schema,
+                task_mode=task_mode,
+                entity_source_mode=entity_source_mode,
+                provided_entities=provided,
+                provider_name=provider,
+                ocr_provider_name=ocr_provider,
+                vlm_provider_name=vlm_provider,
+                operator=operator,
+            )
+            for run_id in dict.fromkeys(
+                item.run_id for item in batch.items if item.run_id
+            ):
+                state = service.show_run(run_id)
+                if state.status not in {"completed", "awaiting_review", "failed"}:
+                    await service.execute_run(run_id)
+            batch = service.refresh_batch(batch.id)
+            return batch, service.batch_results(batch.id)
+        finally:
+            await service.close()
+
+    batch, results = asyncio.run(execute())
+    payload = {
+        "batch": batch.model_dump(mode="json"),
+        "results": [item.model_dump(mode="json") for item in results],
+    }
+    if output:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(orjson.dumps(payload, option=orjson.OPT_INDENT_2))
+        console.print(f"result={output.resolve()}")
+    else:
+        _print_model(payload)
 
 
 @app.command("show-run")

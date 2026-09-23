@@ -14,7 +14,16 @@ class ValidationIssue(BaseModel):
     id: str
     code: str
     stage: Literal["structure", "schema", "reference", "evidence", "commit"]
-    target_type: Literal["candidate", "observation", "claim", "document", "conflict"]
+    target_type: Literal[
+        "candidate",
+        "entity",
+        "attribute",
+        "event",
+        "observation",
+        "claim",
+        "document",
+        "conflict",
+    ]
     target_id: str
     field_path: str
     severity: Literal["warning", "blocking"] = "blocking"

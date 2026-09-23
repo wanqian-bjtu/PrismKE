@@ -38,6 +38,9 @@ class EntityMention(BaseModel):
     context: str = ""
     modality: Modality = Modality.TEXT
     evidence_ids: list[str] = Field(min_length=1)
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    char_start: int | None = Field(default=None, ge=0)
+    char_end: int | None = Field(default=None, ge=0)
 
 
 class CanonicalEntity(BaseModel):

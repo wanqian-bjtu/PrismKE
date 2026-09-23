@@ -15,6 +15,7 @@ from src.domain import (
     ExtractionRequest,
     Modality,
     OutputSchema,
+    TaskMode,
     TextBlock,
 )
 from src.providers import OpenAICompatibleLLMProvider
@@ -80,6 +81,94 @@ async def test_openai_provider_with_mock_transport() -> None:
     assert result.call_records[0].response_model == "qwen3.7-flash-2026-07-15"
     assert result.call_records[0].total_tokens == 120
     assert result.call_records[0].status == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_schema_information_mode_parses_attributes_and_events() -> None:
+    evidence = EvidenceRef(
+        id="ev:info",
+        kind=EvidenceKind.TEXT_SPAN,
+        document_id="doc:info",
+        source_hash="a" * 64,
+        modality=Modality.TEXT,
+        char_start=0,
+        char_end=20,
+    )
+    document = DocumentIR(
+        id="doc:info",
+        source_path="sample.txt",
+        source_hash="a" * 64,
+        media_type="text/plain",
+        text_blocks=[TextBlock(id="b:info", text="Alice joined Acme.", evidence_id=evidence.id)],
+        evidence=[evidence],
+    )
+    schema = OutputSchema(
+        schema_id="info",
+        version="1",
+        entity_types=[EntityTypeDef(id="Person"), EntityTypeDef(id="Organization")],
+        relations=[],
+    )
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        payload = {
+            "entities": [
+                {
+                    "name": "Alice",
+                    "entity_type": "Person",
+                    "confidence": 0.9,
+                    "evidence_id": evidence.id,
+                }
+            ],
+            "claims": [],
+            "attributes": [
+                {
+                    "subject": "Alice",
+                    "subject_type": "Person",
+                    "field": "role",
+                    "value": "Engineer",
+                    "confidence": 0.8,
+                    "evidence_id": evidence.id,
+                }
+            ],
+            "events": [
+                {
+                    "event_type": "EmploymentStart",
+                    "trigger": "joined",
+                    "confidence": 0.85,
+                    "evidence_id": evidence.id,
+                    "arguments": [
+                        {
+                            "role": "employee",
+                            "value": "Alice",
+                            "value_type": "Person",
+                            "evidence_ids": [evidence.id],
+                        }
+                    ],
+                }
+            ],
+        }
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": json.dumps(payload)}}]},
+        )
+
+    provider = OpenAICompatibleLLMProvider(
+        "https://example.test/v1",
+        "secret",
+        "model",
+        transport=httpx.MockTransport(handler),
+    )
+    result = await provider.extract(
+        ExtractionRequest(
+            document=document,
+            output_schema=schema,
+            task_mode=TaskMode.SCHEMA_INFORMATION_EXTRACTION,
+        )
+    )
+    assert result.entities[0].name == "Alice"
+    assert result.attributes[0].field == "role"
+    assert result.events[0].event_type == "EmploymentStart"
+    assert result.events[0].arguments[0].role == "employee"
 
 
 @pytest.mark.asyncio

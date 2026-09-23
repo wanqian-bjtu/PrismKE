@@ -143,7 +143,80 @@ class WorkflowNodes:
         self.fusion_agent.review_repository = self.review_repository
         return await self.fusion_agent.route_by_risk(state)
 
+    async def finalize_extraction_result(self, state: WorkflowState) -> WorkflowState:
+        from src.domain import EntityMention, SchemaIndex, TaskExtractionResult
+
+        assert state.document is not None and state.output_schema is not None
+        mentions = {item.id: item for item in state.extracted_entities}
+        for candidate in state.candidates:
+            mentions[candidate.subject.id] = candidate.subject
+            if isinstance(candidate.object, EntityMention):
+                mentions[candidate.object.id] = candidate.object
+        candidate_issues = await ValidationService().candidates(
+            state.candidates,
+            SchemaIndex(state.output_schema),
+            state.document,
+            self.evidence_store,
+        )
+        item_issues = await ValidationService().extraction_items(
+            list(mentions.values()),
+            state.candidate_attributes,
+            state.candidate_events,
+            SchemaIndex(state.output_schema),
+            state.document,
+            self.evidence_store,
+        )
+        state.validation = ValidationService.merge(
+            state.validation, [*candidate_issues, *item_issues]
+        )
+        evidence_ids = {
+            evidence_id
+            for candidate in state.candidates
+            for evidence_id in candidate.evidence_ids
+        }
+        evidence_ids.update(
+            evidence_id
+            for mention in mentions.values()
+            for evidence_id in mention.evidence_ids
+        )
+        evidence_ids.update(
+            evidence_id
+            for attribute in state.candidate_attributes
+            for evidence_id in attribute.evidence_ids
+        )
+        evidence_ids.update(
+            evidence_id
+            for event in state.candidate_events
+            for evidence_id in event.evidence_ids
+        )
+        state.extraction_result = TaskExtractionResult(
+            task_mode=state.task_mode,
+            entity_source_mode=state.entity_source_mode,
+            entities=list(mentions.values()),
+            canonical_entities=state.entities,
+            mention_to_entity=state.mention_to_entity,
+            relations=state.candidates,
+            attributes=state.candidate_attributes,
+            events=state.candidate_events,
+            evidence=[item for item in state.document.evidence if item.id in evidence_ids],
+            validation_issues=state.validation.issues,
+            warnings=state.warnings,
+            review_required_ids=list(dict.fromkeys(state.extraction_review_required_ids)),
+        )
+        state.status = (
+            "awaiting_review" if state.extraction_review_required_ids else "completed"
+        )
+        return state
+
     async def prepare_graph_commit(self, state: WorkflowState) -> WorkflowState:
+        if not state.task_mode.permits_graph_commit:
+            from src.core.errors import TaskModeCommitError
+
+            raise TaskModeCommitError(TaskModeCommitError.code)
+        if state.extraction_result is None:
+            previous_status = state.status
+            state = await self.finalize_extraction_result(state)
+            state.status = previous_status
         assert state.document is not None
         if state.validation.blocking_count:
             raise GraphIntegrityError(

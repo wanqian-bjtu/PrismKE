@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     reflection_token_budget: int = 20_000
     reflection_time_budget_seconds: float = 180.0
     agent_token_budget: int = 20_000
+    libreoffice_bin: Path | None = None
+    document_conversion_timeout_seconds: int = 120
+    max_batch_files: int = 20
+    max_file_bytes: int = 200 * 1024 * 1024
+    max_batch_bytes: int = 500 * 1024 * 1024
 
     @property
     def runs_dir(self) -> Path:
@@ -95,3 +100,11 @@ class Settings(BaseSettings):
     @property
     def cases_path(self) -> Path:
         return self.runtime_dir / "cases.sqlite"
+
+    @property
+    def batches_dir(self) -> Path:
+        return self.runtime_dir / "batches"
+
+    @property
+    def derived_documents_dir(self) -> Path:
+        return self.runtime_dir / "derived-documents"
