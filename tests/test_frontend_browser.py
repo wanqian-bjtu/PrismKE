@@ -27,6 +27,11 @@ def workspace_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     root = Path(__file__).resolve().parents[1]
     runtime = tmp_path_factory.mktemp("frontend-runtime")
     port = _free_port()
+    environment = os.environ.copy()
+    existing_pythonpath = environment.get("PYTHONPATH")
+    environment["PYTHONPATH"] = os.pathsep.join(
+        item for item in (str(root), existing_pythonpath) if item
+    )
     process = subprocess.Popen(
         [
             sys.executable,
@@ -37,6 +42,7 @@ def workspace_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
             str(runtime),
         ],
         cwd=root,
+        env=environment,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.STDOUT,
     )
