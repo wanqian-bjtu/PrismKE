@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from prismke.providers import BGEM3EmbeddingProvider
+from src.providers import BGEM3EmbeddingProvider
 
 
 @pytest.mark.asyncio

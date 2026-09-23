@@ -12,11 +12,11 @@ from fastapi.testclient import TestClient
 from test_store import versioned_transaction
 from validated_fixtures import prepare_fixture_commit
 
-from prismke.api import create_app
-from prismke.core.errors import GraphIntegrityError, LegacyCheckpointError, ProviderResponseError
-from prismke.core.ids import file_sha256
-from prismke.core.settings import Settings
-from prismke.domain import (
+from src.api import create_app
+from src.core.errors import GraphIntegrityError, LegacyCheckpointError, ProviderResponseError
+from src.core.ids import file_sha256
+from src.core.settings import Settings
+from src.domain import (
     BBox,
     EvidenceKind,
     EvidenceRef,
@@ -26,11 +26,11 @@ from prismke.domain import (
     Modality,
     ValidationResult,
 )
-from prismke.governance.validation import ValidationService
-from prismke.persistence import JSONGraphStore, Neo4jGraphStore
-from prismke.providers import MockLLMProvider, OpenAICompatibleLLMProvider
-from prismke.providers.validation import summarize, validate_item
-from prismke.workflow import PrismKEService
+from src.governance.validation import ValidationService
+from src.persistence import JSONGraphStore, Neo4jGraphStore
+from src.providers import MockLLMProvider, OpenAICompatibleLLMProvider
+from src.providers.validation import summarize, validate_item
+from src.workflow import PrismKEService
 
 
 @pytest.mark.parametrize(
@@ -344,7 +344,7 @@ async def test_entity_type_update_cannot_bypass_existing_claim_validation(tmp_pa
 
 @pytest.mark.asyncio
 async def test_only_closing_legacy_claim_does_not_require_schema(tmp_path: Path) -> None:
-    from prismke.domain import utc_now
+    from src.domain import utc_now
 
     store = JSONGraphStore(tmp_path / "graph")
     transaction = versioned_transaction()
@@ -432,7 +432,7 @@ async def test_readonly_validation_checks_claims_not_only_candidates(
 
 @pytest.mark.asyncio
 async def test_literal_cannot_bypass_declared_entity_range(tmp_path: Path) -> None:
-    from prismke.core.ids import canonical_hash
+    from src.core.ids import canonical_hash
 
     store = JSONGraphStore(tmp_path / "graph")
     transaction = versioned_transaction()
@@ -453,8 +453,8 @@ async def test_literal_cannot_bypass_declared_entity_range(tmp_path: Path) -> No
 async def test_provider_mixed_items_and_whole_batch_failure(
     tmp_path: Path, schema_path: Path
 ) -> None:
-    from prismke.domain import ExtractionRequest, SourceDocument, load_schema
-    from prismke.parsing import ParserRegistry
+    from src.domain import ExtractionRequest, SourceDocument, load_schema
+    from src.parsing import ParserRegistry
 
     source = tmp_path / "text.md"
     source.write_text("PrismKE developed by OpenAI", encoding="utf-8")

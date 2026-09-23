@@ -6,8 +6,8 @@ import pymupdf
 import pytest
 from PIL import Image
 
-from prismke.domain import EvidenceKind, SourceDocument
-from prismke.parsing import ParserRegistry
+from src.domain import EvidenceKind, SourceDocument
+from src.parsing import ParserRegistry
 
 
 @pytest.mark.asyncio

@@ -9,16 +9,16 @@ import orjson
 import pytest
 from fastapi.testclient import TestClient
 
-from prismke.api import create_app
-from prismke.core.ids import file_sha256
-from prismke.core.settings import Settings
-from prismke.domain import EntityCandidate, EntityReviewTask, ReviewDecision, WorkflowState
-from prismke.persistence import Neo4jGraphStore
-from prismke.providers import DisabledOCRProvider, DisabledVLMProvider, MockLLMProvider
-from prismke.web.review import ReviewController
-from prismke.workflow import PrismKEService
-from prismke.workflow.review_details import risk_flags
-from prismke.workflow.review_workspace import import_review_run
+from src.api import create_app
+from src.core.ids import file_sha256
+from src.core.settings import Settings
+from src.domain import EntityCandidate, EntityReviewTask, ReviewDecision, WorkflowState
+from src.persistence import Neo4jGraphStore
+from src.providers import DisabledOCRProvider, DisabledVLMProvider, MockLLMProvider
+from src.web.review import ReviewController
+from src.workflow import PrismKEService
+from src.workflow.review_details import risk_flags
+from src.workflow.review_workspace import import_review_run
 
 
 async def paused_source(

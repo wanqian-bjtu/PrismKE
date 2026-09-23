@@ -2,7 +2,9 @@
 
 PrismKE 是一个面向通用多模态知识图谱构建的研究型项目，目标是实现模式引导、证据感知、可审核和可持续更新的知识抽取流程。
 
-当前稳定版本为 `v0.9.2`。v0.8 将研究工作台重构为左侧导航与右侧主工作区；v0.9 新增不可变审核案例库、BGE-M3 案例检索和受预算约束的 Reflection；v0.9.1 增加 AutoDL 多实例隔离部署能力；v0.9.2 增加历史测试事实的受控治理与 Neo4j 测试实例守卫。系统同时保留持久化任务管理、安全取消、审核纠正、统一校验、语义实体治理、Neo4j 与补偿回滚。软件版本与流程协议版本独立管理；旧运行继续使用对应发布版本处理，生产服务升级需单独执行。
+当前稳定版本为 `v0.10.0`。v0.8 将研究工作台重构为左侧导航与右侧主工作区；v0.9 新增不可变审核案例库、BGE-M3 案例检索和受预算约束的 Reflection；v0.9.2 增加历史测试事实的受控治理与 Neo4j 测试实例守卫；v0.10 建立三个语义 Agent，并完成研究工作台的视觉与配置收尾。系统同时保留持久化任务管理、安全取消、审核纠正、统一校验、语义实体治理、Neo4j 与补偿回滚。软件版本与流程协议版本独立管理；旧运行继续使用对应发布版本处理，生产服务升级需单独执行。
+
+`v0.10.0` 包含三个有结构化交接与决策轨迹的语义 Agent：多模态抽取、实体与事实治理、知识融合与审核。LangGraph 仍是确定性协调器，GraphStore 仍执行硬校验和事务提交；灰区模型建议受显式开关和预算约束。研究工作台提供可调宽侧栏、Schema 文件/文本输入、会话级模型配置、OCR 自动设备选择和中英混合识别，具体边界见 [v0.10 前端视觉验收](docs/PrismKE-v0.10前端视觉验收.md)。本次 Git 发布不替换生产服务。职责、命令和边界见 [v0.10 三 Agent 架构说明](docs/PrismKE-v0.10三Agent架构与验收.md)。
 
 `v0.6.0` 软件版本与流程协议均为 `0.6.0`。新增审核人/原因校验、暂缓、不可变候选与审核事件、可重放投影、纠正预览及精确补偿提交。使用边界见 [v0.6 审核纠正说明](docs/v0.6审核纠正说明.md)，快速检查问题保留在 [问题清单](docs/v0.6.0问题记录与改进清单.md)。旧运行不能由新流程纠正或恢复。
 
@@ -102,7 +104,7 @@ ingest
   -> commit_graph
 ```
 
-工作流由 LangGraph 组织。文本与视觉抽取并行执行并分别保存检查点；某一分支失败时，恢复任务不会重跑已完成分支。解析、治理和持久化等确定性步骤不调用大模型；只有需要语义判断的抽取 Provider 使用 LLM/VLM。
+工作流由 LangGraph 组织。文本与视觉抽取并行执行并分别保存检查点；某一分支失败时，恢复任务不会重跑已完成分支。稳定版的治理与融合主要依靠确定性规则。开发中的 v0.10 将现有节点委托给三个语义 Agent；仅显式启用时在实体灰区和复杂事实组调用文本模型，最终校验、审核与写图仍由原有硬边界负责。
 
 ## 环境安装
 
@@ -133,19 +135,20 @@ uv sync --extra dev --extra neo4j --extra web
 uv sync --extra dev --extra neo4j --extra web --extra embedding
 ```
 
-在当前 AutoDL 服务器上，环境路径为：
+`uv sync` 在项目内创建 `.venv`。启动脚本优先使用该环境中的 `python` 和
+`prismke`；其它安装方式可设置 `PRISMKE_PYTHON_BIN` 与 `PRISMKE_CLI_BIN`。
 
-```text
-/root/miniconda3/envs/prismke
-```
+`dev/v0.10` 的 Python 源码直接放在根目录 `src/`，导入路径为 `src.*`；
+命令行入口仍是 `prismke`。旧的 `prismke.*` 导入不再适用于此开发分支，
+安装或拉取更新后需重新安装项目依赖。历史运行仍由对应发布版本接续。
 
 ## 快速开始
 
-进入项目目录并激活环境：
+进入实际检出的项目目录并激活环境：
 
 ```bash
-cd /root/autodl-tmp/PrismKE
-conda activate prismke
+cd /path/to/PrismKE
+source .venv/bin/activate
 ```
 
 验证示例 Schema：
@@ -244,11 +247,11 @@ prismke run INPUT \
 
 ## OCR 与视觉抽取
 
-OCR 默认使用 CPU、中文模型（兼容常见中英混排）：
+OCR 默认自动检测 Paddle 可用设备，无卡或 CPU 版 Paddle 会安全使用 CPU；中英混排和中文均使用保留英文内容的 `ch` 引擎：
 
 ```text
-PRISMKE_OCR_DEVICE=cpu
-PRISMKE_OCR_LANG=ch
+PRISMKE_OCR_DEVICE=auto
+PRISMKE_OCR_LANG=mixed
 PRISMKE_OCR_MODEL=PP-OCRv5
 ```
 
@@ -262,8 +265,8 @@ PRISMKE_VLM_TIMEOUT=120
 ```
 
 北京地域推荐使用百炼业务空间专属 API Host。`<WorkspaceId>` 可在 API Key 创建结果或
-业务空间管理页面中查看。服务器上的真实配置应写入
-`/root/autodl-tmp/PrismKE/.env`：先复制 `.env.example`，再将同一个 API Key 分别填入
+业务空间管理页面中查看。真实配置应写入项目根目录的 `.env`：先复制
+`.env.example`，再将同一个 API Key 分别填入
 `PRISMKE_LLM_API_KEY` 和 `PRISMKE_VLM_API_KEY`。`.env` 已被 Git 忽略，禁止将密钥
 写入 `.env.example`、命令行参数、日志或运行结果。
 
@@ -368,12 +371,22 @@ GET  /api/v1/entities/{entity_id}/history
 
 Gradio `/ui` 中的“实体治理”页面可以检查 Top-K 候选和评分、处理实体链接审核、创建合并/拆分建议并查看治理结果。合并和拆分始终需要人工批准。
 
-AutoDL 原生部署使用统一控制脚本启动 Neo4j 与 PrismKE Web：
+Linux/WSL 部署使用项目内的统一控制脚本启动 Neo4j 与 PrismKE Web，不依赖
+AutoDL 路径或 Conda。需先安装 Java、Neo4j、tmux、curl、flock 和项目虚拟环境；
+`scripts/install_neo4j.sh` 可将 Neo4j 安装到项目的 `runtime/neo4j/current`。
+`dev/v0.10` 默认使用 `runtime/services/v010/` 的隔离图谱和运行状态，不会读取
+旧的 `runtime/neo4j/data`；可用 `PRISMKE_RUNTIME_DIR` 指定另一实例目录：
 
 ```bash
-bash scripts/prismke_autodl.sh start
-bash scripts/prismke_autodl.sh status
+bash scripts/prismke.sh start
+bash scripts/prismke.sh status
 ```
+
+也可以分别启动：`bash scripts/start_neo4j.sh` 启动本机 Neo4j daemon，
+`bash scripts/start_web.sh` 在当前终端前台启动 Web（`Ctrl+C` 停止 Web）。
+实际 Gradio 页面代码位于根目录 `frontend/`，FastAPI 仍由 `prismke serve`
+启动并在 `/ui/` 挂载页面。独立实例、旧版服务回退及端口转发见
+[v0.10 前端目录与服务切换说明](docs/v0.10前端目录与服务切换说明.md)。
 
 API 位于 `http://127.0.0.1:8000/api/v1`，研究界面位于
 `http://127.0.0.1:8000/ui`。服务器保持本机监听，通过 SSH 端口转发访问。若改为非本地监听，必须设置 `PRISMKE_API_TOKEN`。
@@ -381,14 +394,16 @@ API 位于 `http://127.0.0.1:8000/api/v1`，研究界面位于
 常用运维命令：
 
 ```bash
-bash scripts/prismke_autodl.sh stop
-bash scripts/prismke_autodl.sh restart
-bash scripts/prismke_autodl.sh health
-bash scripts/prismke_autodl.sh logs web --lines 100
-bash scripts/prismke_autodl.sh logs neo4j --follow
+bash scripts/prismke.sh stop
+bash scripts/prismke.sh restart
+bash scripts/prismke.sh health
+bash scripts/prismke.sh logs web --lines 100
+bash scripts/prismke.sh logs neo4j --follow
 ```
 
-脚本不会配置平台级开机自启动。AutoDL 实例启动后执行一次 `start` 即可；重复启动和停止均为幂等操作。本地开发仍可直接执行 `prismke serve`。
+脚本从自身位置定位项目，不要求当前工作目录固定，也不配置平台级开机自启动。
+机器重启后执行一次 `start` 即可；重复启动和停止均为幂等操作。本地开发仍可
+直接执行 `prismke serve`。原 `_autodl.sh` 文件仅作为旧命令兼容入口。
 
 JSON 图谱迁移预检与执行：
 
@@ -421,7 +436,7 @@ runtime/
 
 ```bash
 ruff check .
-mypy src/prismke
+mypy src
 pytest
 ```
 

@@ -8,11 +8,11 @@ from pathlib import Path
 
 import uvicorn
 
-from prismke.api import create_app
-from prismke.core.settings import Settings
-from prismke.domain import ExtractionRequest, ExtractionResult
-from prismke.providers import MockLLMProvider
-from prismke.workflow import PrismKEService
+from src.api import create_app
+from src.core.settings import Settings
+from src.domain import ExtractionRequest, ExtractionResult
+from src.providers import MockLLMProvider
+from src.workflow import PrismKEService
 
 
 class GatedMockProvider(MockLLMProvider):

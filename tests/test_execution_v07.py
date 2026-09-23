@@ -16,17 +16,17 @@ import pytest
 from fastapi.testclient import TestClient
 from filelock import Timeout
 
-from prismke.api import create_app
-from prismke.core.errors import ProviderRequestError
-from prismke.core.execution_control import ExecutionPaused, current_execution
-from prismke.core.settings import Settings
-from prismke.domain import ExtractionResult, ReviewDecision
-from prismke.persistence.execution import ExecutionConflict
-from prismke.persistence.neo4j_graph import Neo4jGraphStore
-from prismke.providers import MockLLMProvider
-from prismke.providers.http_client import _usage, post_chat_completion
-from prismke.workflow import PrismKEService
-from prismke.workflow.execution import RunControl
+from src.api import create_app
+from src.core.errors import ProviderRequestError
+from src.core.execution_control import ExecutionPaused, current_execution
+from src.core.settings import Settings
+from src.domain import ExtractionResult, ReviewDecision
+from src.persistence.execution import ExecutionConflict
+from src.persistence.neo4j_graph import Neo4jGraphStore
+from src.providers import MockLLMProvider
+from src.providers.http_client import _usage, post_chat_completion
+from src.workflow import PrismKEService
+from src.workflow.execution import RunControl
 
 
 def fixture(tmp_path: Path, schema_path: Path) -> tuple[PrismKEService, str, Path]:
@@ -476,11 +476,11 @@ async def test_independent_process_restart_auto_recovers_without_reparsing(
     code = r"""
 import asyncio,sys
 from pathlib import Path
-from prismke.workflow import PrismKEService
-from prismke.providers import MockLLMProvider
-from prismke.core.settings import Settings
-from prismke.core.execution_control import ExecutionPaused
-from prismke.parsing import ParserRegistry
+from src.workflow import PrismKEService
+from src.providers import MockLLMProvider
+from src.core.settings import Settings
+from src.core.execution_control import ExecutionPaused
+from src.parsing import ParserRegistry
 runtime,sample,schema=map(Path,sys.argv[1:])
 original=ParserRegistry.parse
 async def parse(self,source):

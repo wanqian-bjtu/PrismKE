@@ -8,11 +8,11 @@ from unittest.mock import AsyncMock, MagicMock
 import orjson
 import pytest
 
-from prismke.core.errors import GraphIntegrityError
-from prismke.core.ids import canonical_hash
-from prismke.domain import Claim, EvidenceKind, EvidenceRef, GraphRevision, Modality
-from prismke.persistence.file_evidence import FileEvidenceStore
-from prismke.persistence.legacy_evidence import (
+from src.core.errors import GraphIntegrityError
+from src.core.ids import canonical_hash
+from src.domain import Claim, EvidenceKind, EvidenceRef, GraphRevision, Modality
+from src.persistence.file_evidence import FileEvidenceStore
+from src.persistence.legacy_evidence import (
     SAMPLE_CLAIM_ID,
     SAMPLE_EVIDENCE_ID,
     closure_commit,

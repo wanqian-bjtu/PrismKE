@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from prismke.core.errors import ProviderConfigurationError
-from prismke.core.settings import Settings
-from prismke.providers import OpenAICompatibleLLMProvider, OpenAICompatibleVLMProvider
-from prismke.workflow import PrismKEService
+from src.core.errors import ProviderConfigurationError
+from src.core.settings import Settings
+from src.providers import OpenAICompatibleLLMProvider, OpenAICompatibleVLMProvider
+from src.workflow import PrismKEService
 
 
 def test_openai_provider_requires_explicit_configuration(tmp_path: Path) -> None:

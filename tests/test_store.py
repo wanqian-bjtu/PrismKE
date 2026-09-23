@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from validated_fixtures import JSONGraphStore
 
-from prismke.core.errors import GraphIntegrityError
-from prismke.domain import (
+from src.core.errors import GraphIntegrityError
+from src.domain import (
     CanonicalEntity,
     Claim,
     EvidenceKind,

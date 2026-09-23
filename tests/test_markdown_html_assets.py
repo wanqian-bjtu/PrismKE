@@ -1,8 +1,8 @@
 import pytest
 from PIL import Image
 
-from prismke.domain import SourceDocument
-from prismke.parsing.adapters import MarkdownParser
+from src.domain import SourceDocument
+from src.parsing.adapters import MarkdownParser
 
 
 @pytest.mark.asyncio

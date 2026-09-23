@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from prismke.evaluation.request_budget import RequestBudget
-from prismke.providers.common import parse_json_object
+from src.evaluation.request_budget import RequestBudget
+from src.providers.common import parse_json_object
 
 
 @pytest.mark.parametrize("content", ['{"claims":[]}', '```json\n{"claims":[]}\n```'])

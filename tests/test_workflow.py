@@ -7,11 +7,11 @@ import pytest
 from PIL import Image
 from typer.testing import CliRunner
 
-from prismke.cli import app
-from prismke.core.errors import EvidenceIntegrityError
-from prismke.core.ids import stable_id
-from prismke.core.settings import Settings
-from prismke.domain import (
+from src.cli import app
+from src.core.errors import EvidenceIntegrityError
+from src.core.ids import stable_id
+from src.core.settings import Settings
+from src.domain import (
     Claim,
     ClaimStatus,
     ExtractionRequest,
@@ -23,12 +23,12 @@ from prismke.domain import (
     VisualExtractionRequest,
     WorkflowState,
 )
-from prismke.parsing import ParserRegistry
-from prismke.parsing.adapters import MarkdownParser, TextParser
-from prismke.persistence import FileEvidenceStore, JSONGraphStore, RunRepository
-from prismke.providers import DisabledOCRProvider, DisabledVLMProvider, MockLLMProvider
-from prismke.workflow import PrismKEService, PrismKEWorkflow
-from prismke.workflow.nodes import WorkflowNodes
+from src.parsing import ParserRegistry
+from src.parsing.adapters import MarkdownParser, TextParser
+from src.persistence import FileEvidenceStore, JSONGraphStore, RunRepository
+from src.providers import DisabledOCRProvider, DisabledVLMProvider, MockLLMProvider
+from src.workflow import PrismKEService, PrismKEWorkflow
+from src.workflow.nodes import WorkflowNodes
 
 
 def test_run_repository_uses_cross_platform_safe_filename(tmp_path: Path) -> None:

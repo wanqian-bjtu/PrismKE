@@ -4,7 +4,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from prismke.domain import (
+from src.domain import (
     DocumentIR,
     ExtractionRequest,
     ExtractionResult,
@@ -12,15 +12,15 @@ from prismke.domain import (
     OutputSchema,
     TextBlock,
 )
-from prismke.evaluation.document_validation import (
+from src.evaluation.document_validation import (
     _EvaluationLLM,
     _ReusedOCR,
     text_batches,
     validate_documents,
 )
-from prismke.evaluation.request_budget import BudgetedTransport, EvaluationBudgetStop, RequestBudget
-from prismke.providers.ocr import DisabledOCRProvider
-from prismke.providers.openai_compatible import OpenAICompatibleLLMProvider
+from src.evaluation.request_budget import BudgetedTransport, EvaluationBudgetStop, RequestBudget
+from src.providers.ocr import DisabledOCRProvider
+from src.providers.openai_compatible import OpenAICompatibleLLMProvider
 
 
 @pytest.mark.asyncio
@@ -76,7 +76,7 @@ async def test_ledger_is_pending_before_network_and_accumulates_across_documents
 
 @pytest.mark.asyncio
 async def test_ledger_write_failure_blocks_network(tmp_path, monkeypatch):
-    import prismke.evaluation.request_budget as module
+    import src.evaluation.request_budget as module
 
     def fail(*args):
         raise OSError("disk unavailable")
@@ -236,7 +236,7 @@ async def test_completed_text_batches_are_cached_without_new_calls(tmp_path, mon
 
 @pytest.mark.asyncio
 async def test_verified_text_cache_reuses_body_but_extracts_new_ocr(monkeypatch):
-    from prismke.core.ids import stable_id
+    from src.core.ids import stable_id
 
     body = TextBlock(id="body", text="original", evidence_id="ev0")
     ocr = TextBlock(id="ocr", text="new image text", evidence_id="ev1", modality="ocr")
@@ -287,7 +287,7 @@ async def test_verified_text_cache_reuses_body_but_extracts_new_ocr(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_validation_invalid_budget_does_not_create_runtime(tmp_path):
-    from prismke.core.settings import Settings
+    from src.core.settings import Settings
 
     output = tmp_path / "output"
     with pytest.raises(ValueError, match="budget must"):

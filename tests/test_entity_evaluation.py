@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from prismke.evaluation import evaluate_entity_linking_manifest
-from prismke.providers import MockEmbeddingProvider
+from src.evaluation import evaluate_entity_linking_manifest
+from src.providers import MockEmbeddingProvider
 
 
 @pytest.mark.asyncio
@@ -25,8 +25,8 @@ async def test_public_entity_manifest_is_reproducible() -> None:
 
 @pytest.mark.asyncio
 async def test_dual_retrieval_rank_eleven_is_not_a_top_ten_hit(tmp_path, monkeypatch) -> None:
-    from prismke.domain import EntityCandidate, EntityResolutionDecision
-    from prismke.governance.entity_resolution import SemanticEntityResolver
+    from src.domain import EntityCandidate, EntityResolutionDecision
+    from src.governance.entity_resolution import SemanticEntityResolver
 
     entities = [{"id": f"E{i}", "name": f"Name{i}", "entity_type": "Person"} for i in range(1, 12)]
     manifest = tmp_path / "manifest.json"

@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from prismke.core.settings import Settings
-from prismke.evaluation import evaluate_manifest
-from prismke.workflow import PrismKEService
+from src.core.settings import Settings
+from src.evaluation import evaluate_manifest
+from src.workflow import PrismKEService
 
 
 @pytest.mark.asyncio

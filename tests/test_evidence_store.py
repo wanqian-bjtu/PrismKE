@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from prismke.core.ids import stable_id
-from prismke.domain import (
+from src.core.ids import stable_id
+from src.domain import (
     BBox,
     CoordinateSpace,
     EvidenceKind,
@@ -15,8 +15,8 @@ from prismke.domain import (
     Modality,
     SourceDocument,
 )
-from prismke.parsing import ParserRegistry
-from prismke.persistence import FileEvidenceStore
+from src.parsing import ParserRegistry
+from src.persistence import FileEvidenceStore
 
 
 @pytest.mark.asyncio

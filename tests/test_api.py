@@ -7,10 +7,10 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi.testclient import TestClient
 
-from prismke.api import create_app
-from prismke.core.errors import GraphIntegrityError
-from prismke.core.settings import Settings
-from prismke.workflow import PrismKEService
+from src.api import create_app
+from src.core.errors import GraphIntegrityError
+from src.core.settings import Settings
+from src.workflow import PrismKEService
 
 
 def wait_execution(client: TestClient, run_id: str) -> None:

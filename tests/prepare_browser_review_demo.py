@@ -7,7 +7,7 @@ from pathlib import Path
 
 from test_review_workspace import paused_source
 
-from prismke.workflow.review_workspace import import_review_run
+from src.workflow.review_workspace import import_review_run
 
 
 async def main() -> None:
