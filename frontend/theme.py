@@ -14,24 +14,99 @@ APP_CSS = r"""
   --prism-amber: #e9a21a;
   --prism-danger: #c53b45;
   --prism-radius: 6px;
+  --prism-sidebar-width: 300px;
 }
 
 .gradio-container {
+  box-sizing: border-box !important;
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
   background: var(--prism-bg) !important;
   color: var(--prism-text) !important;
   padding: 0 !important;
   letter-spacing: 0 !important;
 }
 
+.gradio-container > .main {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.gradio-container .sidebar-parent {
+  padding-left: var(--prism-sidebar-width) !important;
+}
+
+.gradio-container .sidebar-parent:has(#workspace-sidebar:not(.open)) {
+  padding-left: 0 !important;
+}
+
 #workspace-sidebar {
-  width: 300px !important;
+  width: var(--prism-sidebar-width) !important;
+  min-width: 260px !important;
+  max-width: 520px !important;
+  height: 100dvh !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  scrollbar-width: thin;
+  scrollbar-color: #9aa6b4 transparent;
   border-right: 1px solid var(--prism-border) !important;
   background: #eef2f6 !important;
 }
 
+#workspace-sidebar.open {
+  left: 0 !important;
+  transform: translateX(0) !important;
+}
+#workspace-sidebar::-webkit-scrollbar { width: 7px; }
+#workspace-sidebar::-webkit-scrollbar-track { background: transparent; }
+#workspace-sidebar::-webkit-scrollbar-thumb {
+  background: #9aa6b4;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background-clip: padding-box;
+}
+#workspace-sidebar > .wrap { width: 100%; padding: 14px 14px 22px !important; }
 #workspace-sidebar .wrap { gap: 9px !important; }
-#workspace-sidebar .form { gap: 10px !important; }
-.sidebar-status { color: var(--prism-muted); font-size: 13px; }
+#workspace-sidebar .form { width: 100%; gap: 10px !important; margin-inline: auto; }
+#workspace-sidebar .block { width: 100%; margin-inline: auto; }
+#workspace-sidebar label > span { text-align: left; }
+.sidebar-status {
+  color: var(--prism-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.sidebar-status p { text-align: center; }
+
+#workspace-resizer {
+  position: absolute;
+  z-index: 50;
+  top: 0;
+  right: -6px;
+  width: 12px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+
+#workspace-resizer::after {
+  content: "";
+  position: absolute;
+  top: 18%;
+  bottom: 18%;
+  left: 5px;
+  width: 2px;
+  border-radius: 2px;
+  background: transparent;
+}
+
+#workspace-resizer:hover::after,
+#workspace-resizer:focus-visible::after,
+#workspace-resizer[data-dragging="true"]::after { background: var(--prism-blue); }
 
 #workspace-brand {
   box-sizing: border-box;
@@ -41,8 +116,8 @@ APP_CSS = r"""
   padding: 18px 28px 14px;
   align-items: center;
   justify-content: center;
-  background: var(--prism-surface);
-  border-bottom: 1px solid var(--prism-border);
+  background: var(--prism-bg);
+  border: 0;
   gap: 3px !important;
 }
 
@@ -78,7 +153,9 @@ APP_CSS = r"""
 }
 
 #workspace-tabs {
+  box-sizing: border-box;
   width: min(1500px, calc(100% - 40px));
+  max-width: 1500px;
   margin: 0 auto;
   padding: 18px 0 34px;
 }
@@ -159,14 +236,26 @@ APP_CSS = r"""
 .gradio-container .table-wrap { overflow-x: auto !important; }
 
 @media (max-width: 900px) {
+  .gradio-container .sidebar-parent { padding-left: 0 !important; }
   #workspace-sidebar { width: min(320px, 88vw) !important; }
-  #workspace-brand { min-height: 128px; padding: 14px 18px 12px; }
+  #workspace-resizer { display: none; }
+  #workspace-brand {
+    width: 100%;
+    min-height: 128px;
+    margin-left: 0;
+    padding: 14px 18px 12px;
+  }
   #workspace-tabs { width: calc(100% - 24px); padding-top: 14px; }
+  #workspace-tabs { max-width: none; margin: 0 auto; }
   .workspace-page-header { align-items: flex-start; flex-direction: column; gap: 5px; }
   .workspace-page-header p { text-align: left; }
 }
 
 @media (max-width: 520px) {
+  #workspace-sidebar.open {
+    left: 0 !important;
+    transform: translateX(0) !important;
+  }
   #workspace-sidebar:not(.open) {
     left: calc(12px - min(320px, 88vw)) !important;
   }

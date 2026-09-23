@@ -69,6 +69,10 @@ def _select_next_option(page: Page, elem_id: str) -> None:
     control.press("Enter")
 
 
+def _write_screenshot(page: Page, path: Path, *, full_page: bool) -> None:
+    path.write_bytes(page.screenshot(full_page=full_page))
+
+
 @pytest.mark.browser
 @pytest.mark.parametrize(
     ("name", "width", "height"),
@@ -96,6 +100,11 @@ def test_workspace_navigation_branding_and_responsive_layout(
         logo.wait_for(state="visible")
         assert logo.evaluate("element => element.naturalWidth") > 0
         assert "An auditable and traceable" in page.locator("#workspace-brand").inner_text()
+        assert page.locator("#workspace-brand").evaluate(
+            "element => getComputedStyle(element).backgroundColor"
+        ) == page.locator(".gradio-container").evaluate(
+            "element => getComputedStyle(element).backgroundColor"
+        )
 
         sidebar = page.locator("#workspace-sidebar")
         toggle = page.get_by_role("button", name="Toggle Sidebar")
@@ -114,17 +123,29 @@ def test_workspace_navigation_branding_and_responsive_layout(
         assert page.locator(".workspace-page-header:visible h1").inner_text() == "新建知识构建"
 
         if name == "mobile":
-            toggle.click()
-            page.wait_for_function(
-                "!document.querySelector('#workspace-sidebar').classList.contains('open')"
-            )
+            if "open" in (sidebar.get_attribute("class") or ""):
+                toggle.click()
+                page.wait_for_function(
+                    "!document.querySelector('#workspace-sidebar').classList.contains('open')"
+                )
             page.wait_for_timeout(400)
         else:
             assert "open" in (sidebar.get_attribute("class") or "")
+        if name == "desktop":
+            resizer = page.locator("#workspace-resizer")
+            resizer.wait_for(state="visible")
+            before = sidebar.bounding_box()
+            resizer.focus()
+            resizer.press("ArrowRight")
+            after = sidebar.bounding_box()
+            assert before and after and after["width"] > before["width"]
+            assert page.evaluate(
+                "localStorage.getItem('prismke.workspace.sidebar.width')"
+            ) is not None
 
         overflow = page.evaluate("document.documentElement.scrollWidth - window.innerWidth")
         assert overflow <= 1
-        page.screenshot(path=screenshot_root / f"{name}-build.png", full_page=True)
+        _write_screenshot(page, screenshot_root / f"{name}-build.png", full_page=True)
         browser.close()
 
 
@@ -152,8 +173,9 @@ def test_every_workspace_page_is_reachable_from_grouped_navigation(
                 expected_title = PAGE_META[page_id][0]
                 expect(heading).to_have_text(expected_title)
                 assert heading.inner_text() == expected_title
-                page.screenshot(
-                    path=screenshot_root / f"desktop-{page_id}.png",
+                _write_screenshot(
+                    page,
+                    screenshot_root / f"desktop-{page_id}.png",
                     full_page=False,
                 )
 

@@ -189,8 +189,10 @@ def test_workspace_provider_defaults_and_setting_controls(tmp_path: Path) -> Non
         assert fields[label]["props"]["value"] == value
     assert fields["允许远程资源"]["props"]["value"] is False
 
+    assert fields["LLM 模型别名"]["type"] == "textbox"
+    assert fields["LLM 模型别名"]["props"]["value"] == "custom-llm"
+
     for label, value in {
-        "LLM 模型别名": "custom-llm",
         "OCR 设备": "gpu:1",
         "OCR 语言": "ch",
         "OCR 模型": "PP-OCRv5",

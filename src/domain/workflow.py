@@ -104,10 +104,14 @@ class WorkflowState(BaseModel):
     schema_path: str
     provider_name: str = "mock"
     provider_fingerprint: str = "legacy"
+    llm_base_url: str | None = None
+    llm_model: str | None = None
     ocr_provider_name: str = "disabled"
     ocr_provider_fingerprint: str = "disabled"
     vlm_provider_name: str = "disabled"
     vlm_provider_fingerprint: str = "disabled"
+    vlm_base_url: str | None = None
+    vlm_model: str | None = None
     embedding_provider_name: str = "disabled"
     embedding_provider_fingerprint: str = "disabled"
     case_mode: Literal["none", "good", "good_bad"] = "none"

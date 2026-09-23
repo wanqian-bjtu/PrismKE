@@ -141,6 +141,8 @@ class ExecutionManager:
             )
 
     def blockers(self, state: WorkflowState, *, include_sent: bool = True) -> str | None:
+        if self.service.missing_run_credentials(state):
+            return "CREDENTIAL_REQUIRED"
         if self.service.reviews.repository.pending(state.run_id):
             return "REVIEW_SYNC_PENDING"
         if self.repository.unknown(state.run_id, include_sent=include_sent):
@@ -235,6 +237,7 @@ class ExecutionManager:
             "PROJECTION_SYNC_PENDING",
             "EXECUTION_INPUT_CHANGED",
             "PROVIDER_CONFIGURATION_CHANGED",
+            "CREDENTIAL_REQUIRED",
             "EXECUTION_EVIDENCE_INVALID",
             "CHECKPOINT_MISSING",
         }
@@ -529,13 +532,13 @@ class ExecutionManager:
             state.review_workspace or state.correction_tail_only or state.current_node in tail_nodes
         ):
             pairs: list[tuple[LLMProvider | OCRProvider | VLMProvider | EmbeddingProvider, str]] = [
-                (self.service.provider(state.provider_name), state.provider_fingerprint),
+                (self.service.provider_for_state(state), state.provider_fingerprint),
                 (
                     self.service.ocr_provider(state.ocr_provider_name),
                     state.ocr_provider_fingerprint,
                 ),
                 (
-                    self.service.vlm_provider(state.vlm_provider_name),
+                    self.service.vlm_provider_for_state(state),
                     state.vlm_provider_fingerprint,
                 ),
                 (self.service.embedding_provider(), state.embedding_provider_fingerprint),
@@ -628,6 +631,7 @@ class ExecutionManager:
             finally:
                 control.closed = True
                 current_execution.reset(token)
+                self.service.release_run_credentials(task.run_id)
 
     async def wait(self, run_id: str) -> WorkflowState:
         while True:

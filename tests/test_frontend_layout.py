@@ -80,9 +80,22 @@ def test_workspace_uses_dropdown_navigation_and_no_radio_components(tmp_path: Pa
     assert by_id["workspace-logo"]["type"] == "image"
 
     labels = [component["props"].get("label") for component in components]
-    assert "API Key" not in labels
     assert "Neo4j 密码" not in labels
     assert TAGLINE in response.text
+
+    by_label = {
+        component["props"].get("label"): component
+        for component in components
+        if component["props"].get("label")
+    }
+    assert by_label["Schema 来源"]["type"] == "dropdown"
+    assert by_label["LLM 模型别名"]["type"] == "textbox"
+    assert by_label["VLM 模型别名"]["type"] == "textbox"
+    assert by_label["LLM API Key（当前会话）"]["props"]["type"] == "password"
+    assert by_label["VLM API Key（当前会话）"]["props"]["type"] == "password"
+    assert not by_label["LLM API Key（当前会话）"]["props"].get("value")
+    assert not by_label["VLM API Key（当前会话）"]["props"].get("value")
+    assert by_label["配置操作者"]["props"]["value"] == "管理员"
 
     decision_labels = {"审核决定", "替代决定", "核对结论", "审核动作"}
     for component in components:

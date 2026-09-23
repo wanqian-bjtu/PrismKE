@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
@@ -85,6 +86,14 @@ ASSET_POLICY_VERSION = "assets-v3"
 ALIGNMENT_POLICY_VERSION = "alignment-v1"
 
 
+@dataclass(frozen=True, repr=False)
+class TransientProviderCredentials:
+    """Per-browser credentials kept in process memory and never serialized."""
+
+    llm_api_key: str | None = None
+    vlm_api_key: str | None = None
+
+
 class PrismKEService:
     def __init__(
         self, settings: Settings | None = None, graph_store: GraphStore | None = None
@@ -114,6 +123,7 @@ class PrismKEService:
         self.cases = CaseService(self.case_repository, self.evidence_store)
         self._ocr_providers: dict[str, OCRProvider] = {}
         self._embedding_provider: EmbeddingProvider | None = None
+        self._run_credentials: dict[str, TransientProviderCredentials] = {}
         from src.workflow.reviews import ReviewService
 
         self.reviews = ReviewService(self)
@@ -367,19 +377,34 @@ class PrismKEService:
             raise ProviderConfigurationError(f"openai-compatible requires a valid {variable}")
 
     def provider(self, name: str) -> LLMProvider:
+        return self._llm_provider(
+            name,
+            base_url=self.settings.llm_base_url,
+            model=self.settings.llm_model,
+            api_key=self.settings.llm_api_key,
+        )
+
+    def _llm_provider(
+        self,
+        name: str,
+        *,
+        base_url: str,
+        model: str | None,
+        api_key: str | None,
+    ) -> LLMProvider:
         if name == "mock":
             return MockLLMProvider()
         if name != "openai-compatible":
             raise ProviderConfigurationError(f"unknown provider: {name}")
-        if not self.settings.llm_api_key:
+        if not api_key:
             raise ProviderConfigurationError("openai-compatible requires PRISMKE_LLM_API_KEY")
-        if not self.settings.llm_model:
+        if not model:
             raise ProviderConfigurationError("openai-compatible requires PRISMKE_LLM_MODEL")
-        self._validate_endpoint(self.settings.llm_base_url, "PRISMKE_LLM_BASE_URL")
+        self._validate_endpoint(base_url, "PRISMKE_LLM_BASE_URL")
         return OpenAICompatibleLLMProvider(
-            base_url=self.settings.llm_base_url,
-            api_key=self.settings.llm_api_key,
-            model=self.settings.llm_model,
+            base_url=base_url,
+            api_key=api_key,
+            model=model,
             timeout=self.settings.request_timeout,
         )
 
@@ -403,24 +428,123 @@ class PrismKEService:
         return provider
 
     def vlm_provider(self, name: str) -> VLMProvider:
+        return self._vlm_provider(
+            name,
+            base_url=self.settings.vlm_base_url,
+            model=self.settings.vlm_model,
+            api_key=self.settings.vlm_api_key,
+        )
+
+    def _vlm_provider(
+        self,
+        name: str,
+        *,
+        base_url: str,
+        model: str | None,
+        api_key: str | None,
+    ) -> VLMProvider:
         if name == "disabled":
             return DisabledVLMProvider()
         if name == "mock":
             return MockVLMProvider()
         if name != "openai-compatible":
             raise ProviderConfigurationError(f"unknown VLM provider: {name}")
-        if not self.settings.vlm_api_key:
+        if not api_key:
             raise ProviderConfigurationError("openai-compatible VLM requires PRISMKE_VLM_API_KEY")
-        if not self.settings.vlm_model:
+        if not model:
             raise ProviderConfigurationError("openai-compatible VLM requires PRISMKE_VLM_MODEL")
-        self._validate_endpoint(self.settings.vlm_base_url, "PRISMKE_VLM_BASE_URL")
+        self._validate_endpoint(base_url, "PRISMKE_VLM_BASE_URL")
         return OpenAICompatibleVLMProvider(
-            base_url=self.settings.vlm_base_url,
-            api_key=self.settings.vlm_api_key,
-            model=self.settings.vlm_model,
+            base_url=base_url,
+            api_key=api_key,
+            model=model,
             timeout=self.settings.vlm_timeout,
             max_image_edge=self.settings.vlm_max_image_edge,
         )
+
+    def _credentials(self, run_id: str) -> TransientProviderCredentials:
+        return self._run_credentials.get(run_id, TransientProviderCredentials())
+
+    def release_run_credentials(self, run_id: str) -> None:
+        """Forget browser-supplied credentials after one execution attempt."""
+
+        self._run_credentials.pop(run_id, None)
+
+    def provider_for_state(self, state: WorkflowState) -> LLMProvider:
+        credentials = self._credentials(state.run_id)
+        if (
+            credentials.llm_api_key is None
+            and state.llm_base_url in {None, self.settings.llm_base_url}
+            and state.llm_model in {None, self.settings.llm_model}
+        ):
+            return self.provider(state.provider_name)
+        return self._llm_provider(
+            state.provider_name,
+            base_url=state.llm_base_url or self.settings.llm_base_url,
+            model=state.llm_model or self.settings.llm_model,
+            api_key=credentials.llm_api_key or self.settings.llm_api_key,
+        )
+
+    def vlm_provider_for_state(self, state: WorkflowState) -> VLMProvider:
+        credentials = self._credentials(state.run_id)
+        if (
+            credentials.vlm_api_key is None
+            and state.vlm_base_url in {None, self.settings.vlm_base_url}
+            and state.vlm_model in {None, self.settings.vlm_model}
+        ):
+            return self.vlm_provider(state.vlm_provider_name)
+        return self._vlm_provider(
+            state.vlm_provider_name,
+            base_url=state.vlm_base_url or self.settings.vlm_base_url,
+            model=state.vlm_model or self.settings.vlm_model,
+            api_key=credentials.vlm_api_key or self.settings.vlm_api_key,
+        )
+
+    def missing_run_credentials(self, state: WorkflowState) -> bool:
+        credentials = self._credentials(state.run_id)
+        needs_llm = state.provider_name == "openai-compatible" or (
+            state.reflection_enabled and state.reflection_provider_name == "openai-compatible"
+        ) or state.semantic_advisor_name == "openai-compatible"
+        needs_vlm = state.vlm_provider_name == "openai-compatible"
+        return bool(
+            (needs_llm and not (credentials.llm_api_key or self.settings.llm_api_key))
+            or (needs_vlm and not (credentials.vlm_api_key or self.settings.vlm_api_key))
+        )
+
+    def attach_run_credentials(
+        self,
+        run_id: str,
+        *,
+        llm_api_key: str | None = None,
+        vlm_api_key: str | None = None,
+    ) -> None:
+        state = self.show_run(run_id)
+        previous = self._credentials(run_id)
+        credentials = TransientProviderCredentials(
+            llm_api_key=(llm_api_key or "").strip() or previous.llm_api_key,
+            vlm_api_key=(vlm_api_key or "").strip() or previous.vlm_api_key,
+        )
+        self._run_credentials[run_id] = credentials
+        if self.provider_for_state(state).fingerprint() != state.provider_fingerprint:
+            self._run_credentials.pop(run_id, None)
+            raise ProviderConfigurationError("provider configuration changed since run creation")
+        if self.vlm_provider_for_state(state).fingerprint() != state.vlm_provider_fingerprint:
+            self._run_credentials.pop(run_id, None)
+            raise ProviderConfigurationError("VLM configuration changed since run creation")
+        if (
+            self.reflection_provider_for_state(state).fingerprint()
+            != state.reflection_provider_fingerprint
+        ):
+            self._run_credentials.pop(run_id, None)
+            raise ProviderConfigurationError("Reflection configuration changed since run creation")
+        if (
+            self.semantic_advisor_for_state(state).fingerprint()
+            != state.semantic_advisor_fingerprint
+        ):
+            self._run_credentials.pop(run_id, None)
+            raise ProviderConfigurationError(
+                "semantic advisor configuration changed since run creation"
+            )
 
     def embedding_provider(self) -> EmbeddingProvider:
         if self._embedding_provider is not None:
@@ -448,45 +572,93 @@ class PrismKEService:
         return provider
 
     def reflection_provider(self, name: str) -> ReflectionProvider:
+        return self._reflection_provider(
+            name,
+            base_url=self.settings.llm_base_url,
+            model=self.settings.llm_model,
+            api_key=self.settings.llm_api_key,
+        )
+
+    def _reflection_provider(
+        self,
+        name: str,
+        *,
+        base_url: str,
+        model: str | None,
+        api_key: str | None,
+    ) -> ReflectionProvider:
         if name == "disabled":
             return DisabledReflectionProvider()
         if name == "mock":
             return MockReflectionProvider()
         if name != "openai-compatible":
             raise ProviderConfigurationError(f"unknown Reflection provider: {name}")
-        if not self.settings.llm_api_key:
+        if not api_key:
             raise ProviderConfigurationError(
                 "openai-compatible Reflection requires PRISMKE_LLM_API_KEY"
             )
-        if not self.settings.llm_model:
+        if not model:
             raise ProviderConfigurationError(
                 "openai-compatible Reflection requires PRISMKE_LLM_MODEL"
             )
-        self._validate_endpoint(self.settings.llm_base_url, "PRISMKE_LLM_BASE_URL")
+        self._validate_endpoint(base_url, "PRISMKE_LLM_BASE_URL")
         return OpenAICompatibleReflectionProvider(
-            base_url=self.settings.llm_base_url,
-            api_key=self.settings.llm_api_key,
-            model=self.settings.llm_model,
+            base_url=base_url,
+            api_key=api_key,
+            model=model,
             timeout=self.settings.request_timeout,
         )
 
     def semantic_advisor(self, name: str) -> SemanticAdvisor:
+        return self._semantic_advisor(
+            name,
+            base_url=self.settings.llm_base_url,
+            model=self.settings.llm_model,
+            api_key=self.settings.llm_api_key,
+        )
+
+    def _semantic_advisor(
+        self,
+        name: str,
+        *,
+        base_url: str,
+        model: str | None,
+        api_key: str | None,
+    ) -> SemanticAdvisor:
         if name == "disabled":
             return DisabledSemanticAdvisor()
         if name == "mock":
             return MockSemanticAdvisor()
         if name != "openai-compatible":
             raise ProviderConfigurationError(f"unknown semantic advisor: {name}")
-        if not self.settings.llm_api_key:
+        if not api_key:
             raise ProviderConfigurationError("semantic advisor requires PRISMKE_LLM_API_KEY")
-        if not self.settings.llm_model:
+        if not model:
             raise ProviderConfigurationError("semantic advisor requires PRISMKE_LLM_MODEL")
-        self._validate_endpoint(self.settings.llm_base_url, "PRISMKE_LLM_BASE_URL")
+        self._validate_endpoint(base_url, "PRISMKE_LLM_BASE_URL")
         return OpenAICompatibleSemanticAdvisor(
-            base_url=self.settings.llm_base_url,
-            api_key=self.settings.llm_api_key,
-            model=self.settings.llm_model,
+            base_url=base_url,
+            api_key=api_key,
+            model=model,
             timeout=self.settings.request_timeout,
+        )
+
+    def reflection_provider_for_state(self, state: WorkflowState) -> ReflectionProvider:
+        credentials = self._credentials(state.run_id)
+        return self._reflection_provider(
+            state.reflection_provider_name,
+            base_url=state.llm_base_url or self.settings.llm_base_url,
+            model=state.llm_model or self.settings.llm_model,
+            api_key=credentials.llm_api_key or self.settings.llm_api_key,
+        )
+
+    def semantic_advisor_for_state(self, state: WorkflowState) -> SemanticAdvisor:
+        credentials = self._credentials(state.run_id)
+        return self._semantic_advisor(
+            state.semantic_advisor_name,
+            base_url=state.llm_base_url or self.settings.llm_base_url,
+            model=state.llm_model or self.settings.llm_model,
+            api_key=credentials.llm_api_key or self.settings.llm_api_key,
         )
 
     def case_retriever(self) -> CaseRetriever:
@@ -681,7 +853,7 @@ class PrismKEService:
         if state is not None and state.reflection_enabled:
             retriever = self.case_retriever() if state.case_mode != "none" else None
             reflection_service = BoundedReflectionService(
-                self.reflection_provider(state.reflection_provider_name),
+                self.reflection_provider_for_state(state),
                 retriever,
                 self.evidence_store,
             )
@@ -703,8 +875,10 @@ class PrismKEService:
             entity_review_threshold=self.settings.entity_review_threshold,
             entity_min_margin=self.settings.entity_min_margin,
             reflection_service=reflection_service,
-            semantic_advisor=self.semantic_advisor(
-                state.semantic_advisor_name if state is not None else "disabled"
+            semantic_advisor=(
+                self.semantic_advisor_for_state(state)
+                if state is not None
+                else self.semantic_advisor("disabled")
             ),
         )
 
@@ -724,6 +898,11 @@ class PrismKEService:
         reflection_time_budget_seconds: int | None = None,
         semantic_advisor_name: str = "disabled",
         agent_token_budget: int | None = None,
+        llm_base_url: str | None = None,
+        llm_model: str | None = None,
+        vlm_base_url: str | None = None,
+        vlm_model: str | None = None,
+        credentials: TransientProviderCredentials | None = None,
     ) -> WorkflowState:
         state, created = self.create_run(
             input_path,
@@ -740,6 +919,11 @@ class PrismKEService:
             reflection_time_budget_seconds,
             semantic_advisor_name,
             agent_token_budget,
+            llm_base_url,
+            llm_model,
+            vlm_base_url,
+            vlm_model,
+            credentials,
         )
         if not created:
             return state
@@ -761,6 +945,11 @@ class PrismKEService:
         reflection_time_budget_seconds: int | None = None,
         semantic_advisor_name: str = "disabled",
         agent_token_budget: int | None = None,
+        llm_base_url: str | None = None,
+        llm_model: str | None = None,
+        vlm_base_url: str | None = None,
+        vlm_model: str | None = None,
+        credentials: TransientProviderCredentials | None = None,
     ) -> tuple[WorkflowState, bool]:
         """Validate a request and persist its initial state without executing it."""
         self.executions.ensure_accepting()
@@ -768,9 +957,42 @@ class PrismKEService:
             raise ValueError("isolated review workspace does not allow new extraction runs")
         input_path = input_path.resolve()
         schema_path = schema_path.resolve()
-        provider = self.provider(provider_name)
+        runtime_credentials = credentials or TransientProviderCredentials()
+        resolved_llm_base = (llm_base_url or self.settings.llm_base_url).strip()
+        resolved_llm_model = (llm_model or self.settings.llm_model or "").strip() or None
+        resolved_vlm_base = (vlm_base_url or self.settings.vlm_base_url).strip()
+        resolved_vlm_model = (vlm_model or self.settings.vlm_model or "").strip() or None
+        custom_llm = bool(
+            llm_base_url is not None
+            or llm_model is not None
+            or runtime_credentials.llm_api_key
+        )
+        provider = (
+            self._llm_provider(
+                provider_name,
+                base_url=resolved_llm_base,
+                model=resolved_llm_model,
+                api_key=runtime_credentials.llm_api_key or self.settings.llm_api_key,
+            )
+            if custom_llm
+            else self.provider(provider_name)
+        )
         ocr_provider = self.ocr_provider(ocr_provider_name)
-        vlm_provider = self.vlm_provider(vlm_provider_name)
+        custom_vlm = bool(
+            vlm_base_url is not None
+            or vlm_model is not None
+            or runtime_credentials.vlm_api_key
+        )
+        vlm_provider = (
+            self._vlm_provider(
+                vlm_provider_name,
+                base_url=resolved_vlm_base,
+                model=resolved_vlm_model,
+                api_key=runtime_credentials.vlm_api_key or self.settings.vlm_api_key,
+            )
+            if custom_vlm
+            else self.vlm_provider(vlm_provider_name)
+        )
         embedding_provider = self.embedding_provider()
         if case_mode not in {"none", "good", "good_bad"}:
             raise ValueError("case_mode must be none, good or good_bad")
@@ -795,14 +1017,22 @@ class PrismKEService:
             raise ValueError("reflection_max_attempts must be between 0 and 2")
         if token_budget <= 0 or time_budget <= 0:
             raise ValueError("Reflection token and time budgets must be positive")
-        reflection = self.reflection_provider(
-            reflection_provider_name if reflection_enabled else "disabled"
+        reflection = self._reflection_provider(
+            reflection_provider_name if reflection_enabled else "disabled",
+            base_url=resolved_llm_base,
+            model=resolved_llm_model,
+            api_key=runtime_credentials.llm_api_key or self.settings.llm_api_key,
         )
         if reflection_enabled and reflection.fingerprint() == "reflection:disabled":
             raise ProviderConfigurationError(
                 "Reflection requires mock or openai-compatible provider"
             )
-        advisor = self.semantic_advisor(semantic_advisor_name)
+        advisor = self._semantic_advisor(
+            semantic_advisor_name,
+            base_url=resolved_llm_base,
+            model=resolved_llm_model,
+            api_key=runtime_credentials.llm_api_key or self.settings.llm_api_key,
+        )
         advice_budget = (
             self.settings.agent_token_budget if agent_token_budget is None else agent_token_budget
         )
@@ -846,17 +1076,24 @@ class PrismKEService:
             PIPELINE_VERSION,
         )
         if self.runs.exists(run_id):
-            return self.runs.load(run_id), False
+            existing = self.runs.load(run_id)
+            if runtime_credentials.llm_api_key or runtime_credentials.vlm_api_key:
+                self._run_credentials[run_id] = runtime_credentials
+            return existing, False
         state = WorkflowState(
             run_id=run_id,
             input_path=str(input_path),
             schema_path=str(schema_path),
             provider_name=provider_name,
             provider_fingerprint=provider.fingerprint(),
+            llm_base_url=resolved_llm_base,
+            llm_model=resolved_llm_model,
             ocr_provider_name=ocr_provider_name,
             ocr_provider_fingerprint=ocr_provider.fingerprint(),
             vlm_provider_name=vlm_provider_name,
             vlm_provider_fingerprint=vlm_provider.fingerprint(),
+            vlm_base_url=resolved_vlm_base,
+            vlm_model=resolved_vlm_model,
             embedding_provider_name=self.settings.embedding_provider,
             embedding_provider_fingerprint=embedding_provider.fingerprint(),
             case_mode=case_mode,
@@ -883,6 +1120,8 @@ class PrismKEService:
         with self.runs.creation_lock(run_id):
             if self.runs.exists(run_id):
                 return self.runs.load(run_id), False
+            if runtime_credentials.llm_api_key or runtime_credentials.vlm_api_key:
+                self._run_credentials[run_id] = runtime_credentials
             self.executions.register(state)
             self.runs.save(state)
             return state, True
@@ -895,9 +1134,9 @@ class PrismKEService:
             raise ValueError("isolated review workspace cannot execute extraction")
         state = self.runs.load(run_id)
         self._validate_entity_policy(state)
-        provider = self.provider(state.provider_name)
+        provider = self.provider_for_state(state)
         ocr_provider = self.ocr_provider(state.ocr_provider_name)
-        vlm_provider = self.vlm_provider(state.vlm_provider_name)
+        vlm_provider = self.vlm_provider_for_state(state)
         self._validate_reflection_policy(state)
         self._validate_agent_policy(state)
         return await self._workflow(
@@ -1073,9 +1312,9 @@ class PrismKEService:
         self, state: WorkflowState
     ) -> tuple[LLMProvider, OCRProvider, VLMProvider]:
         self._validate_entity_policy(state)
-        provider = self.provider(state.provider_name)
+        provider = self.provider_for_state(state)
         ocr_provider = self.ocr_provider(state.ocr_provider_name)
-        vlm_provider = self.vlm_provider(state.vlm_provider_name)
+        vlm_provider = self.vlm_provider_for_state(state)
         embedding_provider = self.embedding_provider()
         if state.provider_fingerprint == "legacy":
             raise LegacyCheckpointError(
@@ -1104,7 +1343,7 @@ class PrismKEService:
             raise LegacyCheckpointError(
                 "agent policy changed; old runs are read-only, rerun the input"
             )
-        advisor = self.semantic_advisor(state.semantic_advisor_name)
+        advisor = self.semantic_advisor_for_state(state)
         if advisor.fingerprint() != state.semantic_advisor_fingerprint:
             raise ProviderConfigurationError(
                 "semantic advisor configuration changed since run creation"
@@ -1119,7 +1358,7 @@ class PrismKEService:
             raise LegacyCheckpointError(
                 "Reflection policy changed; old runs are read-only, rerun the input"
             )
-        reflection = self.reflection_provider(state.reflection_provider_name)
+        reflection = self.reflection_provider_for_state(state)
         if reflection.fingerprint() != state.reflection_provider_fingerprint:
             raise ProviderConfigurationError(
                 "Reflection provider configuration changed since run creation"

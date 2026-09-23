@@ -8,7 +8,11 @@ from src.domain import RequestReconciliation
 from src.workflow import PrismKEService
 
 
-def build_execution_tab(service: PrismKEService) -> None:
+def build_execution_tab(
+    service: PrismKEService,
+    llm_api_key_input: Any | None = None,
+    vlm_api_key_input: Any | None = None,
+) -> None:
     import gradio as gr
 
     def refresh(run_id: str | None) -> tuple[Any, ...]:
@@ -99,8 +103,18 @@ def build_execution_tab(service: PrismKEService) -> None:
         except ValueError as exc:
             return f"取消未执行：{exc}；请刷新后核对状态"
 
-    def resume(run_id: str, version: int) -> str:
+    def resume(
+        run_id: str,
+        version: int,
+        llm_api_key: str = "",
+        vlm_api_key: str = "",
+    ) -> str:
         try:
+            service.attach_run_credentials(
+                run_id,
+                llm_api_key=llm_api_key,
+                vlm_api_key=vlm_api_key,
+            )
             service.executions.enqueue(run_id, "resume", expected_version=version)
             return "恢复已排队"
         except ValueError as exc:
@@ -205,7 +219,10 @@ def build_execution_tab(service: PrismKEService) -> None:
         cancel_button.click(cancel, [run, operator, reason, version], output).then(
             refresh, [run], outputs
         )
-        resume_button.click(resume, [run, version], output).then(refresh, [run], outputs)
+        resume_inputs = [run, version]
+        if llm_api_key_input is not None and vlm_api_key_input is not None:
+            resume_inputs.extend([llm_api_key_input, vlm_api_key_input])
+        resume_button.click(resume, resume_inputs, output).then(refresh, [run], outputs)
         reconcile_button.click(
             reconcile,
             [

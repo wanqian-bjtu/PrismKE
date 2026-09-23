@@ -15,11 +15,13 @@ from frontend.layout import (
     page_header,
 )
 from frontend.review import build_review_tabs
+from frontend.schema_input import resolve_schema, schema_summary
 from frontend.theme import APP_CSS
 from frontend.validation import build_validation_tab
 from src import __version__
 from src.domain import CanonicalEntity, ReviewDecision
 from src.workflow import PrismKEService
+from src.workflow.service import TransientProviderCredentials
 
 
 def _state_summary(state: Any) -> dict[str, Any]:
@@ -66,8 +68,10 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         raise RuntimeError("Web UI is not installed; run `uv sync --extra web`") from exc
 
     async def run_document(
-        document: str,
-        schema: str,
+        document: str | None,
+        schema_source: str,
+        schema_file: str | None,
+        schema_text: str,
         provider: str,
         ocr_provider: str,
         vlm_provider: str,
@@ -80,10 +84,24 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         reflection_time_budget: int,
         semantic_advisor: str,
         agent_token_budget: int,
+        llm_base_url: str,
+        llm_model: str,
+        llm_api_key: str,
+        vlm_base_url: str,
+        vlm_model: str,
+        vlm_api_key: str,
     ) -> tuple[str, dict[str, Any], list[list[Any]], str]:
+        if not document:
+            raise ValueError("请先上传文档")
+        schema_path, _ = resolve_schema(
+            schema_source,
+            schema_file,
+            schema_text,
+            service.settings.runtime_dir / "ui" / "schemas",
+        )
         state, created = service.create_run(
             Path(document),
-            Path(schema),
+            schema_path,
             provider,
             ocr_provider,
             vlm_provider,
@@ -96,6 +114,14 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             int(reflection_time_budget),
             semantic_advisor,
             int(agent_token_budget),
+            llm_base_url=llm_base_url,
+            llm_model=llm_model,
+            vlm_base_url=vlm_base_url,
+            vlm_model=vlm_model,
+            credentials=TransientProviderCredentials(
+                llm_api_key=llm_api_key.strip() or None,
+                vlm_api_key=vlm_api_key.strip() or None,
+            ),
         )
         if created:
             service.executions.enqueue(state.run_id, "execute")
@@ -105,6 +131,23 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             _state_summary(state),
             _claim_rows(state),
             state.run_id,
+        )
+
+    def preview_schema(
+        source: str, schema_file: str | None, schema_text: str
+    ) -> str:
+        _, schema = resolve_schema(
+            source,
+            schema_file,
+            schema_text,
+            service.settings.runtime_dir / "ui" / "schemas",
+        )
+        return schema_summary(schema)
+
+    def switch_schema_source(source: str) -> tuple[Any, Any]:
+        return (
+            gr.update(visible=source == "upload"),
+            gr.update(visible=source == "text"),
         )
 
     def load_run(run_id: str) -> tuple[str, dict[str, Any], list[list[Any]]]:
@@ -539,7 +582,19 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             run_context = gr.Markdown("尚无运行", elem_classes="sidebar-status")
             refresh_context = gr.Button("刷新运行")
             with gr.Accordion("任务配置", open=True):
-                schema_input = gr.File(label="Schema", type="filepath")
+                schema_source = gr.Dropdown(
+                    [("上传文件", "upload"), ("文本输入", "text")],
+                    value="upload",
+                    label="Schema 来源",
+                )
+                schema_input = gr.File(label="Schema 文件", type="filepath")
+                schema_text = gr.Textbox(
+                    label="Schema 文本（JSON/YAML）",
+                    lines=10,
+                    visible=False,
+                )
+                validate_schema = gr.Button("校验 Schema")
+                schema_result = gr.Markdown("尚未校验 Schema", elem_classes="sidebar-status")
                 provider_input = gr.Dropdown(
                     ["mock", "openai-compatible"],
                     value="openai-compatible",
@@ -583,24 +638,30 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 )
             with gr.Accordion("模型与图存储", open=False):
                 llm_base = gr.Textbox(label="LLM Base URL", value=public_settings["llm_base_url"])
-                llm_model = gr.Dropdown(
-                    ["qwen3.7-flash"],
-                    value=public_settings["llm_model"],
+                llm_model = gr.Textbox(
+                    value=public_settings["llm_model"] or "qwen3.7-flash",
                     label="LLM 模型别名",
-                    allow_custom_value=True,
+                )
+                llm_api_key = gr.Textbox(
+                    label="LLM API Key（当前会话）",
+                    type="password",
+                    placeholder="留空则使用服务器配置",
                 )
                 vlm_base = gr.Textbox(label="VLM Base URL", value=public_settings["vlm_base_url"])
-                vlm_model = gr.Dropdown(
-                    ["qwen3.7-flash"],
-                    value=public_settings["vlm_model"],
+                vlm_model = gr.Textbox(
+                    value=public_settings["vlm_model"] or "qwen3.7-flash",
                     label="VLM 模型别名",
-                    allow_custom_value=True,
+                )
+                vlm_api_key = gr.Textbox(
+                    label="VLM API Key（当前会话）",
+                    type="password",
+                    placeholder="留空则使用服务器配置",
                 )
                 gr.Markdown(
                     "**密钥状态**  "
                     f"LLM：{'已配置' if public_settings['llm_api_key'] else '未配置'} · "
                     f"VLM：{'已配置' if public_settings['vlm_api_key'] else '未配置'}  \n"
-                    "API Key 仅在服务器 `.env` 或安全后端中管理，页面不显示或编辑。"
+                    "页面输入的 API Key 仅保存在当前服务进程内，不写入运行文件或日志。"
                 )
                 ocr_device = gr.Dropdown(
                     ["cpu", "gpu:0"],
@@ -609,7 +670,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     allow_custom_value=True,
                 )
                 ocr_lang = gr.Dropdown(
-                    ["ch", "en"],
+                    [("中英混合", "ch"), ("英文", "en")],
                     value=public_settings["ocr_lang"],
                     label="OCR 语言",
                     allow_custom_value=True,
@@ -641,7 +702,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     f"{'已配置' if public_settings['neo4j_password'] else '未配置'}  \n"
                     "密码仅在服务器配置中管理。"
                 )
-                config_operator = gr.Textbox(label="配置操作者")
+                config_operator = gr.Textbox(label="配置操作者", value="管理员")
                 save_config = gr.Button("保存设置", variant="primary")
                 config_outcome = gr.Textbox(label="设置结果", interactive=False)
 
@@ -686,7 +747,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             build_review_tabs(service)
             from frontend.execution import build_execution_tab
 
-            build_execution_tab(service)
+            build_execution_tab(service, llm_api_key, vlm_api_key)
 
             with gr.Tab("证据", id="evidence"):
                 page_header(gr, "evidence")
@@ -968,11 +1029,74 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             navigation_page,
             workspace_tabs,
         )
+        schema_source.change(
+            switch_schema_source,
+            schema_source,
+            [schema_input, schema_text],
+        )
+        validate_schema.click(
+            preview_schema,
+            [schema_source, schema_input, schema_text],
+            schema_result,
+        )
         demo.load(
             fn=None,
             js="""() => {
               const sidebar = document.querySelector('#workspace-sidebar');
               const toggle = sidebar?.querySelector('button[aria-label="Toggle Sidebar"]');
+              if (!sidebar) return;
+              const storageKey = 'prismke.workspace.sidebar.width';
+              const clamp = value => Math.max(260, Math.min(520, value));
+              const applyWidth = value => {
+                const width = clamp(Number(value) || 300);
+                sidebar.style.setProperty('--prism-sidebar-width', `${width}px`);
+                document.documentElement.style.setProperty(
+                  '--prism-sidebar-width', `${width}px`
+                );
+                return width;
+              };
+              if (window.innerWidth > 900) applyWidth(localStorage.getItem(storageKey));
+              let resizer = sidebar.querySelector('#workspace-resizer');
+              if (!resizer) {
+                resizer = document.createElement('div');
+                resizer.id = 'workspace-resizer';
+                resizer.tabIndex = 0;
+                resizer.setAttribute('role', 'separator');
+                resizer.setAttribute('aria-orientation', 'vertical');
+                resizer.setAttribute('aria-label', '调整工作区宽度');
+                sidebar.appendChild(resizer);
+                let dragging = false;
+                resizer.addEventListener('pointerdown', event => {
+                  if (window.innerWidth <= 900) return;
+                  dragging = true;
+                  resizer.dataset.dragging = 'true';
+                  resizer.setPointerCapture(event.pointerId);
+                });
+                resizer.addEventListener('pointermove', event => {
+                  if (!dragging) return;
+                  const width = applyWidth(event.clientX);
+                  resizer.setAttribute('aria-valuenow', String(width));
+                });
+                const finish = () => {
+                  if (!dragging) return;
+                  dragging = false;
+                  delete resizer.dataset.dragging;
+                  const width = Math.round(sidebar.getBoundingClientRect().width);
+                  localStorage.setItem(storageKey, String(width));
+                };
+                resizer.addEventListener('pointerup', finish);
+                resizer.addEventListener('pointercancel', finish);
+                resizer.addEventListener('keydown', event => {
+                  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+                  event.preventDefault();
+                  const current = sidebar.getBoundingClientRect().width;
+                  const next = event.key === 'Home' ? 260 : event.key === 'End' ? 520 :
+                    current + (event.key === 'ArrowRight' ? 10 : -10);
+                  const width = applyWidth(next);
+                  localStorage.setItem(storageKey, String(width));
+                  resizer.setAttribute('aria-valuenow', String(width));
+                });
+              }
               if (window.innerWidth <= 520 && sidebar?.classList.contains('open')) {
                 toggle?.click();
               }
@@ -1002,7 +1126,9 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             run_document,
             [
                 document_input,
+                schema_source,
                 schema_input,
+                schema_text,
                 provider_input,
                 ocr_input,
                 vlm_input,
@@ -1015,6 +1141,12 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 reflection_time_input,
                 semantic_advisor_input,
                 agent_tokens_input,
+                llm_base,
+                llm_model,
+                llm_api_key,
+                vlm_base,
+                vlm_model,
+                vlm_api_key,
             ],
             [run_status, run_summary, claim_table, run_id_output],
         ).then(sidebar_run, [run_id_output], [current_run, run_context])
