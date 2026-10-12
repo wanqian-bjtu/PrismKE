@@ -7,6 +7,7 @@ MINERU_VENV="${PRISMKE_MINERU_VENV:-${MINERU_ROOT}/venv}"
 MINERU_HOME="${PRISMKE_MINERU_HOME:-${MINERU_ROOT}/home}"
 PYTHON_BIN="${PRISMKE_MINERU_PYTHON:-python3.11}"
 
+mkdir -p "${PRISMKE_RUNTIME_DIR}"
 available_kib="$(df -Pk "${PRISMKE_RUNTIME_DIR}" | awk 'NR==2 {print $4}')"
 (( available_kib >= 10 * 1024 * 1024 )) || {
   echo "MinerU installation requires at least 10 GiB free in PRISMKE_RUNTIME_DIR" >&2
