@@ -90,7 +90,7 @@ def _complex_layout(path: Path) -> None:
             fill=(0.95, 0.62, 0.12),
         )
     raster = raster_page.get_pixmap(matrix=pymupdf.Matrix(1.5, 1.5), alpha=False)
-    page.insert_image(pymupdf.Rect(330, 455, 555, 560), stream=raster.tobytes("png"))
+    page.insert_image(pymupdf.Rect(330, 650, 555, 755), stream=raster.tobytes("png"))
     raster_source.close()
     document.save(path)
     document.close()
