@@ -110,7 +110,7 @@ bash scripts/stop_mineru.sh
 `PRISMKE_MINERU_MAX_INSTALL_GIB`、`PRISMKE_MINERU_MIN_FREE_GIB` 调整，安装前空间门槛可通过
 `PRISMKE_MINERU_MIN_INITIAL_FREE_GIB` 调整，但仍必须通过空间与模型完整性检查。
 
-脚本从自身位置推导项目根目录，不硬编码 AutoDL 路径。服务只能监听 `127.0.0.1`，默认端口 `18020`，并关闭遥测。安装前至少需要 10 GiB 可用空间，安装后必须保留 5 GiB。
+脚本从自身位置推导项目根目录，不硬编码 AutoDL 路径。服务只能监听 `127.0.0.1`，默认端口 `18020`，并关闭遥测。安装前至少需要 10 GiB 可用空间，安装后默认至少保留 2 GiB。
 
 ## 7. 兼容性
 
