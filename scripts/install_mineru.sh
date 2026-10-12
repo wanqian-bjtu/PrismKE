@@ -10,11 +10,22 @@ MINERU_SPEC="${PRISMKE_MINERU_INSTALL_SPEC:-mineru==4.0.12}"
 SMALL_BACKEND="${PRISMKE_MINERU_SMALL_BACKEND:-onnx}"
 VLM_ENGINE="${PRISMKE_MINERU_VLM_ENGINE:-llama-cpp}"
 MODEL_SOURCE="${PRISMKE_MINERU_DOWNLOAD_SOURCE:-auto}"
+MAX_INSTALL_GIB="${PRISMKE_MINERU_MAX_INSTALL_GIB:-10}"
+MIN_FREE_GIB="${PRISMKE_MINERU_MIN_FREE_GIB:-5}"
+
+[[ "${MAX_INSTALL_GIB}" =~ ^[1-9][0-9]*$ ]] || {
+  echo "PRISMKE_MINERU_MAX_INSTALL_GIB must be a positive integer" >&2
+  exit 1
+}
+[[ "${MIN_FREE_GIB}" =~ ^[1-9][0-9]*$ ]] || {
+  echo "PRISMKE_MINERU_MIN_FREE_GIB must be a positive integer" >&2
+  exit 1
+}
 
 mkdir -p "${PRISMKE_RUNTIME_DIR}"
 available_kib="$(df -Pk "${PRISMKE_RUNTIME_DIR}" | awk 'NR==2 {print $4}')"
-(( available_kib >= 10 * 1024 * 1024 )) || {
-  echo "MinerU installation requires at least 10 GiB free in PRISMKE_RUNTIME_DIR" >&2
+(( available_kib >= (MAX_INSTALL_GIB + MIN_FREE_GIB) * 1024 * 1024 )) || {
+  echo "MinerU installation requires ${MAX_INSTALL_GIB} GiB plus ${MIN_FREE_GIB} GiB free reserve" >&2
   exit 1
 }
 
@@ -33,8 +44,8 @@ EOF
 export MINERU_HOME MINERU_CONFIG="${MINERU_HOME}/config.yaml"
 export DO_NOT_TRACK=1 HF_HUB_DISABLE_TELEMETRY=1
 installed_kib="$(du -sk "${MINERU_ROOT}" | awk '{print $1}')"
-(( installed_kib <= 8 * 1024 * 1024 )) || {
-  echo "MinerU environment exceeds the 8 GiB installation limit before model download" >&2
+(( installed_kib <= MAX_INSTALL_GIB * 1024 * 1024 )) || {
+  echo "MinerU environment exceeds the ${MAX_INSTALL_GIB} GiB installation limit before model download" >&2
   exit 1
 }
 source_args=()
@@ -61,15 +72,15 @@ model:
 EOF
 
 installed_kib="$(du -sk "${MINERU_ROOT}" | awk '{print $1}')"
-(( installed_kib <= 8 * 1024 * 1024 )) || {
-  echo "MinerU environment and models exceed the 8 GiB installation limit" >&2
+(( installed_kib <= MAX_INSTALL_GIB * 1024 * 1024 )) || {
+  echo "MinerU environment and models exceed the ${MAX_INSTALL_GIB} GiB installation limit" >&2
   exit 1
 }
 available_kib="$(df -Pk "${PRISMKE_RUNTIME_DIR}" | awk 'NR==2 {print $4}')"
-(( available_kib >= 5 * 1024 * 1024 )) || {
-  echo "MinerU installation left less than 5 GiB free; do not start the service" >&2
+(( available_kib >= MIN_FREE_GIB * 1024 * 1024 )) || {
+  echo "MinerU installation left less than ${MIN_FREE_GIB} GiB free; do not start the service" >&2
   exit 1
 }
-echo "MinerU footprint: ${installed_kib} KiB (limit: 8388608 KiB)"
+echo "MinerU footprint: ${installed_kib} KiB (limit: $((MAX_INSTALL_GIB * 1024 * 1024)) KiB)"
 echo "MinerU Standard runtime: ${SMALL_BACKEND} + ${VLM_ENGINE} (local models)"
 "${MINERU_VENV}/bin/mineru" version --json
