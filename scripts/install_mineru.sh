@@ -12,6 +12,7 @@ VLM_ENGINE="${PRISMKE_MINERU_VLM_ENGINE:-llama-cpp}"
 MODEL_SOURCE="${PRISMKE_MINERU_DOWNLOAD_SOURCE:-auto}"
 MAX_INSTALL_GIB="${PRISMKE_MINERU_MAX_INSTALL_GIB:-10}"
 MIN_FREE_GIB="${PRISMKE_MINERU_MIN_FREE_GIB:-5}"
+MIN_INITIAL_FREE_GIB="${PRISMKE_MINERU_MIN_INITIAL_FREE_GIB:-10}"
 
 [[ "${MAX_INSTALL_GIB}" =~ ^[1-9][0-9]*$ ]] || {
   echo "PRISMKE_MINERU_MAX_INSTALL_GIB must be a positive integer" >&2
@@ -21,11 +22,15 @@ MIN_FREE_GIB="${PRISMKE_MINERU_MIN_FREE_GIB:-5}"
   echo "PRISMKE_MINERU_MIN_FREE_GIB must be a positive integer" >&2
   exit 1
 }
+[[ "${MIN_INITIAL_FREE_GIB}" =~ ^[1-9][0-9]*$ ]] || {
+  echo "PRISMKE_MINERU_MIN_INITIAL_FREE_GIB must be a positive integer" >&2
+  exit 1
+}
 
 mkdir -p "${PRISMKE_RUNTIME_DIR}"
 available_kib="$(df -Pk "${PRISMKE_RUNTIME_DIR}" | awk 'NR==2 {print $4}')"
-(( available_kib >= (MAX_INSTALL_GIB + MIN_FREE_GIB) * 1024 * 1024 )) || {
-  echo "MinerU installation requires ${MAX_INSTALL_GIB} GiB plus ${MIN_FREE_GIB} GiB free reserve" >&2
+(( available_kib >= MIN_INITIAL_FREE_GIB * 1024 * 1024 )) || {
+  echo "MinerU installation requires at least ${MIN_INITIAL_FREE_GIB} GiB free before installation" >&2
   exit 1
 }
 

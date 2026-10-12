@@ -107,7 +107,8 @@ bash scripts/stop_mineru.sh
 `source: local`，服务启动时不会静默下载模型。需要自行选择其他后端时，可通过
 `PRISMKE_MINERU_INSTALL_SPEC`、`PRISMKE_MINERU_SMALL_BACKEND` 和
 `PRISMKE_MINERU_VLM_ENGINE` 覆盖。安装上限和保留空间也可分别通过
-`PRISMKE_MINERU_MAX_INSTALL_GIB`、`PRISMKE_MINERU_MIN_FREE_GIB` 调整，但仍必须通过空间与模型完整性检查。
+`PRISMKE_MINERU_MAX_INSTALL_GIB`、`PRISMKE_MINERU_MIN_FREE_GIB` 调整，安装前空间门槛可通过
+`PRISMKE_MINERU_MIN_INITIAL_FREE_GIB` 调整，但仍必须通过空间与模型完整性检查。
 
 脚本从自身位置推导项目根目录，不硬编码 AutoDL 路径。服务只能监听 `127.0.0.1`，默认端口 `18020`，并关闭遥测。安装前至少需要 10 GiB 可用空间，安装后必须保留 5 GiB。
 
