@@ -103,7 +103,7 @@ bash scripts/stop_mineru.sh
 ```
 
 默认安装固定的 MinerU 4.0.12 基础包，并以 `ONNX + llama.cpp` 运行 Standard tier；
-该组合是为了满足单独环境、默认总占用不超过 10GB 且安装后至少保留 5GB 空间的部署边界。模型下载并验证后，配置会切换为
+该组合是为了满足单独环境、默认总占用不超过 10GB 且安装后至少保留 2GB 空间的部署边界。模型下载并验证后，配置会切换为
 `source: local`，服务启动时不会静默下载模型。需要自行选择其他后端时，可通过
 `PRISMKE_MINERU_INSTALL_SPEC`、`PRISMKE_MINERU_SMALL_BACKEND` 和
 `PRISMKE_MINERU_VLM_ENGINE` 覆盖。安装上限和保留空间也可分别通过
