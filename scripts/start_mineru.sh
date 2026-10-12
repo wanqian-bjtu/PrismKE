@@ -34,6 +34,9 @@ if curl -fsS "http://127.0.0.1:${MINERU_PORT}/v1/health" >/dev/null 2>&1; then
 fi
 export MINERU_HOME MINERU_CONFIG="${MINERU_HOME}/config.yaml"
 export DO_NOT_TRACK=1 HF_HUB_DISABLE_TELEMETRY=1
+export MINERU_MODEL_SOURCE=local
+export MINERU_MODEL_SMALL_BACKEND="${PRISMKE_MINERU_SMALL_BACKEND:-onnx}"
+export MINERU_MODEL_VLM_ENGINE="${PRISMKE_MINERU_VLM_ENGINE:-llama-cpp}"
 nohup "${MINERU_BIN}" api-server \
   --host 127.0.0.1 --port "${MINERU_PORT}" --tier standard \
   --concurrency 1 --upload-dir "${UPLOAD_DIR}" >"${LOG_FILE}" 2>&1 &
