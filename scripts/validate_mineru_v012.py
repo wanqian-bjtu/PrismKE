@@ -9,9 +9,9 @@ from typing import Any
 
 import orjson
 import pymupdf
-from src.core.ids import file_sha256
 
-from src.domain import PDFParseDecision, PDFParseMode, PDFParserName, SourceDocument
+from src.core.ids import file_sha256
+from src.domain import Modality, PDFParseDecision, PDFParseMode, PDFParserName, SourceDocument
 from src.domain.pdf import PDFComplexityThresholds
 from src.parsing.mineru import MinerUV1Client, convert_mineru_document
 from src.parsing.pdf_complexity import inspect_pdf
@@ -79,6 +79,19 @@ def _complex_layout(path: Path) -> None:
             fill=(0.2, 0.55, 0.9),
         )
     page.insert_text((40, 620), "Formula region: E = mc^2", fontsize=12)
+
+    raster_source = pymupdf.open()
+    raster_page = raster_source.new_page(width=320, height=150)
+    raster_page.insert_text((18, 24), "Embedded chart image", fontsize=13)
+    for index, height in enumerate((28, 64, 42, 88)):
+        raster_page.draw_rect(
+            pymupdf.Rect(30 + index * 65, 130 - height, 70 + index * 65, 130),
+            color=(0.85, 0.38, 0.08),
+            fill=(0.95, 0.62, 0.12),
+        )
+    raster = raster_page.get_pixmap(matrix=pymupdf.Matrix(1.5, 1.5), alpha=False)
+    page.insert_image(pymupdf.Rect(330, 455, 555, 560), stream=raster.tobytes("png"))
+    raster_source.close()
     document.save(path)
     document.close()
 
@@ -115,6 +128,16 @@ async def _validate_one(path: Path, client: MinerUV1Client, evidence_root: Path)
     verified = [await store.verify(reference.id) for reference in document.evidence]
     if not verified or not all(verified):
         raise RuntimeError(f"evidence verification failed for {path.name}")
+    modality_counts = {
+        modality.value: sum(block.modality == modality for block in document.text_blocks)
+        for modality in Modality
+        if any(block.modality == modality for block in document.text_blocks)
+    }
+    if path.name == "table-multicolumn-chart.pdf":
+        if not {Modality.TABLE.value, Modality.CHART.value}.issubset(modality_counts):
+            raise RuntimeError("complex sample lost table or chart evidence")
+        if not document.media_assets:
+            raise RuntimeError("complex sample lost the embedded image asset")
     return {
         "name": path.name,
         "source_hash": file_sha256(path),
@@ -124,6 +147,7 @@ async def _validate_one(path: Path, client: MinerUV1Client, evidence_root: Path)
         "pages": len(document.pages),
         "text_blocks": len(document.text_blocks),
         "media_assets": len(document.media_assets),
+        "text_block_modalities": modality_counts,
         "evidence_refs": len(document.evidence),
         "verified_evidence_refs": sum(verified),
         "manifest_hash": artifacts.manifest_hash,
