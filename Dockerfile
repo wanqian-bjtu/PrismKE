@@ -7,13 +7,17 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir uv
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y libreoffice-writer \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir uv
 
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --extra neo4j --extra web --no-install-project
 
 COPY src ./src
 COPY frontend ./frontend
+COPY assets ./assets
 COPY configs ./configs
 RUN uv sync --frozen --no-dev --extra neo4j --extra web
 

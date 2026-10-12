@@ -11,6 +11,16 @@ class UnsupportedDocumentError(PrismKEError):
     """Raised when no parser supports an input document."""
 
 
+class DocumentConversionError(PrismKEError):
+    """Raised when a legacy document cannot be converted safely."""
+
+
+class TaskModeCommitError(PrismKEError):
+    """Raised when an extraction-only task attempts a graph commit."""
+
+    code = "TASK_MODE_NO_GRAPH_COMMIT"
+
+
 class SchemaValidationError(PrismKEError):
     """Raised when extracted knowledge violates a schema."""
 

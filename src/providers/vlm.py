@@ -24,6 +24,7 @@ from src.domain import (
     LocalizationLevel,
     Modality,
     ProviderCallRecord,
+    TaskMode,
     ValidationResult,
     VisualExtractionRequest,
     VisualObservation,
@@ -34,7 +35,7 @@ from src.providers.common import candidate_from_payload, parse_json_object
 from src.providers.http_client import post_chat_completion
 from src.providers.validation import summarize, validate_item
 
-PROMPT_VERSION = "visual-schema-claims-v4"
+PROMPT_VERSION = "visual-task-extraction-v5"
 PROTOCOL_VERSION = "chat-completions-vision-v1"
 PROVIDER_VERSION = "0.2.1"
 
@@ -42,8 +43,9 @@ PROVIDER_VERSION = "0.2.1"
 def _visual_prompt(request: VisualExtractionRequest) -> str:
     ocr_text = [block.text for block in request.ocr_blocks]
     return (
-        "Extract knowledge facts that are directly supported by the supplied image. "
-        "Return one JSON object containing arrays named 'observations' and 'claims'.\n"
+        f"Task mode: {request.task_mode.value}. Extract knowledge that is directly supported "
+        "by the supplied image. Return one JSON object containing arrays named "
+        "'observations', 'entities' and 'claims'. For entity_extraction, claims must be empty.\n"
         "Evidence priority:\n"
         "1. PRIMARY evidence is the image pixels and IMAGE-DERIVED OCR below.\n"
         "2. AUXILIARY document context may help interpretation but may contradict the image. "
@@ -60,6 +62,7 @@ def _visual_prompt(request: VisualExtractionRequest) -> str:
         "object, subject_type, optional object_type, confidence, observation_index. A claim "
         "with region-level support must reference its supporting observation_index. Use source "
         "surface forms and obey the schema relation direction. Do not invent unsupported facts.\n"
+        "Entity fields: name, type, confidence and optional observation_index.\n"
         f"Schema: {request.output_schema.model_dump_json()}\n"
         f"IMAGE-DERIVED OCR (PRIMARY): {json.dumps(ocr_text, ensure_ascii=False)}\n"
         f"AUXILIARY DOCUMENT CONTEXT (UNTRUSTED): {request.asset.context_text}"
@@ -317,6 +320,7 @@ class OpenAICompatibleVLMProvider:
             )
             observations_by_index[index] = observations[-1]
         candidates = []
+        entities: list[EntityMention] = []
         ocr_context = "\n".join(block.text for block in request.ocr_blocks)
         grounding_context = ocr_context or asset.context_text
         for index, item in enumerate(payload.get("claims", [])):
@@ -367,8 +371,38 @@ class OpenAICompatibleVLMProvider:
                         summary=summarize(item),
                     )
                 )
+        for index, item in enumerate(payload.get("entities", [])):
+            if not isinstance(item, dict):
+                warnings.append(f"visual_entity_invalid:asset={asset.id}:index={index}")
+                continue
+            oi = item.get("observation_index")
+            observation = (
+                observations_by_index.get(oi)
+                if isinstance(oi, int) and not isinstance(oi, bool)
+                else None
+            )
+            name = str(item.get("name", "")).strip()
+            entity_type = str(item.get("type", item.get("entity_type", ""))).strip()
+            if not name or not entity_type:
+                warnings.append(f"visual_entity_invalid:asset={asset.id}:index={index}")
+                continue
+            evidence_id = observation.evidence_id if observation else asset.evidence_id
+            entities.append(
+                EntityMention(
+                    id=stable_id("mention", request.document.id, evidence_id, name, entity_type),
+                    name=name,
+                    entity_type=entity_type,
+                    context=grounding_context,
+                    modality=Modality.IMAGE,
+                    evidence_ids=[evidence_id],
+                    confidence=float(item.get("confidence", 0.5)),
+                )
+            )
+        if request.task_mode == TaskMode.ENTITY_EXTRACTION:
+            candidates = []
         return ExtractionResult(
             candidates=candidates,
+            entities=entities,
             observations=observations,
             evidence=evidence,
             warnings=warnings,

@@ -8,6 +8,13 @@ from src.domain.agents import (
     FusionAdvice,
     FusionAdviceRequest,
 )
+from src.domain.batches import (
+    BatchItem,
+    BatchItemStatus,
+    BatchResult,
+    BatchRun,
+    BatchStatus,
+)
 from src.domain.cases import (
     CaseEmbedding,
     CaseRecord,
@@ -20,6 +27,7 @@ from src.domain.cases import (
 from src.domain.documents import (
     BBox,
     CoordinateSpace,
+    DocumentDerivation,
     DocumentIR,
     DocumentPage,
     EvidenceKind,
@@ -63,13 +71,26 @@ from src.domain.knowledge import (
 )
 from src.domain.reviews import CorrectionGuard, ReviewCorrection, ReviewEvent
 from src.domain.schema import (
+    AttributeDef,
     EntityCatalogItem,
     EntityTypeDef,
+    EventDef,
+    EventRoleDef,
     OutputSchema,
     RelationDef,
     SchemaIndex,
     load_schema,
     normalize_label,
+)
+from src.domain.tasks import (
+    CandidateAttribute,
+    CandidateEvent,
+    CandidateEventArgument,
+    EntitySourceMode,
+    ExtractionReviewEvent,
+    ProvidedEntity,
+    TaskExtractionResult,
+    TaskMode,
 )
 from src.domain.validation import (
     CommitValidationContext,
@@ -126,12 +147,16 @@ __all__ = [
     "EntityCandidate",
     "EntityEmbedding",
     "DocumentIR",
+    "DocumentDerivation",
     "EntityCatalogItem",
+    "AttributeDef",
     "EntityMention",
     "EntityOperation",
     "EntityResolutionDecision",
     "EntityReviewTask",
     "EntityTypeDef",
+    "EventDef",
+    "EventRoleDef",
     "EvidenceKind",
     "EvidenceRef",
     "ExtractionRequest",
@@ -162,4 +187,17 @@ __all__ = [
     "load_schema",
     "normalize_label",
     "utc_now",
+    "TaskMode",
+    "EntitySourceMode",
+    "ExtractionReviewEvent",
+    "ProvidedEntity",
+    "CandidateAttribute",
+    "CandidateEventArgument",
+    "CandidateEvent",
+    "TaskExtractionResult",
+    "BatchStatus",
+    "BatchItemStatus",
+    "BatchItem",
+    "BatchRun",
+    "BatchResult",
 ]

@@ -219,7 +219,7 @@ def test_project_is_discovered_from_script_path(fake_runtime: FakeRuntime) -> No
     )
     assert result.returncode == 0
     assert (
-        fake_runtime.project / "runtime" / "services" / "v010" / "neo4j" / "conf" / "neo4j.conf"
+        fake_runtime.project / "runtime" / "services" / "v011" / "neo4j" / "conf" / "neo4j.conf"
     ).exists()
     assert "sk-private-do-not-print" not in result.stdout + result.stderr
 
@@ -263,13 +263,13 @@ def test_neo4j_entrypoint_prepares_only_the_isolated_instance(
         check=False,
     )
     config = (
-        fake_runtime.project / "runtime" / "services" / "v010" / "neo4j" / "conf" / "neo4j.conf"
+        fake_runtime.project / "runtime" / "services" / "v011" / "neo4j" / "conf" / "neo4j.conf"
     )
     assert result.returncode == 0
     assert f"server.directories.data={config.parent.parent / 'data'}" in config.read_text()
     assert f"server.directories.run={config.parent.parent / 'run'}" in config.read_text()
     assert not (fake_runtime.state / "neo4j-7687").exists()
-    config.write_text(config.read_text().replace("/services/v010/", "/neo4j/"))
+    config.write_text(config.read_text().replace("/services/v011/", "/neo4j/"))
     rejected = subprocess.run(
         ["bash", str(fake_runtime.project / "scripts" / "start_neo4j.sh"), "--prepare"],
         env=env,

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import shutil
 from hashlib import sha256
 from io import BytesIO
@@ -104,6 +106,11 @@ class FileEvidenceStore:
         if not source.is_file():
             raise EvidenceIntegrityError(f"evidence source not found: {source}")
         self._store_blob(source, document.source_hash)
+        for derivation in document.derivations:
+            derived = Path(derivation.derived_path)
+            if not derived.is_file() or file_sha256(derived) != derivation.derived_hash:
+                raise EvidenceIntegrityError("derived document hash mismatch")
+            self._store_blob(derived, derivation.derived_hash)
         for asset in document.media_assets:
             asset_path = Path(asset.path)
             if not asset_path.is_file():
@@ -199,7 +206,43 @@ class FileEvidenceStore:
     async def verify(self, evidence_id: str) -> bool:
         self._require_available()
         try:
-            self._load_ref(evidence_id)
-        except (EvidenceIntegrityError, FileNotFoundError):
+            evidence = self._load_ref(evidence_id)
+            if evidence.json_path and evidence.json_value_hash:
+                payload = json.loads((await self.get_blob(evidence.source_hash)).decode("utf-8"))
+                value = _json_path_value(payload, evidence.json_path)
+                if canonical_hash(value) != evidence.json_value_hash:
+                    return False
+        except (
+            EvidenceIntegrityError,
+            FileNotFoundError,
+            KeyError,
+            IndexError,
+            TypeError,
+            ValueError,
+            json.JSONDecodeError,
+        ):
             return False
         return True
+
+
+def _json_path_value(payload: object, path: str) -> object:
+    """Resolve the restricted JSONPath emitted by JSONParser."""
+    if not path.startswith("$"):
+        raise EvidenceIntegrityError("invalid JSONPath evidence")
+    value = payload
+    for key, index, quoted in re.findall(
+        r"\.([A-Za-z_][A-Za-z0-9_]*)|\[(\d+)\]|\[(\"(?:[^\"\\]|\\.)*\")\]", path[1:]
+    ):
+        if key:
+            if not isinstance(value, dict):
+                raise EvidenceIntegrityError("JSONPath object segment mismatch")
+            value = value[key]
+        elif index:
+            if not isinstance(value, list):
+                raise EvidenceIntegrityError("JSONPath array segment mismatch")
+            value = value[int(index)]
+        else:
+            if not isinstance(value, dict):
+                raise EvidenceIntegrityError("JSONPath object segment mismatch")
+            value = value[json.loads(quoted)]
+    return value

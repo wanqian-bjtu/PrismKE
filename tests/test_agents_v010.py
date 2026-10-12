@@ -486,7 +486,7 @@ def test_agent_policy_and_budget_change_run_id(tmp_path: Path, schema_path: Path
         agent_token_budget=4_000,
     )
     assert len({baseline.run_id, advised.run_id, budgeted.run_id}) == 3
-    assert baseline.pipeline_version == "0.10.0"
+    assert baseline.pipeline_version == "0.11.0"
 
 
 @pytest.mark.asyncio

@@ -37,7 +37,7 @@ NAVIGATION_GROUPS: dict[str, tuple[str, tuple[tuple[str, str], ...]]] = {
 
 PAGE_META: dict[str, tuple[str, str]] = {
     "overview": ("总览", "运行、审核、校验和图存储状态"),
-    "build": ("新建知识构建", "提交文档并启动可追溯的知识抽取运行"),
+    "build": ("新建抽取与构建", "批量提交文档并选择可追溯的抽取或知识构建任务"),
     "execution": ("执行任务", "分支进度、执行时间线与安全恢复"),
     "entity-review": ("实体审核", "核对实体候选、证据与链接决定"),
     "claim-review": ("事实审核", "核对规范事实、冲突与原始证据"),

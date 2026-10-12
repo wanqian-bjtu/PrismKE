@@ -328,6 +328,7 @@ class ExecutionManager:
 
         ocr_done = ocr_total if position > node_order.index("run_ocr") else 0
         commit_done = int(state.revision is not None or bool(task and task.commit_applied))
+        commit_total = int(state.task_mode.permits_graph_commit and state.batch_id is None)
         return [
             BranchProgress(
                 branch="text",
@@ -358,9 +359,9 @@ class ExecutionManager:
             ),
             BranchProgress(
                 branch="commit",
-                status=status(commit_done, 1, "commit_graph", "commit_graph"),
+                status=status(commit_done, commit_total, "commit_graph", "commit_graph"),
                 completed=commit_done,
-                total=1,
+                total=commit_total,
                 updated_at=updated,
             ),
         ]

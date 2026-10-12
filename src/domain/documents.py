@@ -22,6 +22,7 @@ class EvidenceKind(StrEnum):
     PDF_BBOX = "pdf_bbox"
     IMAGE = "image"
     VISUAL_REGION = "visual_region"
+    JSON_VALUE = "json_value"
 
 
 class CoordinateSpace(StrEnum):
@@ -127,6 +128,17 @@ class EvidenceRef(BaseModel):
     canvas_width: float | None = Field(default=None, gt=0)
     canvas_height: float | None = Field(default=None, gt=0)
     localization_level: LocalizationLevel | None = None
+    json_path: str | None = None
+    json_value_hash: str | None = None
+
+
+class DocumentDerivation(BaseModel):
+    tool: str
+    tool_version: str
+    source_hash: str
+    derived_hash: str
+    derived_media_type: str
+    derived_path: str
 
 
 class DocumentIR(BaseModel):
@@ -140,4 +152,5 @@ class DocumentIR(BaseModel):
     media_assets: list[MediaAsset] = Field(default_factory=list)
     visual_observations: list[VisualObservation] = Field(default_factory=list)
     evidence: list[EvidenceRef] = Field(default_factory=list)
+    derivations: list[DocumentDerivation] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)

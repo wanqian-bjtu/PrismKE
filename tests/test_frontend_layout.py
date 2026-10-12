@@ -104,6 +104,16 @@ def test_workspace_uses_dropdown_navigation_and_no_radio_components(tmp_path: Pa
     assert by_label["治理/融合语义建议"]["props"]["value"] == "openai-compatible"
     assert by_label["Agent 建议 Token 预算"]["props"]["value"] == 20_000
     assert by_label["配置操作者"]["props"]["value"] == "管理员"
+    assert [choice[1] for choice in by_label["任务模式"]["props"]["choices"]] == [
+        "entity_extraction",
+        "relation_extraction",
+        "schema_information_extraction",
+        "joint_entity_relation_extraction",
+        "joint_entity_relation_disambiguation",
+        "knowledge_graph_construction",
+    ]
+    assert by_label["任务模式"]["props"]["value"] == "knowledge_graph_construction"
+    assert by_label["文档（最多 20 个）"]["props"]["file_count"] == "multiple"
     assert [choice[1] for choice in by_label["OCR 设备"]["props"]["choices"]] == [
         "auto",
         "cpu",

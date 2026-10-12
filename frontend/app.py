@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Literal, cast
+from uuid import uuid4
 
 import orjson
 
@@ -19,7 +20,13 @@ from frontend.schema_input import resolve_schema, schema_summary
 from frontend.theme import APP_CSS
 from frontend.validation import build_validation_tab
 from src import __version__
-from src.domain import CanonicalEntity, ReviewDecision
+from src.domain import (
+    CanonicalEntity,
+    EntitySourceMode,
+    ProvidedEntity,
+    ReviewDecision,
+    TaskMode,
+)
 from src.workflow import PrismKEService
 from src.workflow.service import TransientProviderCredentials
 
@@ -47,7 +54,7 @@ def _state_status(state: Any, execution: dict[str, Any] | None = None) -> str:
 
 
 def _claim_rows(state: Any) -> list[list[Any]]:
-    return [
+    rows = [
         [
             claim.id,
             claim.subject_id,
@@ -59,6 +66,82 @@ def _claim_rows(state: Any) -> list[list[Any]]:
         ]
         for claim in state.claims
     ]
+    if rows or state.extraction_result is None:
+        return rows
+    result = state.extraction_result
+    decisions = {event.target_id: event.decision for event in result.review_events}
+    rows.extend(
+        [
+            mention.id,
+            mention.name,
+            "实体提及",
+            mention.entity_type,
+            mention.confidence,
+            decisions.get(mention.id, "candidate"),
+            ", ".join(mention.evidence_ids),
+        ]
+        for mention in result.entities
+    )
+    rows.extend(
+        [
+            claim.id,
+            claim.subject.name,
+            claim.relation,
+            claim.object.name if hasattr(claim.object, "name") else claim.object,
+            claim.confidence,
+            decisions.get(claim.id, "candidate"),
+            ", ".join(claim.evidence_ids),
+        ]
+        for claim in result.relations
+    )
+    rows.extend(
+        [
+            attribute.id,
+            attribute.subject.name,
+            f"属性：{attribute.field}",
+            str(attribute.value),
+            attribute.confidence,
+            decisions.get(attribute.id, "candidate"),
+            ", ".join(attribute.evidence_ids),
+        ]
+        for attribute in result.attributes
+    )
+    rows.extend(
+        [
+            event.id,
+            event.trigger,
+            f"事件：{event.event_type}",
+            orjson.dumps(
+                [item.model_dump(mode="json") for item in event.arguments]
+            ).decode(),
+            event.confidence,
+            decisions.get(event.id, "candidate"),
+            ", ".join(event.evidence_ids),
+        ]
+        for event in result.events
+    )
+    return rows
+
+
+def _review_target_choices(state: Any) -> list[tuple[str, str]]:
+    result = getattr(state, "extraction_result", None)
+    if result is None:
+        return []
+    choices: list[tuple[str, str]] = []
+    choices.extend((f"实体 · {item.name}", f"entity|{item.id}") for item in result.entities)
+    choices.extend(
+        (f"关系 · {item.subject.name} / {item.relation}", f"relation|{item.id}")
+        for item in result.relations
+    )
+    choices.extend(
+        (f"属性 · {item.subject.name} / {item.field}", f"attribute|{item.id}")
+        for item in result.attributes
+    )
+    choices.extend(
+        (f"事件 · {item.event_type} / {item.trigger}", f"event|{item.id}")
+        for item in result.events
+    )
+    return choices
 
 
 def mount_gradio(app: Any, service: PrismKEService) -> Any:
@@ -68,7 +151,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         raise RuntimeError("Web UI is not installed; run `uv sync --extra web`") from exc
 
     async def run_document(
-        document: str | None,
+        documents: list[str] | str | None,
         schema_source: str,
         schema_file: str | None,
         schema_text: str,
@@ -90,48 +173,228 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         vlm_base_url: str,
         vlm_model: str,
         vlm_api_key: str,
-    ) -> tuple[str, dict[str, Any], list[list[Any]], str]:
-        if not document:
-            raise ValueError("请先上传文档")
+        task_mode: str,
+        entity_source_mode: str,
+        provided_entities_json: str,
+        operator: str,
+    ) -> tuple[
+        str,
+        dict[str, Any],
+        list[list[Any]],
+        str,
+        str,
+        list[list[Any]],
+        Any,
+        Any,
+    ]:
+        if not documents:
+            raise ValueError("请先上传至少一个文档")
+        document_paths = [documents] if isinstance(documents, str) else documents
         schema_path, _ = resolve_schema(
             schema_source,
             schema_file,
             schema_text,
             service.settings.runtime_dir / "ui" / "schemas",
         )
-        state, created = service.create_run(
-            Path(document),
+        try:
+            raw_entities = orjson.loads(provided_entities_json or "[]")
+            provided_entities = [ProvidedEntity.model_validate(item) for item in raw_entities]
+        except (TypeError, ValueError, orjson.JSONDecodeError) as exc:
+            raise ValueError("实体清单必须是合法的 JSON 数组") from exc
+        batch, created = service.create_batch(
+            [Path(document) for document in document_paths],
             schema_path,
-            provider,
-            ocr_provider,
-            vlm_provider,
-            allow_remote_assets,
-            cast(Literal["none", "good", "good_bad"], case_mode),
-            reflection_enabled,
-            reflection_provider,
-            int(reflection_max_attempts),
-            int(reflection_token_budget),
-            int(reflection_time_budget),
-            semantic_advisor,
-            int(agent_token_budget),
+            task_mode=TaskMode(task_mode),
+            entity_source_mode=EntitySourceMode(entity_source_mode),
+            provided_entities=provided_entities,
+            provider_name=provider,
+            ocr_provider_name=ocr_provider,
+            vlm_provider_name=vlm_provider,
+            allow_remote_assets=allow_remote_assets,
+            case_mode=cast(Literal["none", "good", "good_bad"], case_mode),
+            reflection_enabled=reflection_enabled,
+            reflection_provider_name=reflection_provider,
+            reflection_max_attempts=int(reflection_max_attempts),
+            reflection_token_budget=int(reflection_token_budget),
+            reflection_time_budget_seconds=int(reflection_time_budget),
+            semantic_advisor_name=semantic_advisor,
+            agent_token_budget=int(agent_token_budget),
             llm_base_url=llm_base_url,
             llm_model=llm_model,
             vlm_base_url=vlm_base_url,
             vlm_model=vlm_model,
+            operator=operator,
             credentials=TransientProviderCredentials(
                 llm_api_key=llm_api_key.strip() or None,
                 vlm_api_key=vlm_api_key.strip() or None,
             ),
         )
-        if created:
-            service.executions.enqueue(state.run_id, "execute")
-        execution = service.executions.view(state.run_id)
-        return (
-            _state_status(state, execution),
-            _state_summary(state),
-            _claim_rows(state),
-            state.run_id,
+        first_run_id = next(
+            (item.run_id for item in batch.items if item.run_id),
+            "",
         )
+        state = service.show_run(first_run_id) if first_run_id else None
+        rows = [
+            [
+                item.filename,
+                item.status.value,
+                item.run_id or "",
+                item.reused_from_item_id or "",
+                item.failure_code or "",
+            ]
+            for item in batch.items
+        ]
+        return (
+            f"**批次状态** `{batch.status.value}` · 文件 {len(batch.items)} · "
+            f"{'新建' if created else '复用'}",
+            batch.model_dump(mode="json"),
+            _claim_rows(state) if state else [],
+            first_run_id,
+            batch.id,
+            rows,
+            gr.update(
+                choices=[(item.filename, item.id) for item in batch.items],
+                value=batch.items[0].id if batch.items else None,
+            ),
+            gr.update(
+                choices=_review_target_choices(state) if state else [],
+                value=None,
+            ),
+        )
+
+    def load_build(
+        run_id: str, batch_id: str
+    ) -> tuple[str, dict[str, Any], list[list[Any]], list[list[Any]], Any, Any]:
+        if batch_id:
+            batch = service.refresh_batch(batch_id)
+            rows = [
+                [
+                    item.filename,
+                    item.status.value,
+                    item.run_id or "",
+                    item.reused_from_item_id or "",
+                    item.failure_code or "",
+                ]
+                for item in batch.items
+            ]
+            state = service.show_run(run_id) if run_id else None
+            return (
+                f"**批次状态** `{batch.status.value}` · 文件 {len(batch.items)}",
+                batch.model_dump(mode="json"),
+                _claim_rows(state) if state else [],
+                rows,
+                gr.update(
+                    choices=[(item.filename, item.id) for item in batch.items],
+                    value=batch.items[0].id if batch.items else None,
+                ),
+                gr.update(
+                    choices=_review_target_choices(state) if state else [],
+                    value=None,
+                ),
+            )
+        status, summary, claims = load_run(run_id)
+        state = service.show_run(run_id)
+        return (
+            status,
+            summary,
+            claims,
+            [],
+            gr.update(choices=[], value=None),
+            gr.update(choices=_review_target_choices(state), value=None),
+        )
+
+    def select_batch_result(batch_id: str, item_id: str) -> tuple[str, list[list[Any]], Any]:
+        if not batch_id or not item_id:
+            return "", [], gr.update(choices=[], value=None)
+        batch = service.refresh_batch(batch_id)
+        item = next((candidate for candidate in batch.items if candidate.id == item_id), None)
+        if item is None or not item.run_id:
+            return "", [], gr.update(choices=[], value=None)
+        state = service.show_run(item.run_id)
+        return (
+            item.run_id,
+            _claim_rows(state),
+            gr.update(choices=_review_target_choices(state), value=None),
+        )
+
+    def review_extraction_result(
+        run_id: str,
+        target: str,
+        decision: str,
+        reviewer: str,
+        reason: str,
+    ) -> tuple[list[list[Any]], str]:
+        if not run_id or "|" not in target:
+            raise ValueError("请先选择可审核的抽取结果")
+        target_type, target_id = target.split("|", 1)
+        state = service.show_run(run_id)
+        if state.extraction_result is None:
+            raise ValueError("该文件的抽取结果尚未就绪")
+        service.review_extraction_result(
+            run_id,
+            target_type,
+            target_id,
+            decision,
+            reviewer,
+            reason,
+            uuid4().hex,
+            state.extraction_result.version,
+        )
+        updated = service.show_run(run_id)
+        return _claim_rows(updated), "审核决定已保存，原候选与历史事件均保留。"
+
+    def batch_action_view(
+        batch: Any, message: str
+    ) -> tuple[str, dict[str, Any], list[list[Any]], Any, str]:
+        rows = [
+            [
+                item.filename,
+                item.status.value,
+                item.run_id or "",
+                item.reused_from_item_id or "",
+                item.failure_code or "",
+            ]
+            for item in batch.items
+        ]
+        return (
+            f"**批次状态** `{batch.status.value}` · 文件 {len(batch.items)}",
+            batch.model_dump(mode="json"),
+            rows,
+            gr.update(
+                choices=[(item.filename, item.id) for item in batch.items],
+                value=batch.items[0].id if batch.items else None,
+            ),
+            message,
+        )
+
+    def retry_batch_item(
+        batch_id: str, item_id: str
+    ) -> tuple[str, dict[str, Any], list[list[Any]], Any, str]:
+        if not batch_id or not item_id:
+            raise ValueError("请先选择批次和文件")
+        batch = service.retry_batch_item(batch_id, item_id)
+        return batch_action_view(batch, "已重新排队，执行工作器将从安全边界恢复。")
+
+    def exclude_batch_item(
+        batch_id: str,
+        item_id: str,
+        operator: str,
+        reason: str,
+    ) -> tuple[str, dict[str, Any], list[list[Any]], Any, str]:
+        if not batch_id or not item_id:
+            raise ValueError("请先选择批次和文件")
+        batch = service.exclude_batch_item(batch_id, item_id, operator, reason)
+        return batch_action_view(batch, "已排除该文件并保留审计记录。")
+
+    async def confirm_batch_commit(
+        batch_id: str,
+        reviewer: str,
+        confirmed: bool,
+    ) -> tuple[str, dict[str, Any], list[list[Any]], Any, str]:
+        if not confirmed:
+            raise ValueError("请先确认批次图提交")
+        batch = await service.confirm_batch_commit(batch_id, reviewer)
+        return batch_action_view(batch, f"批次已提交，Revision：`{batch.revision_id}`")
 
     def preview_schema(
         source: str, schema_file: str | None, schema_text: str
@@ -558,7 +821,15 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             gr.update(value=False),
         )
 
-    claim_headers = ["Claim ID", "主语", "关系", "宾语", "置信度", "状态", "证据"]
+    claim_headers = [
+        "结果 ID",
+        "主体/名称",
+        "类型/关系",
+        "宾语/值",
+        "置信度",
+        "状态",
+        "证据",
+    ]
     public_settings = service.settings_view()
     configured_ocr_lang = public_settings["ocr_lang"]
     if configured_ocr_lang == "ch":
@@ -595,6 +866,33 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             run_context = gr.Markdown("尚无运行", elem_classes="sidebar-status")
             refresh_context = gr.Button("刷新运行")
             with gr.Accordion("任务配置", open=True):
+                task_mode_input = gr.Dropdown(
+                    [
+                        ("实体抽取", "entity_extraction"),
+                        ("关系抽取", "relation_extraction"),
+                        ("Schema 信息抽取", "schema_information_extraction"),
+                        ("端到端实体关系抽取", "joint_entity_relation_extraction"),
+                        (
+                            "实体关系抽取与消歧",
+                            "joint_entity_relation_disambiguation",
+                        ),
+                        ("完整知识构建", "knowledge_graph_construction"),
+                    ],
+                    value="knowledge_graph_construction",
+                    label="任务模式",
+                )
+                entity_source_input = gr.Dropdown(
+                    [("系统自动识别", "auto"), ("使用提供实体", "provided")],
+                    value="auto",
+                    label="关系实体来源",
+                    visible=False,
+                )
+                provided_entities_input = gr.Code(
+                    label="实体清单 JSON",
+                    language="json",
+                    value="[]",
+                    visible=False,
+                )
                 schema_source = gr.Dropdown(
                     [("上传文件", "upload"), ("文本输入", "text")],
                     value="upload",
@@ -751,7 +1049,29 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 page_header(gr, "build")
                 with gr.Row(equal_height=False):
                     with gr.Column(scale=2, min_width=300):
-                        document_input = gr.File(label="文档", type="filepath")
+                        document_input = gr.File(
+                            label="文档（最多 20 个）",
+                            type="filepath",
+                            file_count="multiple",
+                            file_types=[
+                                ".txt",
+                                ".md",
+                                ".markdown",
+                                ".pdf",
+                                ".doc",
+                                ".docx",
+                                ".html",
+                                ".htm",
+                                ".json",
+                                ".png",
+                                ".jpg",
+                                ".jpeg",
+                                ".webp",
+                                ".tif",
+                                ".tiff",
+                                ".bmp",
+                            ],
+                        )
                         run_button = gr.Button("开始构建", variant="primary")
                         reload_button = gr.Button("刷新运行状态")
                     with gr.Column(scale=3, min_width=320):
@@ -766,9 +1086,41 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                         ):
                             run_summary = gr.JSON(label="完整运行状态")
                 run_id_output = gr.State()
-                claim_table = gr.Dataframe(
-                    headers=claim_headers, interactive=False, label="Claim", wrap=True
+                batch_id_output = gr.State()
+                batch_table = gr.Dataframe(
+                    headers=["文件", "状态", "Run ID", "复用来源", "失败代码"],
+                    interactive=False,
+                    label="批次文件",
+                    wrap=True,
                 )
+                claim_table = gr.Dataframe(
+                    headers=claim_headers, interactive=False, label="抽取结果", wrap=True
+                )
+                with gr.Accordion("批次处理", open=False):
+                    batch_item_selector = gr.Dropdown(label="批次文件", choices=[])
+                    batch_operator = gr.Textbox(label="操作者", value="管理员")
+                    batch_reason = gr.Textbox(label="排除原因")
+                    with gr.Row():
+                        retry_batch_button = gr.Button("重试文件")
+                        exclude_batch_button = gr.Button("排除文件", variant="stop")
+                    batch_action_outcome = gr.Markdown("尚未执行批次操作")
+                    with gr.Group(visible=True) as batch_commit_group:
+                        batch_reviewer = gr.Textbox(label="提交审核人", value="管理员")
+                        batch_commit_confirm = gr.Checkbox(
+                            label="我确认将该批次的已批准事实写入图谱"
+                        )
+                        batch_commit_button = gr.Button("提交批次到图谱", variant="primary")
+                with gr.Accordion("抽取结果审核", open=False):
+                    extraction_review_target = gr.Dropdown(label="审核对象", choices=[])
+                    extraction_review_decision = gr.Dropdown(
+                        [("批准", "approve"), ("拒绝", "reject"), ("暂缓", "defer")],
+                        value="approve",
+                        label="审核决定",
+                    )
+                    extraction_reviewer = gr.Textbox(label="审核人", value="管理员")
+                    extraction_review_reason = gr.Textbox(label="审核意见")
+                    extraction_review_button = gr.Button("保存抽取审核")
+                    extraction_review_outcome = gr.Markdown("尚未审核抽取结果")
 
             build_review_tabs(service)
             from frontend.execution import build_execution_tab
@@ -1060,6 +1412,24 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             schema_source,
             [schema_input, schema_text],
         )
+        def switch_task_mode(mode: str) -> tuple[Any, Any, Any]:
+            relation = mode == "relation_extraction"
+            return (
+                gr.update(visible=relation),
+                gr.update(visible=False),
+                gr.update(visible=mode == "knowledge_graph_construction"),
+            )
+
+        task_mode_input.change(
+            switch_task_mode,
+            task_mode_input,
+            [entity_source_input, provided_entities_input, batch_commit_group],
+        )
+        entity_source_input.change(
+            lambda mode: gr.update(visible=mode == "provided"),
+            entity_source_input,
+            provided_entities_input,
+        )
         validate_schema.click(
             preview_schema,
             [schema_source, schema_input, schema_text],
@@ -1173,13 +1543,71 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 vlm_base,
                 vlm_model,
                 vlm_api_key,
+                task_mode_input,
+                entity_source_input,
+                provided_entities_input,
+                config_operator,
             ],
-            [run_status, run_summary, claim_table, run_id_output],
+            [
+                run_status,
+                run_summary,
+                claim_table,
+                run_id_output,
+                batch_id_output,
+                batch_table,
+                batch_item_selector,
+                extraction_review_target,
+            ],
         ).then(sidebar_run, [run_id_output], [current_run, run_context])
         reload_button.click(
-            load_run,
-            [run_id_output],
-            [run_status, run_summary, claim_table],
+            load_build,
+            [run_id_output, batch_id_output],
+            [
+                run_status,
+                run_summary,
+                claim_table,
+                batch_table,
+                batch_item_selector,
+                extraction_review_target,
+            ],
+        )
+        batch_item_selector.change(
+            select_batch_result,
+            [batch_id_output, batch_item_selector],
+            [run_id_output, claim_table, extraction_review_target],
+        )
+        extraction_review_button.click(
+            review_extraction_result,
+            [
+                run_id_output,
+                extraction_review_target,
+                extraction_review_decision,
+                extraction_reviewer,
+                extraction_review_reason,
+            ],
+            [claim_table, extraction_review_outcome],
+        )
+        batch_action_outputs = [
+            run_status,
+            run_summary,
+            batch_table,
+            batch_item_selector,
+            batch_action_outcome,
+        ]
+        retry_batch_button.click(
+            retry_batch_item,
+            [batch_id_output, batch_item_selector],
+            batch_action_outputs,
+        )
+        exclude_batch_button.click(
+            exclude_batch_item,
+            [batch_id_output, batch_item_selector, batch_operator, batch_reason],
+            batch_action_outputs,
+        )
+        batch_commit_button.click(
+            confirm_batch_commit,
+            [batch_id_output, batch_reviewer, batch_commit_confirm],
+            batch_action_outputs,
         )
         save_config.click(
             save_settings,

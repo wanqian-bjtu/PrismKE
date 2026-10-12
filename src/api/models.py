@@ -97,3 +97,20 @@ class CaseDisableRequest(BaseModel):
 
 class CaseIndexRequest(BaseModel):
     dry_run: bool = False
+
+
+class BatchExcludeRequest(BaseModel):
+    operator: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+
+class BatchCommitRequest(BaseModel):
+    reviewer: str = Field(min_length=1)
+
+
+class ExtractionReviewRequest(BaseModel):
+    decision: Literal["approve", "reject", "defer"]
+    reviewer: str = Field(min_length=1)
+    reason: str = ""
+    request_id: str = Field(min_length=1)
+    expected_version: int = Field(ge=0)

@@ -128,6 +128,7 @@ def merge_supporting_claims(claims: list[Claim]) -> list[Claim]:
         current.source_candidate_ids = sorted(
             set(current.source_candidate_ids + claim.source_candidate_ids)
         )
+        current.source_run_ids = sorted(set(current.source_run_ids + claim.source_run_ids))
         current.confidence = max(current.confidence, claim.confidence)
         current.cross_modal_support = current.cross_modal_support or claim.cross_modal_support
         current.coarse_visual_evidence = (
