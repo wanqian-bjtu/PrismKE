@@ -102,9 +102,7 @@ async def test_snapshot_pins_all_fixture_sources() -> None:
         (historical, "test.md", "b" * 64),
     ):
         for claim in claims:
-            ref = sample_ref.model_copy(
-                update={"id": claim.evidence_ids[0], "source_hash": digest}
-            )
+            ref = sample_ref.model_copy(update={"id": claim.evidence_ids[0], "source_hash": digest})
             rows.append(
                 {
                     "claim_id": claim.id,

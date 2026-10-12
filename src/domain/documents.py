@@ -8,6 +8,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from src.domain.pdf import PDFParseDecision
+
 
 class Modality(StrEnum):
     TEXT = "text"
@@ -15,6 +17,7 @@ class Modality(StrEnum):
     OCR = "ocr"
     TABLE = "table"
     CHART = "chart"
+    FORMULA = "formula"
 
 
 class EvidenceKind(StrEnum):
@@ -23,6 +26,9 @@ class EvidenceKind(StrEnum):
     IMAGE = "image"
     VISUAL_REGION = "visual_region"
     JSON_VALUE = "json_value"
+    TABLE_REGION = "table_region"
+    FORMULA_REGION = "formula_region"
+    CHART_REGION = "chart_region"
 
 
 class CoordinateSpace(StrEnum):
@@ -84,6 +90,11 @@ class MediaAsset(BaseModel):
         "docx_embedded",
         "html_embedded",
         "markdown_embedded",
+        "mineru_image",
+        "mineru_table",
+        "mineru_formula",
+        "mineru_chart",
+        "mineru_page_render",
     ] = "source_image"
     source_ref: str | None = None
     context_text: str = ""
@@ -130,15 +141,21 @@ class EvidenceRef(BaseModel):
     localization_level: LocalizationLevel | None = None
     json_path: str | None = None
     json_value_hash: str | None = None
+    derivation_id: str | None = None
+    source_locator: dict[str, Any] | None = None
 
 
 class DocumentDerivation(BaseModel):
+    id: str | None = None
     tool: str
     tool_version: str
+    parser_fingerprint: str | None = None
     source_hash: str
     derived_hash: str
     derived_media_type: str
     derived_path: str
+    artifact_manifest_hash: str | None = None
+    artifact_hashes: dict[str, str] = Field(default_factory=dict)
 
 
 class DocumentIR(BaseModel):
@@ -154,3 +171,4 @@ class DocumentIR(BaseModel):
     evidence: list[EvidenceRef] = Field(default_factory=list)
     derivations: list[DocumentDerivation] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    pdf_parse_decision: PDFParseDecision | None = None

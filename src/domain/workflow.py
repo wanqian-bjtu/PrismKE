@@ -28,6 +28,7 @@ from src.domain.knowledge import (
     GraphRevision,
     ReviewTask,
 )
+from src.domain.pdf import PDFParseDecision, PDFParseMode
 from src.domain.schema import OutputSchema
 from src.domain.tasks import (
     CandidateAttribute,
@@ -151,7 +152,13 @@ class WorkflowState(BaseModel):
     entity_resolution_policy_version: str | None = None
     current_node: str = "ingest"
     failed_node: str | None = None
-    status: Literal["running", "awaiting_review", "completed", "failed"] = "running"
+    status: Literal["running", "awaiting_review", "completed", "failed", "parser_blocked"] = (
+        "running"
+    )
+    pdf_parse_mode: PDFParseMode = PDFParseMode.AUTO
+    pdf_parse_decision: PDFParseDecision | None = None
+    pdf_parser_fallback_approved: bool = False
+    pdf_parser_fallback_event_id: str | None = None
     document: DocumentIR | None = None
     output_schema: OutputSchema | None = Field(default=None, alias="schema")
     candidates: list[CandidateClaim] = Field(default_factory=list)

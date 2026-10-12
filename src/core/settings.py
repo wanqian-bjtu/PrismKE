@@ -56,6 +56,21 @@ class Settings(BaseSettings):
     max_batch_files: int = 20
     max_file_bytes: int = 200 * 1024 * 1024
     max_batch_bytes: int = 500 * 1024 * 1024
+    pdf_parse_mode: str = "auto"
+    pdf_no_text_ratio: float = 0.15
+    pdf_short_text_chars: int = 80
+    pdf_short_text_ratio: float = 0.30
+    pdf_table_ratio: float = 0.10
+    pdf_drawing_count: int = 5
+    pdf_drawing_ratio: float = 0.20
+    pdf_multicolumn_ratio: float = 0.20
+    mineru_base_url: str = "http://127.0.0.1:18020"
+    mineru_version: str = "4.0.12"
+    mineru_tier: str = "standard"
+    mineru_request_timeout: float = 60.0
+    mineru_transfer_timeout: float = 300.0
+    mineru_poll_interval: float = 2.0
+    mineru_max_polls: int = 300
 
     @property
     def runs_dir(self) -> Path:
@@ -108,3 +123,7 @@ class Settings(BaseSettings):
     @property
     def derived_documents_dir(self) -> Path:
         return self.runtime_dir / "derived-documents"
+
+    @property
+    def mineru_runtime_dir(self) -> Path:
+        return self.runtime_dir / "mineru"

@@ -219,7 +219,7 @@ def test_project_is_discovered_from_script_path(fake_runtime: FakeRuntime) -> No
     )
     assert result.returncode == 0
     assert (
-        fake_runtime.project / "runtime" / "services" / "v011" / "neo4j" / "conf" / "neo4j.conf"
+        fake_runtime.project / "runtime" / "services" / "v012" / "neo4j" / "conf" / "neo4j.conf"
     ).exists()
     assert "sk-private-do-not-print" not in result.stdout + result.stderr
 
@@ -263,13 +263,13 @@ def test_neo4j_entrypoint_prepares_only_the_isolated_instance(
         check=False,
     )
     config = (
-        fake_runtime.project / "runtime" / "services" / "v011" / "neo4j" / "conf" / "neo4j.conf"
+        fake_runtime.project / "runtime" / "services" / "v012" / "neo4j" / "conf" / "neo4j.conf"
     )
     assert result.returncode == 0
     assert f"server.directories.data={config.parent.parent / 'data'}" in config.read_text()
     assert f"server.directories.run={config.parent.parent / 'run'}" in config.read_text()
     assert not (fake_runtime.state / "neo4j-7687").exists()
-    config.write_text(config.read_text().replace("/services/v011/", "/neo4j/"))
+    config.write_text(config.read_text().replace("/services/v012/", "/neo4j/"))
     rejected = subprocess.run(
         ["bash", str(fake_runtime.project / "scripts" / "start_neo4j.sh"), "--prepare"],
         env=env,
@@ -305,8 +305,32 @@ def test_primary_scripts_have_no_machine_specific_path() -> None:
         "start_web.sh",
         "start_neo4j.sh",
         "install_neo4j.sh",
+        "install_mineru.sh",
+        "start_mineru.sh",
+        "status_mineru.sh",
+        "stop_mineru.sh",
     ):
         assert "/root/autodl-tmp" not in (SCRIPT.parent / name).read_text()
+
+
+def test_mineru_scripts_are_valid_and_loopback_only() -> None:
+    for name in (
+        "install_mineru.sh",
+        "start_mineru.sh",
+        "status_mineru.sh",
+        "stop_mineru.sh",
+    ):
+        result = subprocess.run(
+            ["bash", "-n", str(SCRIPT.parent / name)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+    start = (SCRIPT.parent / "start_mineru.sh").read_text()
+    assert "--host 127.0.0.1" in start
+    assert "--concurrency 1" in start
+    assert "0.0.0.0" not in start
 
 
 def test_full_lifecycle_is_idempotent_and_redacts_environment(

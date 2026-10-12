@@ -114,3 +114,10 @@ class ExtractionReviewRequest(BaseModel):
     reason: str = ""
     request_id: str = Field(min_length=1)
     expected_version: int = Field(ge=0)
+
+
+class PDFParserFallbackRequest(BaseModel):
+    operator: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+    request_id: str = Field(min_length=1)
+    expected_execution_version: int = Field(ge=0)

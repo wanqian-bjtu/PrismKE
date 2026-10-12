@@ -60,9 +60,7 @@ def _mention(name: str, item_id: str) -> EntityMention:
 
 
 @pytest.mark.asyncio
-async def test_three_agents_handoff_without_extra_calls(
-    tmp_path: Path, schema_path: Path
-) -> None:
+async def test_three_agents_handoff_without_extra_calls(tmp_path: Path, schema_path: Path) -> None:
     sample = tmp_path / "sample.txt"
     sample.write_text(
         "PrismKE | developed_by | OpenAI | Software | Organization | 0.92\n",
@@ -289,9 +287,7 @@ def test_agent_tool_whitelist_and_idempotent_trace() -> None:
 
 
 @pytest.mark.asyncio
-async def test_gray_zone_advice_remains_human_review(
-    tmp_path: Path, schema_path: Path
-) -> None:
+async def test_gray_zone_advice_remains_human_review(tmp_path: Path, schema_path: Path) -> None:
     class LinkAdvisor(MockSemanticAdvisor):
         async def advise_entity(
             self, request: EntityAdviceRequest
@@ -475,9 +471,7 @@ def test_agent_policy_and_budget_change_run_id(tmp_path: Path, schema_path: Path
     source.write_text("PrismKE developed by OpenAI.", encoding="utf-8")
     service = PrismKEService(Settings(_env_file=None, runtime_dir=tmp_path / "runtime"))
     baseline, _ = service.create_run(source, schema_path, "mock")
-    advised, _ = service.create_run(
-        source, schema_path, "mock", semantic_advisor_name="mock"
-    )
+    advised, _ = service.create_run(source, schema_path, "mock", semantic_advisor_name="mock")
     budgeted, _ = service.create_run(
         source,
         schema_path,
@@ -486,7 +480,7 @@ def test_agent_policy_and_budget_change_run_id(tmp_path: Path, schema_path: Path
         agent_token_budget=4_000,
     )
     assert len({baseline.run_id, advised.run_id, budgeted.run_id}) == 3
-    assert baseline.pipeline_version == "0.11.0"
+    assert baseline.pipeline_version == "0.12.0"
 
 
 @pytest.mark.asyncio
@@ -569,8 +563,12 @@ async def test_semantic_provider_fusion_uses_existing_candidate_evidence() -> No
         id="mention:software", name="PrismKE", entity_type="Software", evidence_ids=["e:1"]
     )
     left = CandidateClaim(
-        id="candidate:1", subject=subject, relation="developed_by", object="Harbor",
-        confidence=0.8, evidence_ids=["e:1"]
+        id="candidate:1",
+        subject=subject,
+        relation="developed_by",
+        object="Harbor",
+        confidence=0.8,
+        evidence_ids=["e:1"],
     )
     right = left.model_copy(
         update={"id": "candidate:2", "object": "Contoso", "evidence_ids": ["e:2"]}

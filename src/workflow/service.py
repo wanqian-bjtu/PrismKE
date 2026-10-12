@@ -33,6 +33,10 @@ from src.domain import (
     GraphCommit,
     GraphDocument,
     GraphRevision,
+    PDFComplexityThresholds,
+    PDFParseMode,
+    PDFParserFallbackEvent,
+    PDFParserName,
     ProvidedEntity,
     ReviewDecision,
     SchemaIndex,
@@ -51,6 +55,7 @@ from src.governance import (
 from src.governance.entity_resolution import ENTITY_RESOLUTION_POLICY_VERSION
 from src.governance.validation import ValidationService
 from src.parsing import ParserRegistry
+from src.parsing.mineru import MinerUV1Client
 from src.persistence import (
     AuditLog,
     BatchRepository,
@@ -103,7 +108,7 @@ from src.workflow.graph import PrismKEWorkflow
 from src.workflow.reflection import REFLECTION_POLICY_VERSION, BoundedReflectionService
 from src.workflow.review_workspace import validate_workspace_run, workspace_metadata
 
-PIPELINE_VERSION = "0.11.0"
+PIPELINE_VERSION = "0.12.0"
 ASSET_POLICY_VERSION = "assets-v3"
 ALIGNMENT_POLICY_VERSION = "alignment-v1"
 
@@ -174,18 +179,14 @@ class PrismKEService:
             raise ValueError("operator is required")
         invalid_values = set(values) - EDITABLE_FIELDS
         if invalid_values:
-            raise ValueError(
-                "unsupported runtime settings: " + ", ".join(sorted(invalid_values))
-            )
+            raise ValueError("unsupported runtime settings: " + ", ".join(sorted(invalid_values)))
         invalid_clear = set(clear_secrets) - SECRET_FIELDS
         if invalid_clear:
             raise ValueError("only secret fields can be cleared")
         conflicting_secrets = {
             field
             for field in clear_secrets
-            if field in values
-            and values[field] is not None
-            and str(values[field]).strip()
+            if field in values and values[field] is not None and str(values[field]).strip()
         }
         if conflicting_secrets:
             raise ValueError(
@@ -548,9 +549,11 @@ class PrismKEService:
 
     def missing_run_credentials(self, state: WorkflowState) -> bool:
         credentials = self._credentials(state.run_id)
-        needs_llm = state.provider_name == "openai-compatible" or (
-            state.reflection_enabled and state.reflection_provider_name == "openai-compatible"
-        ) or state.semantic_advisor_name == "openai-compatible"
+        needs_llm = (
+            state.provider_name == "openai-compatible"
+            or (state.reflection_enabled and state.reflection_provider_name == "openai-compatible")
+            or state.semantic_advisor_name == "openai-compatible"
+        )
         needs_vlm = state.vlm_provider_name == "openai-compatible"
         return bool(
             (needs_llm and not (credentials.llm_api_key or self.settings.llm_api_key))
@@ -917,6 +920,31 @@ class PrismKEService:
                 derived_dir=self.settings.derived_documents_dir,
                 libreoffice_bin=self.settings.libreoffice_bin,
                 conversion_timeout_seconds=self.settings.document_conversion_timeout_seconds,
+                pdf_parse_mode=(
+                    state.pdf_parse_mode
+                    if state is not None
+                    else PDFParseMode(self.settings.pdf_parse_mode)
+                ),
+                pdf_thresholds=PDFComplexityThresholds(
+                    no_text_ratio=self.settings.pdf_no_text_ratio,
+                    short_text_chars=self.settings.pdf_short_text_chars,
+                    short_text_ratio=self.settings.pdf_short_text_ratio,
+                    table_ratio=self.settings.pdf_table_ratio,
+                    drawing_count=self.settings.pdf_drawing_count,
+                    drawing_ratio=self.settings.pdf_drawing_ratio,
+                    multicolumn_ratio=self.settings.pdf_multicolumn_ratio,
+                ),
+                mineru_client=MinerUV1Client(
+                    self.settings.mineru_base_url,
+                    self.settings.derived_documents_dir,
+                    version=self.settings.mineru_version,
+                    tier=self.settings.mineru_tier,
+                    request_timeout=self.settings.mineru_request_timeout,
+                    transfer_timeout=self.settings.mineru_transfer_timeout,
+                    poll_interval=self.settings.mineru_poll_interval,
+                    max_polls=self.settings.mineru_max_polls,
+                ),
+                pdf_fallback_approved=(state.pdf_parser_fallback_approved if state else False),
             ),
             embedding_provider=self.embedding_provider(),
             entity_top_k=self.settings.entity_top_k,
@@ -956,6 +984,7 @@ class PrismKEService:
         entity_source_mode: EntitySourceMode = EntitySourceMode.AUTO,
         provided_entities: list[ProvidedEntity] | None = None,
         batch_id: str | None = None,
+        pdf_parse_mode: PDFParseMode | str | None = None,
     ) -> WorkflowState:
         state, created = self.create_run(
             input_path,
@@ -981,6 +1010,7 @@ class PrismKEService:
             entity_source_mode,
             provided_entities,
             batch_id,
+            pdf_parse_mode,
         )
         if not created:
             return state
@@ -1011,6 +1041,7 @@ class PrismKEService:
         entity_source_mode: EntitySourceMode = EntitySourceMode.AUTO,
         provided_entities: list[ProvidedEntity] | None = None,
         batch_id: str | None = None,
+        pdf_parse_mode: PDFParseMode | str | None = None,
     ) -> tuple[WorkflowState, bool]:
         """Validate a request and persist its initial state without executing it."""
         self.executions.ensure_accepting()
@@ -1020,6 +1051,7 @@ class PrismKEService:
         schema_path = schema_path.resolve()
         runtime_credentials = credentials or TransientProviderCredentials()
         provided_entities = provided_entities or []
+        resolved_pdf_mode = PDFParseMode(pdf_parse_mode or self.settings.pdf_parse_mode)
         if task_mode != TaskMode.RELATION_EXTRACTION:
             entity_source_mode = EntitySourceMode.AUTO
             provided_entities = []
@@ -1030,9 +1062,7 @@ class PrismKEService:
         resolved_vlm_base = (vlm_base_url or self.settings.vlm_base_url).strip()
         resolved_vlm_model = (vlm_model or self.settings.vlm_model or "").strip() or None
         custom_llm = bool(
-            llm_base_url is not None
-            or llm_model is not None
-            or runtime_credentials.llm_api_key
+            llm_base_url is not None or llm_model is not None or runtime_credentials.llm_api_key
         )
         provider = (
             self._llm_provider(
@@ -1046,9 +1076,7 @@ class PrismKEService:
         )
         ocr_provider = self.ocr_provider(ocr_provider_name)
         custom_vlm = bool(
-            vlm_base_url is not None
-            or vlm_model is not None
-            or runtime_credentials.vlm_api_key
+            vlm_base_url is not None or vlm_model is not None or runtime_credentials.vlm_api_key
         )
         vlm_provider = (
             self._vlm_provider(
@@ -1110,6 +1138,26 @@ class PrismKEService:
         case_snapshot = retriever.fingerprint_for(case_snapshot_ids) if retriever else "cases:none"
         schema = load_schema(schema_path)
         schema_fingerprint = canonical_hash(schema.model_dump(mode="json"))
+        pdf_parser_config_fingerprint = canonical_hash(
+            {
+                "mode": resolved_pdf_mode,
+                "thresholds": {
+                    "no_text_ratio": self.settings.pdf_no_text_ratio,
+                    "short_text_chars": self.settings.pdf_short_text_chars,
+                    "short_text_ratio": self.settings.pdf_short_text_ratio,
+                    "table_ratio": self.settings.pdf_table_ratio,
+                    "drawing_count": self.settings.pdf_drawing_count,
+                    "drawing_ratio": self.settings.pdf_drawing_ratio,
+                    "multicolumn_ratio": self.settings.pdf_multicolumn_ratio,
+                },
+                "mineru": MinerUV1Client(
+                    self.settings.mineru_base_url,
+                    self.settings.derived_documents_dir,
+                    version=self.settings.mineru_version,
+                    tier=self.settings.mineru_tier,
+                ).fingerprint(),
+            }
+        )
         run_id = stable_id(
             "run",
             file_sha256(input_path),
@@ -1144,6 +1192,17 @@ class PrismKEService:
             entity_source_mode,
             *(item.model_dump_json() for item in provided_entities),
             batch_id or "single",
+            resolved_pdf_mode,
+            pdf_parser_config_fingerprint,
+            self.settings.pdf_no_text_ratio,
+            self.settings.pdf_short_text_chars,
+            self.settings.pdf_short_text_ratio,
+            self.settings.pdf_table_ratio,
+            self.settings.pdf_drawing_count,
+            self.settings.pdf_drawing_ratio,
+            self.settings.pdf_multicolumn_ratio,
+            self.settings.mineru_version,
+            self.settings.mineru_tier,
             PIPELINE_VERSION,
         )
         if self.runs.exists(run_id):
@@ -1154,6 +1213,7 @@ class PrismKEService:
         state = WorkflowState(
             run_id=run_id,
             batch_id=batch_id,
+            pdf_parse_mode=resolved_pdf_mode,
             input_path=str(input_path),
             schema_path=str(schema_path),
             task_mode=task_mode,
@@ -1224,6 +1284,110 @@ class PrismKEService:
 
     def show_run(self, run_id: str) -> WorkflowState:
         return self.runs.load(run_id)
+
+    async def pdf_parser_status(self) -> dict[str, Any]:
+        client = MinerUV1Client(
+            self.settings.mineru_base_url,
+            self.settings.derived_documents_dir,
+            version=self.settings.mineru_version,
+            tier=self.settings.mineru_tier,
+            request_timeout=self.settings.mineru_request_timeout,
+        )
+        mineru = await client.status()
+        return {
+            "default_mode": self.settings.pdf_parse_mode,
+            "pymupdf": {"available": True},
+            "mineru": mineru,
+        }
+
+    def pdf_parse_view(self, run_id: str) -> dict[str, Any]:
+        state = self.show_run(run_id)
+        return {
+            "run_id": run_id,
+            "mode": state.pdf_parse_mode,
+            "decision": state.pdf_parse_decision,
+            "fallback_approved": state.pdf_parser_fallback_approved,
+            "fallback_events": self.executions.repository.pdf_fallbacks(run_id),
+            "execution": self.executions.view(run_id),
+        }
+
+    def approve_pdf_parser_fallback(
+        self,
+        run_id: str,
+        operator: str,
+        reason: str,
+        request_id: str,
+        expected_execution_version: int,
+    ) -> dict[str, Any]:
+        normalized_operator = operator.strip()
+        normalized_reason = reason.strip()
+        normalized_request_id = request_id.strip()
+        if not normalized_operator or not normalized_reason or not normalized_request_id:
+            raise ValueError("PDF_FALLBACK_IDENTITY_REQUIRED")
+        previous = next(
+            (
+                event
+                for event in self.executions.repository.pdf_fallbacks(run_id)
+                if event.request_id == normalized_request_id
+            ),
+            None,
+        )
+        if previous is not None:
+            if (
+                previous.operator != normalized_operator
+                or previous.reason != normalized_reason
+                or previous.expected_execution_version != expected_execution_version
+            ):
+                raise ValueError("REQUEST_ID_REUSED")
+            task = self.executions.repository.get(run_id)
+            if task is None:
+                raise ValueError("EXECUTION_NOT_REGISTERED")
+            return {
+                "event": previous.model_dump(mode="json"),
+                "execution": self.executions.view(run_id),
+                "version": task.version,
+            }
+        state = self.show_run(run_id)
+        if state.pdf_parse_mode != PDFParseMode.AUTO:
+            raise ValueError("PDF_FALLBACK_FORCED_MINERU_FORBIDDEN")
+        if (
+            state.status != "parser_blocked"
+            or state.pdf_parse_decision is None
+            or state.pdf_parse_decision.actual_parser != PDFParserName.MINERU
+        ):
+            raise ValueError("PDF_FALLBACK_NOT_AVAILABLE")
+        event, task = self.executions.repository.record_pdf_fallback(
+            PDFParserFallbackEvent(
+                run_id=run_id,
+                operator=normalized_operator,
+                reason=normalized_reason,
+                request_id=normalized_request_id,
+                expected_execution_version=expected_execution_version,
+            )
+        )
+        if not state.pdf_parser_fallback_approved:
+            state.pdf_parser_fallback_approved = True
+            state.pdf_parser_fallback_event_id = stable_id("pdf-fallback", run_id, event.request_id)
+            state.status = "running"
+            state.failed_node = None
+            self.runs.save(state)
+            task = self.executions.enqueue(run_id, "resume", expected_version=task.version)
+        self.audit.record(
+            "pdf_parser_fallback",
+            run_id,
+            {
+                "event_id": state.pdf_parser_fallback_event_id,
+                "operator": event.operator,
+                "reason": event.reason,
+                "from_parser": event.from_parser,
+                "to_parser": event.to_parser,
+            },
+        )
+        return {
+            "event": event.model_dump(mode="json"),
+            "execution": self.executions.view(run_id),
+            "version": task.version,
+        }
 
     def run_result(self, run_id: str) -> TaskExtractionResult:
         state = self.show_run(run_id)
@@ -1296,9 +1460,7 @@ class PrismKEService:
             )
             result.version += 1
             state.extraction_result = result
-            latest_decisions = {
-                event.target_id: event.decision for event in result.review_events
-            }
+            latest_decisions = {event.target_id: event.decision for event in result.review_events}
             pending_review_ids = {
                 target_id
                 for target_id in result.review_required_ids
@@ -1349,6 +1511,7 @@ class PrismKEService:
         vlm_base_url: str | None = None,
         vlm_model: str | None = None,
         credentials: TransientProviderCredentials | None = None,
+        pdf_parse_mode: PDFParseMode | str | None = None,
     ) -> tuple[BatchRun, bool]:
         if not documents:
             raise ValueError("BATCH_EMPTY")
@@ -1392,6 +1555,7 @@ class PrismKEService:
             llm_model,
             vlm_base_url,
             vlm_model,
+            PDFParseMode(pdf_parse_mode or self.settings.pdf_parse_mode),
             *(item.model_dump_json() for item in provided_entities or []),
             *[f"{name}:{digest}" for name, digest in zip(filenames, hashes, strict=True)],
         )
@@ -1403,6 +1567,7 @@ class PrismKEService:
             entity_source_mode=entity_source_mode,
             schema_path=str(schema_path.resolve()),
             operator=operator,
+            pdf_parse_mode=PDFParseMode(pdf_parse_mode or self.settings.pdf_parse_mode),
         )
         first_by_hash: dict[str, BatchItem] = {}
         for index, (path, filename, digest, size) in enumerate(
@@ -1446,6 +1611,7 @@ class PrismKEService:
                 entity_source_mode=entity_source_mode,
                 provided_entities=provided_entities,
                 batch_id=batch_id,
+                pdf_parse_mode=pdf_parse_mode,
             )
             item.run_id = state.run_id
             item.status = BatchItemStatus.QUEUED if created else BatchItemStatus.REUSED
@@ -1466,7 +1632,10 @@ class PrismKEService:
                 continue
             state = self.show_run(item.run_id)
             execution = self.executions.view(item.run_id)
-            if state.status == "failed" or execution["status"] == "failed":
+            if state.status in {"failed", "parser_blocked"} or execution["status"] in {
+                "failed",
+                "parser_blocked",
+            }:
                 item.status = BatchItemStatus.FAILED
                 item.failure_code = execution.get("error_code") or state.failed_node
                 item.failure_reason = state.errors[-1] if state.errors else None
@@ -1481,9 +1650,7 @@ class PrismKEService:
             else:
                 item.status = BatchItemStatus.RUNNING
             statuses.append(item.status)
-        active_statuses = [
-            status for status in statuses if status != BatchItemStatus.EXCLUDED
-        ]
+        active_statuses = [status for status in statuses if status != BatchItemStatus.EXCLUDED]
         cross_document_blocked = any(
             error.startswith("cross_document_conflict:") for error in batch.errors
         )
@@ -1605,11 +1772,7 @@ class PrismKEService:
             [
                 claim.model_copy(
                     deep=True,
-                    update={
-                        "source_run_ids": sorted(
-                            set([*claim.source_run_ids, state.run_id])
-                        )
-                    },
+                    update={"source_run_ids": sorted(set([*claim.source_run_ids, state.run_id]))},
                 )
                 for state in states.values()
                 for claim in state.claims
@@ -1628,15 +1791,11 @@ class PrismKEService:
         if cross_document_conflicts:
             batch.status = BatchStatus.BLOCKED
             batch.errors = [
-                f"cross_document_conflict:{conflict.id}"
-                for conflict in cross_document_conflicts
+                f"cross_document_conflict:{conflict.id}" for conflict in cross_document_conflicts
             ]
             self.batches.save(batch)
             raise ValueError("BATCH_CROSS_DOCUMENT_CONFLICT")
-        claims = {
-            claim.id: claim
-            for claim in merged_claims
-        }
+        claims = {claim.id: claim for claim in merged_claims}
         if not claims:
             raise ValueError("BATCH_NO_APPROVED_CLAIMS")
         referenced_entities = {
@@ -1660,8 +1819,7 @@ class PrismKEService:
         documents = {
             state.document.id: GraphDocument(
                 id=state.document.id,
-                filename=state.document.source_filename
-                or Path(state.document.source_path).name,
+                filename=state.document.source_filename or Path(state.document.source_path).name,
                 content_hash=state.document.source_hash,
                 media_type=state.document.media_type,
             )
@@ -1679,9 +1837,7 @@ class PrismKEService:
             if item.id in evidence_ids
         }
         existing_claims = {claim.id: claim for claim in await self.graph_store.list_claims()}
-        existing_entities = {
-            entity.id: entity for entity in await self.graph_store.list_entities()
-        }
+        existing_entities = {entity.id: entity for entity in await self.graph_store.list_entities()}
         parent = await self.graph_store.latest_revision()
         changes = [
             GraphChange(

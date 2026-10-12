@@ -202,9 +202,7 @@ class OpenAICompatibleLLMProvider:
             context = blocks_by_evidence.get(evidence_id)
             entities.append(
                 EntityMention(
-                    id=stable_id(
-                        "mention", request.document.id, evidence_id, name, entity_type
-                    ),
+                    id=stable_id("mention", request.document.id, evidence_id, name, entity_type),
                     name=name,
                     entity_type=entity_type,
                     context=context.text if context else "",

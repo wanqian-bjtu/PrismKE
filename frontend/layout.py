@@ -99,8 +99,4 @@ def build_brand_header(gr: Any, version: str) -> None:
 
 def page_header(gr: Any, page_id: str) -> None:
     title, description = PAGE_META[page_id]
-    gr.HTML(
-        '<header class="workspace-page-header">'
-        f"<h1>{title}</h1><p>{description}</p>"
-        "</header>"
-    )
+    gr.HTML(f'<header class="workspace-page-header"><h1>{title}</h1><p>{description}</p></header>')

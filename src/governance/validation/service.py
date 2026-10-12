@@ -416,9 +416,7 @@ class ValidationService:
                     )
                 )
             else:
-                role_index = {
-                    normalize_label(role.id): role for role in event_definition.roles
-                }
+                role_index = {normalize_label(role.id): role for role in event_definition.roles}
                 present_roles = {normalize_label(argument.role) for argument in event.arguments}
                 missing = {
                     role.id

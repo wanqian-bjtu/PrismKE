@@ -12,6 +12,7 @@ ExecutionStatus = Literal[
     "cancelled",
     "interrupted",
     "failed",
+    "parser_blocked",
     "awaiting_review",
     "awaiting_commit",
     "completed",

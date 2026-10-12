@@ -111,6 +111,21 @@ class FileEvidenceStore:
             if not derived.is_file() or file_sha256(derived) != derivation.derived_hash:
                 raise EvidenceIntegrityError("derived document hash mismatch")
             self._store_blob(derived, derivation.derived_hash)
+            if derivation.artifact_manifest_hash:
+                manifest = derived.parent / "manifest.json"
+                if (
+                    not manifest.is_file()
+                    or file_sha256(manifest) != derivation.artifact_manifest_hash
+                ):
+                    raise EvidenceIntegrityError("derived artifact manifest mismatch")
+                self._store_blob(manifest, derivation.artifact_manifest_hash)
+            for relative_path, expected_hash in derivation.artifact_hashes.items():
+                artifact = (derived.parent / relative_path).resolve()
+                if derived.parent.resolve() not in artifact.parents:
+                    raise EvidenceIntegrityError("derived artifact escapes its package")
+                if not artifact.is_file() or file_sha256(artifact) != expected_hash:
+                    raise EvidenceIntegrityError("derived artifact hash mismatch")
+                self._store_blob(artifact, expected_hash)
         for asset in document.media_assets:
             asset_path = Path(asset.path)
             if not asset_path.is_file():
@@ -212,6 +227,106 @@ class FileEvidenceStore:
                 value = _json_path_value(payload, evidence.json_path)
                 if canonical_hash(value) != evidence.json_value_hash:
                     return False
+            if evidence.coordinate_space == CoordinateSpace.PDF_POINTS:
+                if evidence.page_number is None or evidence.bbox is None:
+                    return False
+                content = await self.get_blob(evidence.source_hash)
+                with pymupdf.open(stream=content, filetype="pdf") as pdf:  # type: ignore[no-untyped-call]
+                    if not 1 <= evidence.page_number <= len(pdf):
+                        return False
+                    page = pdf[evidence.page_number - 1]
+                    if evidence.canvas_width and abs(page.rect.width - evidence.canvas_width) > 0.5:
+                        return False
+                    if (
+                        evidence.canvas_height
+                        and abs(page.rect.height - evidence.canvas_height) > 0.5
+                    ):
+                        return False
+                    box = evidence.bbox
+                    if (
+                        box.x0 < 0
+                        or box.y0 < 0
+                        or box.x1 > page.rect.width
+                        or box.y1 > page.rect.height
+                    ):
+                        return False
+            if evidence.derivation_id:
+                locator = evidence.source_locator
+                if not isinstance(locator, dict) or locator.get("schema") != "docvortex.middle":
+                    return False
+                derived_hash = locator.get("derived_hash")
+                if not isinstance(derived_hash, str):
+                    return False
+                derived = orjson.loads(await self.get_blob(derived_hash))
+                if (
+                    not isinstance(derived, dict)
+                    or derived.get("schema") != "docvortex.middle"
+                    or derived.get("schema_version") != "2.0"
+                    or derived.get("is_full_document") is not True
+                ):
+                    return False
+                metadata = derived.get("metadata")
+                extensions = derived.get("extensions")
+                if (
+                    not isinstance(metadata, dict)
+                    or not isinstance(metadata.get("producer"), dict)
+                    or metadata["producer"].get("name") != "mineru"
+                    or not isinstance(extensions, dict)
+                    or not isinstance(extensions.get("mineru"), dict)
+                    or extensions["mineru"].get("tier") != "standard"
+                ):
+                    return False
+                page_idx = locator.get("page_idx")
+                block_index = locator.get("block_index")
+                if not isinstance(page_idx, int) or not isinstance(block_index, int):
+                    return False
+                if evidence.page_number != page_idx + 1:
+                    return False
+                pages = derived.get("pages")
+                if not isinstance(pages, list):
+                    return False
+                page = next(
+                    (
+                        item
+                        for item in pages
+                        if isinstance(item, dict) and item.get("page_idx") == page_idx
+                    ),
+                    None,
+                )
+                if not isinstance(page, dict) or not isinstance(page.get("blocks"), list):
+                    return False
+                if not 0 <= block_index < len(page["blocks"]):
+                    return False
+                block = page["blocks"][block_index]
+                if (
+                    not isinstance(block, dict)
+                    or locator.get("block_hash") != canonical_hash(block)
+                    or locator.get("block_type") != str(block.get("type", "text")).lower()
+                ):
+                    return False
+                block_bbox = block.get("bbox")
+                if evidence.bbox is not None:
+                    if not isinstance(block_bbox, list) or len(block_bbox) != 4:
+                        return False
+                    if any(
+                        abs(float(actual) - expected) > 0.001
+                        for actual, expected in zip(
+                            block_bbox,
+                            (
+                                evidence.bbox.x0,
+                                evidence.bbox.y0,
+                                evidence.bbox.x1,
+                                evidence.bbox.y1,
+                            ),
+                            strict=True,
+                        )
+                    ):
+                        return False
+                asset_hash = locator.get("asset_hash")
+                if asset_hash is not None:
+                    if not isinstance(asset_hash, str):
+                        return False
+                    await self.get_blob(asset_hash)
         except (
             EvidenceIntegrityError,
             FileNotFoundError,

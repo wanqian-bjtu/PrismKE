@@ -48,7 +48,9 @@ def workspace_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     )
     base_url = f"http://127.0.0.1:{port}"
     try:
-        deadline = time.monotonic() + 30
+        # A fresh environment may spend more than 30 seconds importing Paddle
+        # before Gradio is ready, especially on CPU-only Windows runners.
+        deadline = time.monotonic() + 90
         while time.monotonic() < deadline:
             try:
                 if httpx.get(f"{base_url}/api/v1/health", timeout=0.5).status_code == 200:
@@ -163,9 +165,9 @@ def test_workspace_navigation_branding_and_responsive_layout(
             resizer.press("ArrowRight")
             after = sidebar.bounding_box()
             assert before and after and after["width"] > before["width"]
-            assert page.evaluate(
-                "localStorage.getItem('prismke.workspace.sidebar.width')"
-            ) is not None
+            assert (
+                page.evaluate("localStorage.getItem('prismke.workspace.sidebar.width')") is not None
+            )
 
         overflow = page.evaluate("document.documentElement.scrollWidth - window.innerWidth")
         assert overflow <= 1

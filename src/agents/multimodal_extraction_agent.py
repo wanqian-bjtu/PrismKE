@@ -67,8 +67,7 @@ class MultimodalExtractionAgent:
                     local_end = provided.char_end - block.char_start
                     if (
                         0 <= local_start < local_end <= len(block.text)
-                        and block.text[local_start:local_end].casefold()
-                        == provided.name.casefold()
+                        and block.text[local_start:local_end].casefold() == provided.name.casefold()
                     ):
                         matches.append(
                             (block.evidence_id, provided.char_start, provided.char_end, block.text)
@@ -102,9 +101,7 @@ class MultimodalExtractionAgent:
             is_ambiguous = len(matches) > 1
             if is_ambiguous:
                 state.extraction_review_required_ids.append(mention_id)
-                state.warnings.append(
-                    f"provided_entity_ambiguous:{mention_id}:{len(matches)}"
-                )
+                state.warnings.append(f"provided_entity_ambiguous:{mention_id}:{len(matches)}")
             grounded.append(
                 EntityMention(
                     id=mention_id,
@@ -231,9 +228,10 @@ class MultimodalExtractionAgent:
                 obj = candidate.object
                 if (subject.name.casefold(), subject.entity_type.casefold()) not in allowed:
                     return False
-                return not isinstance(obj, EntityMention) or (
-                    obj.name.casefold(), obj.entity_type.casefold()
-                ) in allowed
+                return (
+                    not isinstance(obj, EntityMention)
+                    or (obj.name.casefold(), obj.entity_type.casefold()) in allowed
+                )
 
             result.candidates = [item for item in result.candidates if permitted(item)]
         if state.task_mode == TaskMode.ENTITY_EXTRACTION:
@@ -381,9 +379,7 @@ class MultimodalExtractionAgent:
             "align_modalities",
             "candidates_handed_off",
             tools=("modality_alignment",),
-            input_ids=tuple(
-                item.id for item in [*state.text_candidates, *state.visual_candidates]
-            ),
+            input_ids=tuple(item.id for item in [*state.text_candidates, *state.visual_candidates]),
             output_ids=tuple(item.id for item in state.candidates),
         )
         handoff(

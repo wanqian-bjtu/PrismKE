@@ -11,9 +11,7 @@ from src.workflow import PrismKEService
 
 
 @pytest.mark.asyncio
-async def test_evaluation_manifest_reports_claim_metrics(
-    tmp_path: Path, schema_path: Path
-) -> None:
+async def test_evaluation_manifest_reports_claim_metrics(tmp_path: Path, schema_path: Path) -> None:
     sample = tmp_path / "sample.md"
     sample.write_text(
         "PrismKE | developed_by | OpenAI | Software | Organization | 0.92\n",
@@ -61,9 +59,7 @@ async def test_evaluation_manifest_reports_claim_metrics(
 
 
 @pytest.mark.asyncio
-async def test_evaluation_keeps_case_failures_isolated(
-    tmp_path: Path, schema_path: Path
-) -> None:
+async def test_evaluation_keeps_case_failures_isolated(tmp_path: Path, schema_path: Path) -> None:
     valid = tmp_path / "valid.md"
     valid.write_text("no mock claims", encoding="utf-8")
     manifest = tmp_path / "manifest.json"
@@ -110,9 +106,7 @@ async def test_evaluation_redacts_provider_keys(
         ),
         encoding="utf-8",
     )
-    service = PrismKEService(
-        Settings(runtime_dir=tmp_path / "runtime", llm_api_key=secret)
-    )
+    service = PrismKEService(Settings(runtime_dir=tmp_path / "runtime", llm_api_key=secret))
 
     async def fail(*args: object, **kwargs: object) -> object:
         raise RuntimeError(f"request failed with {secret}")

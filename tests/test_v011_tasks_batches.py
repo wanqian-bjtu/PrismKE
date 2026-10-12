@@ -88,8 +88,7 @@ async def test_provided_entity_is_grounded_and_ambiguous_match_requires_review(
 ) -> None:
     source = tmp_path / "ambiguous.txt"
     source.write_text(
-        "PrismKE | developed_by | OpenAI | Software | Organization | 0.92\n"
-        "PrismKE is auditable.\n",
+        "PrismKE | developed_by | OpenAI | Software | Organization | 0.92\nPrismKE is auditable.\n",
         encoding="utf-8",
     )
     service = PrismKEService(Settings(_env_file=None, runtime_dir=tmp_path / "runtime"))
@@ -143,9 +142,7 @@ async def test_missing_provided_entity_fails_before_model_call(
                 "mock",
                 task_mode=TaskMode.RELATION_EXTRACTION,
                 entity_source_mode=EntitySourceMode.PROVIDED,
-                provided_entities=[
-                    ProvidedEntity(name="Missing", entity_type="Software")
-                ],
+                provided_entities=[ProvidedEntity(name="Missing", entity_type="Software")],
             )
         task_files = list((tmp_path / "runtime" / "requests").rglob("*.json"))
         assert task_files == []
@@ -176,9 +173,7 @@ async def test_json_parser_emits_verifiable_jsonpath_evidence(tmp_path: Path) ->
         encoding="utf-8",
     )
     runtime = tmp_path / "runtime"
-    document = await ParserRegistry(asset_dir=runtime / "assets").parse(
-        SourceDocument(path=source)
-    )
+    document = await ParserRegistry(asset_dir=runtime / "assets").parse(SourceDocument(path=source))
     assert [item.json_path for item in document.evidence] == [
         "$.name",
         "$.items[0].year",
@@ -218,9 +213,7 @@ async def test_supported_document_parsers_cover_v011_formats(tmp_path: Path) -> 
         ("bmp", "BMP"),
     ]
     for suffix, image_format in image_formats:
-        Image.new("RGB", (96, 96), "white").save(
-            tmp_path / f"sample.{suffix}", format=image_format
-        )
+        Image.new("RGB", (96, 96), "white").save(tmp_path / f"sample.{suffix}", format=image_format)
     registry = ParserRegistry(asset_dir=tmp_path / "assets")
     for source in sorted(tmp_path.glob("sample.*")):
         parsed = await registry.parse(SourceDocument(path=source))
