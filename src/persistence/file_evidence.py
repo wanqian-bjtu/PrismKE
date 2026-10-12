@@ -308,10 +308,27 @@ class FileEvidenceStore:
                 if evidence.bbox is not None:
                     if not isinstance(block_bbox, list) or len(block_bbox) != 4:
                         return False
+                    expected_bbox = tuple(float(value) for value in block_bbox)
+                    encoding = locator.get("bbox_encoding")
+                    if encoding == "normalized":
+                        if (
+                            evidence.canvas_width is None
+                            or evidence.canvas_height is None
+                            or any(value < 0 or value > 1 for value in expected_bbox)
+                        ):
+                            return False
+                        expected_bbox = (
+                            expected_bbox[0] * evidence.canvas_width,
+                            expected_bbox[1] * evidence.canvas_height,
+                            expected_bbox[2] * evidence.canvas_width,
+                            expected_bbox[3] * evidence.canvas_height,
+                        )
+                    elif encoding != "pdf_points":
+                        return False
                     if any(
                         abs(float(actual) - expected) > 0.001
                         for actual, expected in zip(
-                            block_bbox,
+                            expected_bbox,
                             (
                                 evidence.bbox.x0,
                                 evidence.bbox.y0,

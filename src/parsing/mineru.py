@@ -398,26 +398,64 @@ def _resolve_asset(package: Path, reference: str) -> Path:
     return matches[0]
 
 
-def _bbox(block: dict[str, Any]) -> BBox | None:
+def _bbox(
+    block: dict[str, Any], canvas_width: float, canvas_height: float
+) -> tuple[BBox | None, str | None]:
     value = block.get("bbox")
     if isinstance(value, dict):
         values = [value.get(key) for key in ("x0", "y0", "x1", "y1")]
     elif isinstance(value, list) and len(value) == 4:
         values = value
     else:
-        return None
+        return None, None
     if any(item is None for item in values):
         raise MinerUEvidenceError("invalid MiddleJson bbox")
     numeric_values = cast(list[Any], values)
     try:
+        coordinates = tuple(float(item) for item in numeric_values)
+        if all(0.0 <= item <= 1.0 for item in coordinates):
+            return (
+                BBox(
+                    x0=coordinates[0] * canvas_width,
+                    y0=coordinates[1] * canvas_height,
+                    x1=coordinates[2] * canvas_width,
+                    y1=coordinates[3] * canvas_height,
+                ),
+                "normalized",
+            )
         return BBox(
-            x0=float(numeric_values[0]),
-            y0=float(numeric_values[1]),
-            x1=float(numeric_values[2]),
-            y1=float(numeric_values[3]),
-        )
+            x0=coordinates[0],
+            y0=coordinates[1],
+            x1=coordinates[2],
+            y1=coordinates[3],
+        ), "pdf_points"
     except (TypeError, ValueError) as exc:
         raise MinerUEvidenceError("invalid MiddleJson bbox") from exc
+
+
+def _block_asset_references(
+    package: Path,
+    block: dict[str, Any],
+    *,
+    page_idx: int,
+    block_position: int,
+    block_type: str,
+) -> list[str]:
+    references = _asset_references(block)
+    if references:
+        return references
+    if block_type not in {"table", "chart", "image", "figure", "equation", "formula"}:
+        return []
+    raw_index = block.get("index", block_position)
+    if not isinstance(raw_index, int) or raw_index < 0:
+        raise MinerUEvidenceError("invalid MinerU block index for derived asset")
+    images = package / "images"
+    matches = sorted(images.glob(f"page_{page_idx}_{block_type}_{raw_index}.*"))
+    if len(matches) > 1:
+        raise MinerUEvidenceError("MinerU block has ambiguous derived assets")
+    if not matches:
+        return []
+    return [str(matches[0].relative_to(package)).replace("\\", "/")]
 
 
 def _layout_sizes(payload: dict[str, Any]) -> dict[int, tuple[float, float]]:
@@ -495,7 +533,7 @@ def convert_mineru_document(
                 continue
             block_type = str(raw_block.get("type", "text")).lower()
             text = _block_text(raw_block)
-            bbox = _bbox(raw_block)
+            bbox, bbox_encoding = _bbox(raw_block, width, height)
             if bbox and (bbox.x1 > width or bbox.y1 > height):
                 raise MinerUEvidenceError("MiddleJson bbox exceeds page canvas")
             locator = {
@@ -506,6 +544,7 @@ def convert_mineru_document(
                 "block_index": block_position,
                 "block_type": block_type,
                 "block_hash": canonical_hash(raw_block),
+                "bbox_encoding": bbox_encoding,
             }
             if "table" in block_type:
                 modality = Modality.TABLE
@@ -555,7 +594,13 @@ def convert_mineru_document(
                     )
                 )
                 page_block_ids.append(block_id)
-            references = _asset_references(raw_block)
+            references = _block_asset_references(
+                artifacts.directory / "package",
+                raw_block,
+                page_idx=page_idx,
+                block_position=block_position,
+                block_type=block_type,
+            )
             for reference in references:
                 if bbox is None:
                     raise MinerUEvidenceError("MinerU visual asset has no source bbox")

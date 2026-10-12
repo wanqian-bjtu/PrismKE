@@ -63,12 +63,12 @@ def _middle_json() -> bytes:
                     "blocks": [
                         {
                             "type": "text",
-                            "bbox": [10, 10, 190, 35],
+                            "bbox": [0.05, 0.033333, 0.95, 0.116667],
                             "content": "Auditable PDF evidence",
                         },
                         {
                             "type": "table",
-                            "bbox": [10, 45, 190, 120],
+                            "bbox": [0.05, 0.15, 0.95, 0.4],
                             "content": [
                                 {"content": "Metric | Value"},
                                 {
@@ -80,12 +80,12 @@ def _middle_json() -> bytes:
                         },
                         {
                             "type": "formula",
-                            "bbox": [10, 130, 190, 160],
+                            "bbox": [0.05, 0.433333, 0.95, 0.533333],
                             "content": "E = mc^2",
                         },
                         {
                             "type": "image",
-                            "bbox": [10, 170, 190, 280],
+                            "bbox": [0.05, 0.566667, 0.95, 0.933333],
                             "content": [{"src": "figure.png"}],
                         },
                     ],
@@ -100,6 +100,7 @@ def _package_zip() -> bytes:
     with zipfile.ZipFile(target, "w") as archive:
         archive.writestr("images/table.png", b"table-image")
         archive.writestr("images/figure.png", b"figure-image")
+        archive.writestr("images/page_0_formula_2.jpg", b"formula-image")
     return target.getvalue()
 
 
@@ -309,6 +310,8 @@ async def test_mineru_v1_lifecycle_resume_and_evidence_integrity(tmp_path: Path)
     assert all(ref.source_hash == file_sha256(source) for ref in document.evidence)
     assert all(ref.derivation_id for ref in document.evidence)
     assert all(ref.source_locator for ref in document.evidence)
+    assert all(ref.bbox is None or ref.bbox.x1 > 1 for ref in document.evidence)
+    assert "mineru_formula" in {asset.origin for asset in document.media_assets}
 
     store = FileEvidenceStore(tmp_path / "evidence")
     await store.put_document(document)
