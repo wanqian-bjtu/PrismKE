@@ -9,7 +9,7 @@ from typing import Any
 
 import orjson
 import pymupdf
-from src.core.hashing import file_sha256
+from src.core.ids import file_sha256
 
 from src.domain import PDFParseDecision, PDFParseMode, PDFParserName, SourceDocument
 from src.domain.pdf import PDFComplexityThresholds
