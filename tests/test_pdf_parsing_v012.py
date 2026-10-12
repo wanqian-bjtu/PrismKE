@@ -247,8 +247,16 @@ def test_complexity_report_detects_table_and_multicolumn(tmp_path: Path) -> None
 async def test_auto_blocks_when_mineru_is_unavailable(tmp_path: Path) -> None:
     source = tmp_path / "scan.pdf"
     _pdf(source)
+    unavailable = MinerUV1Client(
+        "http://127.0.0.1:1",
+        tmp_path / "unavailable-derived",
+        request_timeout=0.1,
+    )
     with pytest.raises(MinerUUnavailableError) as caught:
-        await ParserRegistry(pdf_parse_mode=PDFParseMode.AUTO).parse(SourceDocument(path=source))
+        await ParserRegistry(
+            pdf_parse_mode=PDFParseMode.AUTO,
+            mineru_client=unavailable,
+        ).parse(SourceDocument(path=source))
     assert caught.value.code == "MINERU_UNAVAILABLE"
     assert caught.value.decision.actual_parser == PDFParserName.MINERU
     assert caught.value.decision.mineru_status == "unavailable"
