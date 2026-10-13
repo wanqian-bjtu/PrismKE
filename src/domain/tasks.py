@@ -10,6 +10,12 @@ from pydantic import BaseModel, Field, model_validator
 
 from src.domain.documents import EvidenceRef
 from src.domain.knowledge import CandidateClaim, CanonicalEntity, EntityMention, utc_now
+from src.domain.media import (
+    CandidateMediaRelation,
+    CandidateVisualAssertion,
+    GraphMediaContent,
+    GraphMediaOccurrence,
+)
 from src.domain.validation import ValidationIssue
 
 
@@ -106,4 +112,9 @@ class TaskExtractionResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     review_required_ids: list[str] = Field(default_factory=list)
     review_events: list[ExtractionReviewEvent] = Field(default_factory=list)
+    media_contents: list[GraphMediaContent] = Field(default_factory=list)
+    media_occurrences: list[GraphMediaOccurrence] = Field(default_factory=list)
+    candidate_media_relations: list[CandidateMediaRelation] = Field(default_factory=list)
+    candidate_visual_assertions: list[CandidateVisualAssertion] = Field(default_factory=list)
+    visual_review_required_ids: list[str] = Field(default_factory=list)
     version: int = 0

@@ -23,6 +23,7 @@ from src.domain import (
     load_schema,
 )
 from src.governance import entity_embedding_text
+from src.governance.media import MediaKnowledgeProjector
 from src.governance.validation import ValidationService
 from src.parsing import ParserRegistry
 from src.persistence.base import EvidenceStore, GraphStore
@@ -151,11 +152,14 @@ class WorkflowNodes:
 
     async def route_by_risk(self, state: WorkflowState) -> WorkflowState:
         self.fusion_agent.review_repository = self.review_repository
-        return await self.fusion_agent.route_by_risk(state)
+        state = await self.fusion_agent.route_by_risk(state)
+        return MediaKnowledgeProjector().project(state)
 
     async def finalize_extraction_result(self, state: WorkflowState) -> WorkflowState:
         from src.domain import EntityMention, SchemaIndex, TaskExtractionResult
 
+        assert state.document is not None and state.output_schema is not None
+        state = MediaKnowledgeProjector().project(state)
         assert state.document is not None and state.output_schema is not None
         mentions = {item.id: item for item in state.extracted_entities}
         for candidate in state.candidates:
@@ -206,11 +210,25 @@ class WorkflowNodes:
             validation_issues=state.validation.issues,
             warnings=state.warnings,
             review_required_ids=list(dict.fromkeys(state.extraction_review_required_ids)),
+            media_contents=state.media_contents,
+            media_occurrences=state.media_occurrences,
+            candidate_media_relations=state.candidate_media_relations,
+            candidate_visual_assertions=state.candidate_visual_assertions,
+            visual_review_required_ids=[
+                item.target_id for item in state.visual_review_tasks if item.status == "pending"
+            ],
         )
-        state.status = "awaiting_review" if state.extraction_review_required_ids else "completed"
+        state.status = (
+            "awaiting_review"
+            if state.extraction_review_required_ids
+            or any(item.status == "pending" for item in state.visual_review_tasks)
+            else "completed"
+        )
         return state
 
     async def prepare_graph_commit(self, state: WorkflowState) -> WorkflowState:
+        from src.domain import GraphMediaRelation, MediaRelationType
+
         if not state.task_mode.permits_graph_commit:
             from src.core.errors import TaskModeCommitError
 
@@ -220,6 +238,8 @@ class WorkflowNodes:
             state = await self.finalize_extraction_result(state)
             state.status = previous_status
         assert state.document is not None
+        if any(item.status == "pending" for item in state.visual_review_tasks):
+            raise GraphIntegrityError("VISUAL_REVIEW_PENDING")
         if state.validation.blocking_count:
             raise GraphIntegrityError(
                 f"VALIDATION_BLOCKED: {state.validation.blocking_count} 个问题未排除"
@@ -234,6 +254,55 @@ class WorkflowNodes:
             claim.source_run_ids = sorted(set([*claim.source_run_ids, state.run_id]))
         existing_claims = {claim.id: claim for claim in await self.graph_store.list_claims()}
         existing_entities = {entity.id: entity for entity in await self.graph_store.list_entities()}
+        existing_media_contents = {
+            item.id: item for item in await self.graph_store.list_media_contents()
+        }
+        existing_media_occurrences = {
+            item.id: item for item in await self.graph_store.list_media_occurrences()
+        }
+        existing_media_relations = {
+            item.id: item for item in await self.graph_store.list_media_relations()
+        }
+        existing_visual_assertions = {
+            item.id: item for item in await self.graph_store.list_visual_assertions()
+        }
+        normalized_media_contents = []
+        for content in state.media_contents:
+            existing_content = existing_media_contents.get(content.id)
+            if existing_content is None:
+                normalized_media_contents.append(content)
+                continue
+            if existing_content.model_dump(exclude={"created_at"}) != content.model_dump(
+                exclude={"created_at"}
+            ):
+                raise GraphIntegrityError(
+                    f"immutable media content changed for hash {content.content_hash}"
+                )
+            normalized_media_contents.append(existing_content)
+        state.media_contents = normalized_media_contents
+        media_relations = list(state.media_relations)
+        known_media_relation_ids = {item.id for item in media_relations}
+        for occurrence in state.media_occurrences:
+            for claim in accepted:
+                if occurrence.evidence_id not in claim.evidence_ids:
+                    continue
+                relation = GraphMediaRelation(
+                    id=stable_id(
+                        "media-relation",
+                        occurrence.id,
+                        MediaRelationType.SUPPORTS,
+                        claim.id,
+                        occurrence.evidence_id,
+                    ),
+                    occurrence_id=occurrence.id,
+                    relation_type=MediaRelationType.SUPPORTS,
+                    target_claim_id=claim.id,
+                    evidence_ids=[occurrence.evidence_id],
+                )
+                if relation.id not in known_media_relation_ids:
+                    media_relations.append(relation)
+                    known_media_relation_ids.add(relation.id)
+        state.media_relations = media_relations
         existing_claim_ids = set(existing_claims)
         persisted_claim_ids = existing_claim_ids | {claim.id for claim in accepted}
         conflicts = [item for item in state.conflicts if set(item.claim_ids) <= persisted_claim_ids]
@@ -244,6 +313,12 @@ class WorkflowNodes:
             for entity_id in (claim.subject_id, claim.object_entity_id)
             if entity_id
         }
+        entity_ids.update(
+            item.target_entity_id
+            for item in media_relations
+            if item.target_entity_id is not None
+        )
+        entity_ids.update(item.subject_entity_id for item in state.visual_assertions)
         entities = [
             entity.model_copy(update={"active": True})
             for entity in state.entities
@@ -277,6 +352,26 @@ class WorkflowNodes:
             )
             for claim in accepted
         )
+        for resource_type, items, existing in (
+            ("media_content", state.media_contents, existing_media_contents),
+            ("media_occurrence", state.media_occurrences, existing_media_occurrences),
+            ("media_relation", media_relations, existing_media_relations),
+            ("visual_assertion", state.visual_assertions, existing_visual_assertions),
+        ):
+            changes.extend(
+                GraphChange(
+                    resource_type=resource_type,
+                    resource_id=item.id,
+                    action="update" if item.id in existing else "create",
+                    before=(
+                        existing[item.id].model_dump(mode="json")
+                        if item.id in existing
+                        else None
+                    ),
+                    after=item.model_dump(mode="json"),
+                )
+                for item in items
+            )
         changes.extend(
             GraphChange(
                 resource_type="conflict",
@@ -292,12 +387,20 @@ class WorkflowNodes:
                 state.run_id,
                 parent.id if parent else "root",
                 *sorted(claim.id for claim in accepted),
+                *sorted(item.id for item in state.media_contents),
+                *sorted(item.id for item in state.media_occurrences),
+                *sorted(item.id for item in media_relations),
+                *sorted(item.id for item in state.visual_assertions),
             ),
             run_id=state.run_id,
             parent_id=parent.id if parent else None,
             entity_ids=sorted(entity_ids),
             claim_ids=sorted(claim.id for claim in accepted),
             conflict_ids=sorted(conflict.id for conflict in conflicts),
+            media_content_ids=sorted(item.id for item in state.media_contents),
+            media_occurrence_ids=sorted(item.id for item in state.media_occurrences),
+            media_relation_ids=sorted(item.id for item in media_relations),
+            visual_assertion_ids=sorted(item.id for item in state.visual_assertions),
             changes=changes,
         )
         state.revision = revision
@@ -323,11 +426,33 @@ class WorkflowNodes:
                 evidence
                 for evidence in state.document.evidence
                 if evidence.id
-                in {evidence_id for claim in accepted for evidence_id in claim.evidence_ids}
+                in {
+                    *(
+                        evidence_id
+                        for claim in accepted
+                        for evidence_id in claim.evidence_ids
+                    ),
+                    *(item.evidence_id for item in state.media_occurrences),
+                    *(
+                        evidence_id
+                        for item in media_relations
+                        for evidence_id in item.evidence_ids
+                    ),
+                    *(
+                        evidence_id
+                        for item in state.visual_assertions
+                        for evidence_id in item.evidence_ids
+                    ),
+                }
             ],
             entities=entities,
             claims=accepted,
             conflicts=conflicts,
+            media_contents=state.media_contents,
+            media_occurrences=state.media_occurrences,
+            media_relations=media_relations,
+            visual_assertions=state.visual_assertions,
+            visual_review_events=state.visual_review_events,
             revision=revision,
             validation_context=context,
         )

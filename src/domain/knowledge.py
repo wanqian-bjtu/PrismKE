@@ -9,6 +9,13 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from src.domain.documents import EvidenceRef, Modality
+from src.domain.media import (
+    GraphMediaContent,
+    GraphMediaOccurrence,
+    GraphMediaRelation,
+    VisualAssertion,
+    VisualReviewEvent,
+)
 from src.domain.reviews import CorrectionGuard
 from src.domain.validation import CommitValidationContext
 
@@ -233,7 +240,16 @@ class GraphDocument(BaseModel):
 
 
 class GraphChange(BaseModel):
-    resource_type: Literal["entity", "claim", "conflict", "entity_operation"]
+    resource_type: Literal[
+        "entity",
+        "claim",
+        "conflict",
+        "entity_operation",
+        "media_content",
+        "media_occurrence",
+        "media_relation",
+        "visual_assertion",
+    ]
     resource_id: str
     action: Literal["create", "update", "close", "restore"]
     before: dict[str, Any] | None = None
@@ -247,6 +263,10 @@ class GraphRevision(BaseModel):
     entity_ids: list[str] = Field(default_factory=list)
     claim_ids: list[str] = Field(default_factory=list)
     conflict_ids: list[str] = Field(default_factory=list)
+    media_content_ids: list[str] = Field(default_factory=list)
+    media_occurrence_ids: list[str] = Field(default_factory=list)
+    media_relation_ids: list[str] = Field(default_factory=list)
+    visual_assertion_ids: list[str] = Field(default_factory=list)
     changes: list[GraphChange] = Field(default_factory=list)
     validation_context: CommitValidationContext | None = None
     commit_fingerprint: str | None = None
@@ -263,6 +283,11 @@ class GraphCommit(BaseModel):
     conflicts: list[ConflictSet] = Field(default_factory=list)
     entity_operations: list[EntityOperation] = Field(default_factory=list)
     entity_embeddings: list[EntityEmbedding] = Field(default_factory=list)
+    media_contents: list[GraphMediaContent] = Field(default_factory=list)
+    media_occurrences: list[GraphMediaOccurrence] = Field(default_factory=list)
+    media_relations: list[GraphMediaRelation] = Field(default_factory=list)
+    visual_assertions: list[VisualAssertion] = Field(default_factory=list)
+    visual_review_events: list[VisualReviewEvent] = Field(default_factory=list)
     revision: GraphRevision
     validation_context: CommitValidationContext | None = None
     correction_guard: CorrectionGuard | None = None
@@ -289,3 +314,7 @@ class RevisionDiff(BaseModel):
     entity_ids: list[str] = Field(default_factory=list)
     claim_ids: list[str] = Field(default_factory=list)
     conflict_ids: list[str] = Field(default_factory=list)
+    media_content_ids: list[str] = Field(default_factory=list)
+    media_occurrence_ids: list[str] = Field(default_factory=list)
+    media_relation_ids: list[str] = Field(default_factory=list)
+    visual_assertion_ids: list[str] = Field(default_factory=list)

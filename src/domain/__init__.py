@@ -69,6 +69,20 @@ from src.domain.knowledge import (
     RevisionDiff,
     utc_now,
 )
+from src.domain.media import (
+    CandidateMediaRelation,
+    CandidateVisualAssertion,
+    GraphMediaContent,
+    GraphMediaOccurrence,
+    GraphMediaRelation,
+    MediaKnowledgeType,
+    MediaRelationType,
+    VisualAssertion,
+    VisualAssertionKind,
+    VisualReviewEvent,
+    VisualReviewTask,
+    visual_value_matches,
+)
 from src.domain.pdf import (
     PDFComplexityReport,
     PDFComplexityThresholds,
@@ -214,4 +228,16 @@ __all__ = [
     "PDFComplexityReport",
     "PDFParseDecision",
     "PDFParserFallbackEvent",
+    "MediaKnowledgeType",
+    "MediaRelationType",
+    "VisualAssertionKind",
+    "GraphMediaContent",
+    "GraphMediaOccurrence",
+    "CandidateMediaRelation",
+    "GraphMediaRelation",
+    "CandidateVisualAssertion",
+    "VisualAssertion",
+    "VisualReviewTask",
+    "VisualReviewEvent",
+    "visual_value_matches",
 ]

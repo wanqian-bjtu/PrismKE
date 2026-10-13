@@ -5,6 +5,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from PIL import Image
 from validated_fixtures import prepare_fixture_commit
 
 from src.core.errors import GraphIntegrityError
@@ -18,14 +19,161 @@ from src.domain import (
     GraphChange,
     GraphCommit,
     GraphDocument,
+    GraphMediaContent,
+    GraphMediaOccurrence,
+    GraphMediaRelation,
     GraphRevision,
+    MediaKnowledgeType,
+    MediaRelationType,
     Modality,
+    SourceDocument,
+    VisualReviewEvent,
 )
 from src.governance import EntityGovernanceService
-from src.persistence import EntityGovernanceRepository, Neo4jGraphStore
+from src.parsing import ParserRegistry
+from src.persistence import EntityGovernanceRepository, FileEvidenceStore, Neo4jGraphStore
 from src.providers import MockEmbeddingProvider
 
 pytestmark = pytest.mark.neo4j
+
+
+@pytest.mark.skipif(
+    os.getenv("PRISMKE_TEST_NEO4J") != "1",
+    reason="set PRISMKE_TEST_NEO4J=1 for live Neo4j tests",
+)
+@pytest.mark.asyncio
+async def test_live_neo4j_media_commit_query_and_rollback(tmp_path: Path) -> None:
+    settings = Settings()
+    assert settings.neo4j_password is not None
+    source = tmp_path / "media.png"
+    Image.new("RGB", (96, 64), "white").save(source)
+    document = await ParserRegistry(asset_dir=tmp_path / "assets").parse(
+        SourceDocument(path=source)
+    )
+    evidence_store = FileEvidenceStore(tmp_path / "evidence")
+    await evidence_store.put_document(document)
+    store = Neo4jGraphStore(
+        settings.neo4j_uri,
+        settings.neo4j_user,
+        settings.neo4j_password,
+        settings.neo4j_database,
+        evidence_store=evidence_store,
+    )
+    suffix = uuid4().hex
+    asset = document.media_assets[0]
+    evidence = next(item for item in document.evidence if item.id == asset.evidence_id)
+    assert asset.blob_hash is not None
+    entity = CanonicalEntity(
+        id=f"entity:media:{suffix}", name="PrismKE", entity_type="Product"
+    )
+    content = GraphMediaContent(
+        id=f"media-content:{suffix}",
+        content_hash=asset.blob_hash,
+        blob_hash=asset.blob_hash,
+        media_type=asset.media_type,
+        asset_type=MediaKnowledgeType.IMAGE,
+        width=asset.width,
+        height=asset.height,
+    )
+    occurrence = GraphMediaOccurrence(
+        id=f"media-occurrence:{suffix}",
+        document_id=document.id,
+        media_content_id=content.id,
+        evidence_id=evidence.id,
+        bbox=evidence.bbox,
+        canvas_width=evidence.canvas_width or float(asset.width or 96),
+        canvas_height=evidence.canvas_height or float(asset.height or 64),
+        source_type=asset.origin,
+    )
+    candidate_id = f"candidate:media:{suffix}"
+    event = VisualReviewEvent(
+        id=f"visual-review-event:{suffix}",
+        request_id=f"request:{suffix}",
+        run_id=f"run:media:{suffix}",
+        task_id=f"task:media:{suffix}",
+        target_type="media_relation",
+        target_id=candidate_id,
+        decision="approve",
+        reviewer="integration-test",
+        reason="verified synthetic image",
+        expected_version=0,
+        resulting_version=1,
+    )
+    relation = GraphMediaRelation(
+        id=f"media-relation:{suffix}",
+        occurrence_id=occurrence.id,
+        relation_type=MediaRelationType.DEPICTS,
+        target_entity_id=entity.id,
+        evidence_ids=[evidence.id],
+        source_candidate_id=candidate_id,
+        approved_review_event_id=event.id,
+    )
+    changes = [
+        GraphChange(
+            resource_type="media_content",
+            resource_id=content.id,
+            action="create",
+            after=content.model_dump(mode="json"),
+        ),
+        GraphChange(
+            resource_type="media_occurrence",
+            resource_id=occurrence.id,
+            action="create",
+            after=occurrence.model_dump(mode="json"),
+        ),
+        GraphChange(
+            resource_type="media_relation",
+            resource_id=relation.id,
+            action="create",
+            after=relation.model_dump(mode="json"),
+        ),
+    ]
+    try:
+        parent = await store.latest_revision()
+        revision = GraphRevision(
+            id=f"revision:media:{suffix}",
+            run_id=event.run_id,
+            parent_id=parent.id if parent else None,
+            entity_ids=[entity.id],
+            media_content_ids=[content.id],
+            media_occurrence_ids=[occurrence.id],
+            media_relation_ids=[relation.id],
+            changes=changes,
+        )
+        await store.commit(
+            GraphCommit(
+                documents=[
+                    GraphDocument(
+                        id=document.id,
+                        filename=document.source_filename or source.name,
+                        content_hash=document.source_hash,
+                        media_type=document.media_type,
+                    )
+                ],
+                evidence=[evidence],
+                entities=[entity],
+                media_contents=[content],
+                media_occurrences=[occurrence],
+                media_relations=[relation],
+                visual_review_events=[event],
+                revision=revision,
+            )
+        )
+        assert (await store.get_media_occurrence(occurrence.id)) == occurrence
+        assert [item.id for item in await store.list_media_relations()] == [relation.id]
+        compensation = await store.rollback_revision(revision.id)
+        assert compensation.media_occurrence_ids == [occurrence.id]
+        rolled_back = await store.get_media_occurrence(occurrence.id)
+        assert rolled_back is not None and not rolled_back.active
+        async with store.driver.session(database=settings.neo4j_database) as session:
+            result = await session.run(
+                "MATCH (:MediaOccurrence {id: $id})-[r:DEPICTS]->() RETURN count(r) AS count",
+                id=occurrence.id,
+            )
+            row = await result.single()
+            assert row is not None and row["count"] == 0
+    finally:
+        await store.close()
 
 
 @pytest.mark.skipif(

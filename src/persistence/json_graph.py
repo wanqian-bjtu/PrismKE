@@ -23,9 +23,15 @@ from src.domain import (
     GraphChange,
     GraphCommit,
     GraphHealth,
+    GraphMediaContent,
+    GraphMediaOccurrence,
+    GraphMediaRelation,
     GraphNeighborhood,
     GraphRevision,
     RevisionDiff,
+    VisualAssertion,
+    VisualReviewEvent,
+    visual_value_matches,
 )
 from src.governance.review_guards import verify_correction
 from src.governance.validation import ValidationService
@@ -57,6 +63,11 @@ class JSONGraphStore:
             "entity_operations": {},
             "claims": {},
             "conflicts": {},
+            "media_contents": {},
+            "media_occurrences": {},
+            "media_relations": {},
+            "visual_assertions": {},
+            "visual_review_events": {},
             "revisions": [],
         }
 
@@ -154,6 +165,31 @@ class JSONGraphStore:
         with self.lock:
             data = self._read()
         return [Claim.model_validate(item) for item in data["claims"].values()]
+
+    async def list_media_occurrences(self) -> list[GraphMediaOccurrence]:
+        with self.lock:
+            payloads = self._read()["media_occurrences"].values()
+            return [GraphMediaOccurrence.model_validate(item) for item in payloads]
+
+    async def list_media_contents(self) -> list[GraphMediaContent]:
+        with self.lock:
+            payloads = self._read()["media_contents"].values()
+            return [GraphMediaContent.model_validate(item) for item in payloads]
+
+    async def get_media_occurrence(self, occurrence_id: str) -> GraphMediaOccurrence | None:
+        with self.lock:
+            payload = self._read()["media_occurrences"].get(occurrence_id)
+        return GraphMediaOccurrence.model_validate(payload) if payload is not None else None
+
+    async def list_media_relations(self) -> list[GraphMediaRelation]:
+        with self.lock:
+            payloads = self._read()["media_relations"].values()
+            return [GraphMediaRelation.model_validate(item) for item in payloads]
+
+    async def list_visual_assertions(self) -> list[VisualAssertion]:
+        with self.lock:
+            payloads = self._read()["visual_assertions"].values()
+            return [VisualAssertion.model_validate(item) for item in payloads]
 
     async def latest_revision(self) -> GraphRevision | None:
         with self.lock:
@@ -272,11 +308,49 @@ class JSONGraphStore:
             data["claims"][claim.id] = claim.model_dump(mode="json")
         for conflict in transaction.conflicts:
             data["conflicts"][conflict.id] = conflict.model_dump(mode="json")
+        for event in transaction.visual_review_events:
+            previous = data["visual_review_events"].get(event.id)
+            payload = event.model_dump(mode="json")
+            if previous is not None and previous != payload:
+                raise GraphIntegrityError(
+                    f"visual review event already exists with different content: {event.id}"
+                )
+            data["visual_review_events"][event.id] = payload
+        for content in transaction.media_contents:
+            previous = data["media_contents"].get(content.id)
+            payload = content.model_dump(mode="json")
+            if previous is not None and previous != payload:
+                raise GraphIntegrityError(
+                    f"immutable media content changed: {content.id}"
+                )
+            duplicate = next(
+                (
+                    item_id
+                    for item_id, item in data["media_contents"].items()
+                    if item["content_hash"] == content.content_hash and item_id != content.id
+                ),
+                None,
+            )
+            if duplicate:
+                raise GraphIntegrityError(
+                    f"duplicate media content hash: {content.content_hash}"
+                )
+            data["media_contents"][content.id] = payload
+        for occurrence in transaction.media_occurrences:
+            data["media_occurrences"][occurrence.id] = occurrence.model_dump(mode="json")
+        for relation in transaction.media_relations:
+            data["media_relations"][relation.id] = relation.model_dump(mode="json")
+        for assertion in transaction.visual_assertions:
+            data["visual_assertions"][assertion.id] = assertion.model_dump(mode="json")
 
         known_entities = set(data["entities"])
         known_claims = set(data["claims"])
         known_conflicts = set(data["conflicts"])
         known_evidence = set(data["evidence"])
+        known_contents = set(data["media_contents"])
+        known_occurrences = set(data["media_occurrences"])
+        known_review_events = set(data["visual_review_events"])
+        review_events = data["visual_review_events"]
         if not {item.entity_id for item in transaction.entity_embeddings} <= known_entities:
             raise GraphIntegrityError("embedding references missing entity")
         for operation in transaction.entity_operations:
@@ -303,6 +377,109 @@ class JSONGraphStore:
         for conflict in transaction.conflicts:
             if not set(conflict.claim_ids) <= known_claims:
                 raise GraphIntegrityError(f"conflict {conflict.id} references missing claims")
+        for occurrence in transaction.media_occurrences:
+            if occurrence.document_id not in data["documents"]:
+                raise GraphIntegrityError(
+                    f"media occurrence {occurrence.id} references missing document"
+                )
+            if occurrence.media_content_id not in known_contents:
+                raise GraphIntegrityError(
+                    f"media occurrence {occurrence.id} references missing content"
+                )
+            if occurrence.evidence_id not in known_evidence:
+                raise GraphIntegrityError(
+                    f"media occurrence {occurrence.id} references missing evidence"
+                )
+        for relation in transaction.media_relations:
+            if relation.occurrence_id not in known_occurrences:
+                raise GraphIntegrityError(
+                    f"media relation {relation.id} references missing occurrence"
+                )
+            if not set(relation.evidence_ids) <= known_evidence:
+                raise GraphIntegrityError(
+                    f"media relation {relation.id} references missing evidence"
+                )
+            if relation.target_entity_id and relation.target_entity_id not in known_entities:
+                raise GraphIntegrityError(
+                    f"media relation {relation.id} references missing entity"
+                )
+            if relation.target_claim_id:
+                claim_payload = data["claims"].get(relation.target_claim_id)
+                if claim_payload is None:
+                    raise GraphIntegrityError(
+                        f"media relation {relation.id} references missing claim"
+                    )
+                claim = Claim.model_validate(claim_payload)
+                occurrence = GraphMediaOccurrence.model_validate(
+                    data["media_occurrences"][relation.occurrence_id]
+                )
+                if claim.status not in {"approved", "auto_approved"}:
+                    raise GraphIntegrityError("SUPPORTS requires an approved claim")
+                if occurrence.evidence_id not in claim.evidence_ids:
+                    raise GraphIntegrityError("SUPPORTS evidence does not support target claim")
+            if relation.relation_type == "DEPICTS":
+                event_payload = review_events.get(relation.approved_review_event_id or "")
+                if event_payload is None:
+                    raise GraphIntegrityError("DEPICTS requires an approved visual review")
+                event = VisualReviewEvent.model_validate(event_payload)
+                if (
+                    event.decision != "approve"
+                    or event.target_type != "media_relation"
+                    or event.target_id != relation.source_candidate_id
+                ):
+                    raise GraphIntegrityError("DEPICTS review event does not approve relation")
+        for assertion in transaction.visual_assertions:
+            if assertion.occurrence_id not in known_occurrences:
+                raise GraphIntegrityError(
+                    f"visual assertion {assertion.id} references missing occurrence"
+                )
+            if assertion.subject_entity_id not in known_entities:
+                raise GraphIntegrityError(
+                    f"visual assertion {assertion.id} references missing entity"
+                )
+            if not set(assertion.evidence_ids) <= known_evidence:
+                raise GraphIntegrityError(
+                    f"visual assertion {assertion.id} references missing evidence"
+                )
+            if assertion.approved_review_event_id not in known_review_events:
+                raise GraphIntegrityError("visual assertion requires an approved visual review")
+            assertion_event = VisualReviewEvent.model_validate(
+                review_events[assertion.approved_review_event_id]
+            )
+            if (
+                assertion_event.decision != "approve"
+                or assertion_event.target_type != "visual_assertion"
+                or assertion_event.target_id != assertion.source_candidate_id
+            ):
+                raise GraphIntegrityError(
+                    "visual assertion review event does not approve assertion"
+                )
+            definitions = {
+                item.id: item
+                for schema in (
+                    transaction.validation_context.schemas.values()
+                    if transaction.validation_context
+                    else []
+                )
+                for item in schema.attributes
+            }
+            definition = definitions.get(assertion.predicate)
+            if definition is None:
+                raise GraphIntegrityError(
+                    f"visual assertion predicate is not in schema: {assertion.predicate}"
+                )
+            if not visual_value_matches(assertion.normalized_value, definition.value_type):
+                raise GraphIntegrityError(
+                    f"visual assertion value type is invalid: {assertion.id}"
+                )
+        if not set(transaction.revision.media_content_ids) <= known_contents:
+            raise GraphIntegrityError("revision references missing media content")
+        if not set(transaction.revision.media_occurrence_ids) <= known_occurrences:
+            raise GraphIntegrityError("revision references missing media occurrence")
+        if not set(transaction.revision.media_relation_ids) <= set(data["media_relations"]):
+            raise GraphIntegrityError("revision references missing media relation")
+        if not set(transaction.revision.visual_assertion_ids) <= set(data["visual_assertions"]):
+            raise GraphIntegrityError("revision references missing visual assertion")
 
         revisions.append(revision_payload)
         return data, False
@@ -310,6 +487,22 @@ class JSONGraphStore:
     async def commit(self, transaction: GraphCommit) -> None:
         bind_commit_provenance(transaction)
         transaction = transaction.model_copy(deep=True)
+        if self.evidence_store is None and transaction.media_contents:
+            raise GraphIntegrityError("media commit requires an evidence store")
+        if self.evidence_store is not None:
+            from hashlib import sha256
+
+            for content in transaction.media_contents:
+                payload = await self.evidence_store.get_blob(content.blob_hash)
+                if sha256(payload).hexdigest() != content.content_hash:
+                    raise GraphIntegrityError(
+                        f"media content hash verification failed: {content.id}"
+                    )
+            for occurrence in transaction.media_occurrences:
+                if not await self.evidence_store.verify(occurrence.evidence_id):
+                    raise GraphIntegrityError(
+                        f"media occurrence evidence is invalid: {occurrence.id}"
+                    )
         with self.lock:
             data = self._read()
             if transaction.revision.id not in {r["id"] for r in data["revisions"]}:
@@ -355,6 +548,18 @@ class JSONGraphStore:
             entity_ids=sorted({item for revision in selected for item in revision.entity_ids}),
             claim_ids=sorted({item for revision in selected for item in revision.claim_ids}),
             conflict_ids=sorted({item for revision in selected for item in revision.conflict_ids}),
+            media_content_ids=sorted(
+                {item for revision in selected for item in revision.media_content_ids}
+            ),
+            media_occurrence_ids=sorted(
+                {item for revision in selected for item in revision.media_occurrence_ids}
+            ),
+            media_relation_ids=sorted(
+                {item for revision in selected for item in revision.media_relation_ids}
+            ),
+            visual_assertion_ids=sorted(
+                {item for revision in selected for item in revision.visual_assertion_ids}
+            ),
         )
 
     async def rollback_revision(self, revision_id: str) -> GraphRevision:
@@ -381,6 +586,10 @@ class JSONGraphStore:
                 "claim": "claims",
                 "conflict": "conflicts",
                 "entity_operation": "entity_operations",
+                "media_content": "media_contents",
+                "media_occurrence": "media_occurrences",
+                "media_relation": "media_relations",
+                "visual_assertion": "visual_assertions",
             }
             for change in target.changes:
                 if data[buckets[change.resource_type]].get(change.resource_id) != change.after:
@@ -392,6 +601,10 @@ class JSONGraphStore:
                 "claim": 1,
                 "conflict": 2,
                 "entity": 3,
+                "visual_assertion": 0,
+                "media_relation": 0,
+                "media_occurrence": 1,
+                "media_content": 4,
             }
             ordered_changes = sorted(
                 reversed(target.changes),
@@ -403,6 +616,10 @@ class JSONGraphStore:
                     "claim": "claims",
                     "conflict": "conflicts",
                     "entity_operation": "entity_operations",
+                    "media_content": "media_contents",
+                    "media_occurrence": "media_occurrences",
+                    "media_relation": "media_relations",
+                    "visual_assertion": "visual_assertions",
                 }[change.resource_type]
                 bucket = data[bucket_name]
                 current = bucket.get(change.resource_id)
@@ -426,6 +643,16 @@ class JSONGraphStore:
                         current["status"] = "resolved"
                     elif change.resource_type == "entity_operation" and current is not None:
                         current["status"] = "rolled_back"
+                    elif change.resource_type in {
+                        "media_occurrence",
+                        "media_relation",
+                        "visual_assertion",
+                    } and current is not None:
+                        current["active"] = False
+                        current["tx_to"] = timestamp.isoformat().replace("+00:00", "Z")
+                    elif change.resource_type == "media_content":
+                        # Retain immutable content while historical occurrences may refer to it.
+                        current = deepcopy(current)
                     inverse.append(
                         GraphChange(
                             resource_type=change.resource_type,
@@ -458,6 +685,34 @@ class JSONGraphStore:
                 ),
                 conflict_ids=sorted(
                     {item.resource_id for item in inverse if item.resource_type == "conflict"}
+                ),
+                media_content_ids=sorted(
+                    {
+                        item.resource_id
+                        for item in inverse
+                        if item.resource_type == "media_content"
+                    }
+                ),
+                media_occurrence_ids=sorted(
+                    {
+                        item.resource_id
+                        for item in inverse
+                        if item.resource_type == "media_occurrence"
+                    }
+                ),
+                media_relation_ids=sorted(
+                    {
+                        item.resource_id
+                        for item in inverse
+                        if item.resource_type == "media_relation"
+                    }
+                ),
+                visual_assertion_ids=sorted(
+                    {
+                        item.resource_id
+                        for item in inverse
+                        if item.resource_type == "visual_assertion"
+                    }
                 ),
                 changes=inverse,
                 created_at=timestamp,

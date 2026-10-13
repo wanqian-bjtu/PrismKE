@@ -121,3 +121,11 @@ class PDFParserFallbackRequest(BaseModel):
     reason: str = Field(min_length=1)
     request_id: str = Field(min_length=1)
     expected_execution_version: int = Field(ge=0)
+
+
+class VisualReviewRequest(BaseModel):
+    decision: Literal["approve", "reject", "defer"]
+    reviewer: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+    request_id: str = Field(min_length=1)
+    expected_version: int = Field(ge=0)
