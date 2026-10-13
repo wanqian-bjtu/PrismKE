@@ -1727,7 +1727,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             navigation_group,
             workspace_tabs,
         )
-        navigation_page.input(
+        navigation_page.change(
             lambda page: gr.update(selected=page),
             navigation_page,
             workspace_tabs,
