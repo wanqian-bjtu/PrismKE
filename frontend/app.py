@@ -1720,14 +1720,14 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 gr.update(selected=target),
             )
 
-        navigation_group.change(
+        navigation_group.input(
             switch_group,
             navigation_group,
             [navigation_page, workspace_tabs],
             trigger_mode="always_last",
             queue=False,
         )
-        navigation_page.change(
+        navigation_page.input(
             lambda page: gr.update(selected=page),
             navigation_page,
             workspace_tabs,
