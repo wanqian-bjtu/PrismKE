@@ -108,7 +108,7 @@ from src.workflow.graph import PrismKEWorkflow
 from src.workflow.reflection import REFLECTION_POLICY_VERSION, BoundedReflectionService
 from src.workflow.review_workspace import validate_workspace_run, workspace_metadata
 
-PIPELINE_VERSION = "0.12.0"
+PIPELINE_VERSION = "0.13.0"
 ASSET_POLICY_VERSION = "assets-v3"
 ALIGNMENT_POLICY_VERSION = "alignment-v1"
 
