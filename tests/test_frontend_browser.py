@@ -210,5 +210,6 @@ def test_every_workspace_page_is_reachable_from_grouped_navigation(
                     screenshot_root / f"desktop-{page_id}.png",
                     full_page=False,
                 )
+                page.wait_for_timeout(750)
 
         browser.close()
