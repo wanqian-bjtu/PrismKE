@@ -1724,11 +1724,13 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             switch_group,
             navigation_group,
             [navigation_page, workspace_tabs],
+            trigger_mode="always_last",
         )
-        navigation_page.select(
+        navigation_page.change(
             lambda page: gr.update(selected=page),
             navigation_page,
             workspace_tabs,
+            trigger_mode="always_last",
         )
         schema_source.change(
             switch_schema_source,
