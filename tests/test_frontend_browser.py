@@ -74,9 +74,11 @@ def workspace_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
 
 def _select_next_option(page: Page, elem_id: str) -> None:
     control = page.locator(f"#{elem_id} input")
+    previous = control.input_value()
     control.click()
     control.press("ArrowDown")
     control.press("Enter")
+    expect(control).not_to_have_value(previous, timeout=15_000)
 
 
 def _write_screenshot(page: Page, path: Path, *, full_page: bool) -> None:
@@ -197,7 +199,7 @@ def test_every_workspace_page_is_reachable_from_grouped_navigation(
                 heading = page.locator(".workspace-page-header:visible h1")
                 heading.wait_for(state="visible")
                 expected_title = PAGE_META[page_id][0]
-                expect(heading).to_have_text(expected_title)
+                expect(heading).to_have_text(expected_title, timeout=15_000)
                 assert heading.inner_text() == expected_title
                 _write_screenshot(
                     page,
