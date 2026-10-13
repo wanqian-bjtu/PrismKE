@@ -2,7 +2,7 @@
 
 本项目遵循语义化版本管理。
 
-## v0.12.0.dev0 - 未发布
+## v0.12.0 - 2026-10-13
 
 - 增加 PyMuPDF 预检与 MinerU Standard 双层 PDF 解析，保存可复现的路由决定。
 - MinerU 结构化结果转换为 DocumentIR/EvidenceRef；Markdown 仅用于预览，不作为证据。
