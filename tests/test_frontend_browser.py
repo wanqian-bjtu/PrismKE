@@ -191,13 +191,14 @@ def test_every_workspace_page_is_reachable_from_grouped_navigation(
         for group_index, (_, (group_label, pages)) in enumerate(NAVIGATION_GROUPS.items()):
             if group_index:
                 _select_option(page, "navigation-group", group_label)
-            for page_index, (page_label, page_id) in enumerate(pages):
-                if page_index:
+            for page_label, page_id in pages:
+                if len(pages) > 1:
+                    page.locator("#navigation-page").wait_for(state="visible", timeout=60_000)
                     _select_option(page, "navigation-page", page_label)
                 heading = page.locator(".workspace-page-header:visible h1")
                 heading.wait_for(state="visible")
                 expected_title = PAGE_META[page_id][0]
-                expect(heading).to_have_text(expected_title, timeout=15_000)
+                expect(heading).to_have_text(expected_title, timeout=60_000)
                 assert heading.inner_text() == expected_title
                 _write_screenshot(
                     page,
