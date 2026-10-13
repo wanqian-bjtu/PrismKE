@@ -1728,10 +1728,14 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             concurrency_limit=None,
             queue=False,
         )
+
+        def switch_page(page: str) -> tuple[Any, Any]:
+            return gr.update(value=page), gr.update(selected=page)
+
         navigation_page.input(
-            lambda page: gr.update(selected=page),
+            switch_page,
             navigation_page,
-            workspace_tabs,
+            [navigation_page, workspace_tabs],
             trigger_mode="multiple",
             concurrency_limit=None,
             queue=False,
