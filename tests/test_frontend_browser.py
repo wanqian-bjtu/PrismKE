@@ -192,6 +192,10 @@ def test_every_workspace_page_is_reachable_from_grouped_navigation(
         for group_index, (_, (group_label, pages)) in enumerate(NAVIGATION_GROUPS.items()):
             if group_index:
                 _select_option(page, "navigation-group", group_label)
+                if len(pages) > 1:
+                    expect(page.locator("#navigation-page input")).to_have_value(
+                        pages[0][0], timeout=60_000
+                    )
             for page_label, page_id in pages:
                 if len(pages) > 1:
                     page.locator("#navigation-page").wait_for(state="visible", timeout=60_000)
