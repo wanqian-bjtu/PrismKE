@@ -72,13 +72,11 @@ def workspace_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
             process.wait(timeout=5)
 
 
-def _select_next_option(page: Page, elem_id: str) -> None:
+def _select_option(page: Page, elem_id: str, label: str) -> None:
     control = page.locator(f"#{elem_id} input")
-    previous = control.input_value()
     control.click()
-    control.press("ArrowDown")
-    control.press("Enter")
-    expect(control).not_to_have_value(previous, timeout=15_000)
+    page.get_by_role("option", name=label, exact=True).click()
+    expect(control).to_have_value(label, timeout=15_000)
 
 
 def _write_screenshot(page: Page, path: Path, *, full_page: bool) -> None:
@@ -145,7 +143,7 @@ def test_workspace_navigation_branding_and_responsive_layout(
                 "document.querySelector('#workspace-sidebar').classList.contains('open')"
             )
 
-        _select_next_option(page, "navigation-group")
+        _select_option(page, "navigation-group", "构建与执行")
         page.locator("#navigation-page").wait_for(state="visible")
         page.locator(".workspace-page-header:visible h1").wait_for(state="visible")
         assert page.locator(".workspace-page-header:visible h1").inner_text() == "新建抽取与构建"
@@ -190,12 +188,12 @@ def test_every_workspace_page_is_reachable_from_grouped_navigation(
         page.goto(workspace_url, wait_until="domcontentloaded", timeout=60_000)
         page.locator("#workspace-logo img").wait_for(state="visible")
 
-        for group_index, (_, (_, pages)) in enumerate(NAVIGATION_GROUPS.items()):
+        for group_index, (_, (group_label, pages)) in enumerate(NAVIGATION_GROUPS.items()):
             if group_index:
-                _select_next_option(page, "navigation-group")
-            for page_index, (_, page_id) in enumerate(pages):
+                _select_option(page, "navigation-group", group_label)
+            for page_index, (page_label, page_id) in enumerate(pages):
                 if page_index:
-                    _select_next_option(page, "navigation-page")
+                    _select_option(page, "navigation-page", page_label)
                 heading = page.locator(".workspace-page-header:visible h1")
                 heading.wait_for(state="visible")
                 expected_title = PAGE_META[page_id][0]
