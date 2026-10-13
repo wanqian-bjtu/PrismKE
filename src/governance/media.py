@@ -220,17 +220,24 @@ class MediaKnowledgeProjector:
             assertions[assertion.id] = assertion
 
         entities_by_evidence: dict[str, set[str]] = {}
+        entities_by_occurrence: dict[str, set[str]] = {}
         for mention in state.extracted_entities:
             entity_id = state.mention_to_entity.get(mention.id)
             if entity_id is None or mention.modality is not Modality.IMAGE:
                 continue
             for evidence_id in mention.evidence_ids:
                 entities_by_evidence.setdefault(evidence_id, set()).add(entity_id)
+                ref = visual_evidence.get(evidence_id)
+                if ref is not None and ref.media_asset_id in occurrence_by_asset:
+                    occurrence = occurrence_by_asset[ref.media_asset_id]
+                    entities_by_occurrence.setdefault(occurrence.id, set()).add(entity_id)
         for observation in state.document.visual_observations:
             visual_occurrence = occurrence_by_asset.get(observation.media_asset_id)
             if visual_occurrence is None:
                 continue
             entity_ids = entities_by_evidence.get(observation.evidence_id, set())
+            if not entity_ids:
+                entity_ids = entities_by_occurrence.get(visual_occurrence.id, set())
             if len(entity_ids) != 1:
                 if observation.attributes:
                     warning = f"visual_attribute_subject_ambiguous:{observation.id}"

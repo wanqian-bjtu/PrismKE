@@ -176,17 +176,25 @@ def _add_conflict_attribute(state: WorkflowState, expected: str) -> None:
     )
 
 
-async def _run(output: Path, env_file: Path) -> dict[str, Any]:
+async def _run(
+    output: Path,
+    env_file: Path,
+    ledger_path: Path | None = None,
+    *,
+    resume_ledger: bool = False,
+) -> dict[str, Any]:
     if output.exists():
         raise ValueError("choose a fresh, isolated output directory")
     if not env_file.is_file():
         raise ValueError("configuration file is missing")
     output.mkdir(parents=True)
+    effective_ledger = ledger_path or output / "request-ledger.json"
     budget = RequestBudget(
         limit=30_000,
         stop_at=27_000,
         max_output_tokens=2_048,
-        ledger_path=output / "request-ledger.json",
+        ledger_path=effective_ledger,
+        resume_ledger=resume_ledger,
     )
     settings = Settings(_env_file=env_file)
     if not settings.vlm_api_key or not settings.vlm_model:
@@ -214,6 +222,7 @@ async def _run(output: Path, env_file: Path) -> dict[str, Any]:
         "production_graph_access": False,
         "token_limit": budget.limit,
         "stop_at": budget.stop_at,
+        "tokens_before_run": budget.total_tokens,
         "samples": [],
         "stopped_reason": None,
     }
@@ -323,8 +332,17 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--env-file", type=Path, required=True)
+    parser.add_argument("--ledger", type=Path)
+    parser.add_argument("--resume-ledger", action="store_true")
     args = parser.parse_args()
-    report = asyncio.run(_run(args.output.resolve(), args.env_file.resolve()))
+    report = asyncio.run(
+        _run(
+            args.output.resolve(),
+            args.env_file.resolve(),
+            args.ledger.resolve() if args.ledger else None,
+            resume_ledger=args.resume_ledger,
+        )
+    )
     print(
         json.dumps(
             {

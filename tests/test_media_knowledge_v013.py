@@ -168,13 +168,15 @@ async def test_projector_separates_media_content_occurrence_and_semantic_entity(
 ) -> None:
     _, document = await _image_fixture(tmp_path)
     asset = document.media_assets[0]
+    region_evidence = document.evidence[0].model_copy(update={"id": "evidence:product-region"})
+    document.evidence.append(region_evidence)
     document.visual_observations = [
         VisualObservation(
             id="observation:product",
             media_asset_id=asset.id,
             label="PrismKE product",
             confidence=0.88,
-            evidence_id=asset.evidence_id,
+            evidence_id=region_evidence.id,
             attributes={"component_count": 3, "left_of": "logo"},
         )
     ]
