@@ -182,6 +182,7 @@ async def _run(
     ledger_path: Path | None = None,
     *,
     resume_ledger: bool = False,
+    case_ids: set[str] | None = None,
 ) -> dict[str, Any]:
     if output.exists():
         raise ValueError("choose a fresh, isolated output directory")
@@ -202,6 +203,12 @@ async def _run(
     if settings.vlm_model != "qwen3.7-flash":
         raise ValueError("live acceptance requires qwen3.7-flash")
     samples = _write_samples(output / "samples")
+    if case_ids:
+        known_case_ids = {item[0] for item in samples}
+        unknown_case_ids = case_ids - known_case_ids
+        if unknown_case_ids:
+            raise ValueError(f"unknown live media cases: {sorted(unknown_case_ids)}")
+        samples = [item for item in samples if item[0] in case_ids]
     evidence_store = FileEvidenceStore(output / "runtime" / "evidence")
     parser = ParserRegistry(
         asset_dir=output / "runtime" / "assets",
@@ -223,6 +230,8 @@ async def _run(
         "token_limit": budget.limit,
         "stop_at": budget.stop_at,
         "tokens_before_run": budget.total_tokens,
+        "requested_cases": [item[0] for item in samples],
+        "expected_sample_count": len(samples),
         "samples": [],
         "stopped_reason": None,
     }
@@ -291,6 +300,9 @@ async def _run(
                 "entity_count": len(result.entities),
                 "claim_candidate_count": len(result.candidates),
                 "visual_observation_count": len(result.observations),
+                "visual_attribute_keys": sorted(
+                    {key for item in result.observations for key in item.attributes}
+                ),
                 "depicts_candidate_count": len(projected.candidate_media_relations),
                 "visual_assertion_count": len(projected.candidate_visual_assertions),
                 "visual_review_count": len(projected.visual_review_tasks),
@@ -334,6 +346,12 @@ def main() -> None:
     parser.add_argument("--env-file", type=Path, required=True)
     parser.add_argument("--ledger", type=Path)
     parser.add_argument("--resume-ledger", action="store_true")
+    parser.add_argument(
+        "--case",
+        action="append",
+        dest="cases",
+        choices=("product-photo", "table-chart", "text-image-conflict"),
+    )
     args = parser.parse_args()
     report = asyncio.run(
         _run(
@@ -341,6 +359,7 @@ def main() -> None:
             args.env_file.resolve(),
             args.ledger.resolve() if args.ledger else None,
             resume_ledger=args.resume_ledger,
+            case_ids=set(args.cases) if args.cases else None,
         )
     )
     print(
@@ -358,7 +377,7 @@ def main() -> None:
     if (
         report["stopped_reason"]
         or not report["accounting_complete"]
-        or len(report["samples"]) != 3
+        or len(report["samples"]) != report["expected_sample_count"]
     ):
         raise SystemExit(1)
 

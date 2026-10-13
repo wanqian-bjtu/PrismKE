@@ -65,7 +65,13 @@ def _visual_prompt(request: VisualExtractionRequest) -> str:
         "Entity fields: name, type, confidence and optional observation_index.\n"
         "For every directly visible schema attribute, put the normalized value in the "
         "supporting observation's attributes object and use the exact schema attribute id "
-        "as its key. Do not use display labels or invent non-schema attribute keys.\n"
+        "as its key. Do not use display labels or invent non-schema attribute keys. If an "
+        "image visibly shows a schema attribute, at least one observation must have a "
+        "non-empty attributes object. Follow this shape: "
+        '{"observations":[{"label":"...","description":"...","confidence":0.9,'
+        '"bbox":[0.0,0.0,1.0,1.0],"attributes":{"schema_attribute_id":"value"}}],'
+        '"entities":[{"name":"...","type":"...","confidence":0.9,'
+        '"observation_index":0}],"claims":[]}.\n'
         f"Schema: {request.output_schema.model_dump_json()}\n"
         f"IMAGE-DERIVED OCR (PRIMARY): {json.dumps(ocr_text, ensure_ascii=False)}\n"
         f"AUXILIARY DOCUMENT CONTEXT (UNTRUSTED): {request.asset.context_text}"
