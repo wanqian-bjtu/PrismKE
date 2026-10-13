@@ -23,6 +23,7 @@ from src import __version__
 from src.domain import (
     CanonicalEntity,
     EntitySourceMode,
+    PDFParseMode,
     ProvidedEntity,
     ReviewDecision,
     TaskMode,
@@ -111,9 +112,7 @@ def _claim_rows(state: Any) -> list[list[Any]]:
             event.id,
             event.trigger,
             f"事件：{event.event_type}",
-            orjson.dumps(
-                [item.model_dump(mode="json") for item in event.arguments]
-            ).decode(),
+            orjson.dumps([item.model_dump(mode="json") for item in event.arguments]).decode(),
             event.confidence,
             decisions.get(event.id, "candidate"),
             ", ".join(event.evidence_ids),
@@ -138,8 +137,7 @@ def _review_target_choices(state: Any) -> list[tuple[str, str]]:
         for item in result.attributes
     )
     choices.extend(
-        (f"事件 · {item.event_type} / {item.trigger}", f"event|{item.id}")
-        for item in result.events
+        (f"事件 · {item.event_type} / {item.trigger}", f"event|{item.id}") for item in result.events
     )
     return choices
 
@@ -176,6 +174,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         task_mode: str,
         entity_source_mode: str,
         provided_entities_json: str,
+        pdf_parse_mode: str,
         operator: str,
     ) -> tuple[
         str,
@@ -228,6 +227,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 llm_api_key=llm_api_key.strip() or None,
                 vlm_api_key=vlm_api_key.strip() or None,
             ),
+            pdf_parse_mode=PDFParseMode(pdf_parse_mode),
         )
         first_run_id = next(
             (item.run_id for item in batch.items if item.run_id),
@@ -396,9 +396,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         batch = await service.confirm_batch_commit(batch_id, reviewer)
         return batch_action_view(batch, f"批次已提交，Revision：`{batch.revision_id}`")
 
-    def preview_schema(
-        source: str, schema_file: str | None, schema_text: str
-    ) -> str:
+    def preview_schema(source: str, schema_file: str | None, schema_text: str) -> str:
         _, schema = resolve_schema(
             source,
             schema_file,
@@ -881,6 +879,15 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     value="knowledge_graph_construction",
                     label="任务模式",
                 )
+                pdf_parse_mode_input = gr.Dropdown(
+                    [
+                        ("自动判定（推荐）", "auto"),
+                        ("PyMuPDF 快速解析", "pymupdf"),
+                        ("MinerU 高精度解析", "mineru"),
+                    ],
+                    value="auto",
+                    label="PDF 解析模式",
+                )
                 entity_source_input = gr.Dropdown(
                     [("系统自动识别", "auto"), ("使用提供实体", "provided")],
                     value="auto",
@@ -1252,9 +1259,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     )
                     gr.Markdown("### 实体拆分建议")
                     split_source = gr.Textbox(label="原 Entity ID")
-                    split_targets = gr.Code(
-                        label="新实体 JSON 数组", language="json", value="[]"
-                    )
+                    split_targets = gr.Code(label="新实体 JSON 数组", language="json", value="[]")
                     split_assignments = gr.Code(
                         label="Claim 到新 Entity 的映射 JSON", language="json", value="{}"
                     )
@@ -1389,21 +1394,23 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     health_output = gr.JSON(label="服务状态")
                 health_button.click(health, outputs=[health_output])
 
-        def switch_group(group_id: str) -> tuple[Any, Any]:
+        def switch_group(group_id: str) -> Any:
             choices = page_choices(group_id)
             target = first_page(group_id)
-            return (
-                gr.update(choices=choices, value=target, visible=len(choices) > 1),
-                gr.Tabs(selected=target),
-            )
+            return gr.update(choices=choices, value=target, visible=len(choices) > 1)
 
-        navigation_group.change(
+        group_change = navigation_group.change(
             switch_group,
             navigation_group,
-            [navigation_page, workspace_tabs],
+            navigation_page,
         )
-        navigation_page.change(
-            lambda page: gr.Tabs(selected=page),
+        group_change.then(
+            lambda group_id: gr.update(selected=first_page(group_id)),
+            navigation_group,
+            workspace_tabs,
+        )
+        navigation_page.input(
+            lambda page: gr.update(selected=page),
             navigation_page,
             workspace_tabs,
         )
@@ -1412,6 +1419,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             schema_source,
             [schema_input, schema_text],
         )
+
         def switch_task_mode(mode: str) -> tuple[Any, Any, Any]:
             relation = mode == "relation_extraction"
             return (
@@ -1546,6 +1554,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 task_mode_input,
                 entity_source_input,
                 provided_entities_input,
+                pdf_parse_mode_input,
                 config_operator,
             ],
             [

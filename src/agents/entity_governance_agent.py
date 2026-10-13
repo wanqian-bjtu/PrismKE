@@ -103,9 +103,7 @@ class EntityGovernanceAgent:
         )
         return state
 
-    async def _advise_gray_zone(
-        self, state: WorkflowState, mentions: list[EntityMention]
-    ) -> None:
+    async def _advise_gray_zone(self, state: WorkflowState, mentions: list[EntityMention]) -> None:
         if state.semantic_advisor_name == "disabled":
             return
         mention_by_id = {item.id: item for item in mentions}
@@ -138,10 +136,7 @@ class EntityGovernanceAgent:
             request = EntityAdviceRequest(
                 mention=mention,
                 candidates=same_type_candidates,
-                candidate_entities=[
-                    entities[item.entity_id]
-                    for item in same_type_candidates
-                ],
+                candidate_entities=[entities[item.entity_id] for item in same_type_candidates],
             )
             started = perf_counter()
             try:

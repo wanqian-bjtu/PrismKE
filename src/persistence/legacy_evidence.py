@@ -38,9 +38,7 @@ async def _graph_evidence(store: Neo4jGraphStore, evidence_id: str) -> EvidenceR
     return evidence
 
 
-async def legacy_snapshot(
-    store: Neo4jGraphStore, source: FileEvidenceStore
-) -> dict[str, Any]:
+async def legacy_snapshot(store: Neo4jGraphStore, source: FileEvidenceStore) -> dict[str, Any]:
     """Produce a small, non-sensitive manifest that pins every planned change."""
     claims = await store.list_claims()
     governance = sorted(
@@ -177,7 +175,8 @@ async def verify_active_claims(
     exclude_ids: set[str] | None = None,
 ) -> int:
     active = [
-        claim for claim in await store.list_claims()
+        claim
+        for claim in await store.list_claims()
         if claim.tx_to is None and claim.id not in (exclude_ids or set())
     ]
     for claim in active:

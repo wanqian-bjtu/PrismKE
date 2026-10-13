@@ -6,7 +6,7 @@ import pymupdf
 import pytest
 from PIL import Image
 
-from src.domain import EvidenceKind, SourceDocument
+from src.domain import EvidenceKind, PDFParseMode, SourceDocument
 from src.parsing import ParserRegistry
 
 
@@ -28,7 +28,9 @@ async def test_pdf_parser_preserves_page_and_bbox(tmp_path: Path) -> None:
     page.insert_text((72, 72), "PrismKE evidence")
     pdf.save(path)
     pdf.close()
-    document = await ParserRegistry().parse(SourceDocument(path=path))
+    document = await ParserRegistry(pdf_parse_mode=PDFParseMode.PYMUPDF).parse(
+        SourceDocument(path=path)
+    )
     assert document.text_blocks[0].page_number == 1
     assert document.text_blocks[0].bbox is not None
     assert document.evidence[0].kind == EvidenceKind.PDF_BBOX
@@ -41,7 +43,9 @@ async def test_scanned_pdf_is_marked_for_ocr(tmp_path: Path) -> None:
     pdf.new_page()
     pdf.save(path)
     pdf.close()
-    document = await ParserRegistry().parse(SourceDocument(path=path))
+    document = await ParserRegistry(pdf_parse_mode=PDFParseMode.PYMUPDF).parse(
+        SourceDocument(path=path)
+    )
     assert "ocr_required:page=1" in document.warnings
     assert document.pages[0].requires_ocr
     assert document.media_assets[0].origin == "pdf_page_render"

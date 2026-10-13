@@ -8,6 +8,7 @@ from enum import StrEnum
 from pydantic import BaseModel, Field
 
 from src.domain.knowledge import utc_now
+from src.domain.pdf import PDFParseMode
 from src.domain.tasks import EntitySourceMode, TaskExtractionResult, TaskMode
 
 
@@ -53,6 +54,7 @@ class BatchRun(BaseModel):
     id: str
     task_mode: TaskMode = TaskMode.KNOWLEDGE_GRAPH_CONSTRUCTION
     entity_source_mode: EntitySourceMode = EntitySourceMode.AUTO
+    pdf_parse_mode: PDFParseMode = PDFParseMode.AUTO
     schema_path: str
     status: BatchStatus = BatchStatus.QUEUED
     items: list[BatchItem] = Field(default_factory=list)

@@ -48,7 +48,9 @@ def workspace_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     )
     base_url = f"http://127.0.0.1:{port}"
     try:
-        deadline = time.monotonic() + 30
+        # A fresh environment may spend more than 30 seconds importing Paddle
+        # before Gradio is ready, especially on CPU-only Windows runners.
+        deadline = time.monotonic() + 90
         while time.monotonic() < deadline:
             try:
                 if httpx.get(f"{base_url}/api/v1/health", timeout=0.5).status_code == 200:
@@ -70,11 +72,11 @@ def workspace_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
             process.wait(timeout=5)
 
 
-def _select_next_option(page: Page, elem_id: str) -> None:
+def _select_option(page: Page, elem_id: str, label: str) -> None:
     control = page.locator(f"#{elem_id} input")
     control.click()
-    control.press("ArrowDown")
-    control.press("Enter")
+    page.get_by_role("option", name=label, exact=True).click()
+    expect(control).to_have_value(label, timeout=15_000)
 
 
 def _write_screenshot(page: Page, path: Path, *, full_page: bool) -> None:
@@ -141,10 +143,11 @@ def test_workspace_navigation_branding_and_responsive_layout(
                 "document.querySelector('#workspace-sidebar').classList.contains('open')"
             )
 
-        _select_next_option(page, "navigation-group")
+        _select_option(page, "navigation-group", "构建与执行")
         page.locator("#navigation-page").wait_for(state="visible")
-        page.locator(".workspace-page-header:visible h1").wait_for(state="visible")
-        assert page.locator(".workspace-page-header:visible h1").inner_text() == "新建抽取与构建"
+        heading = page.locator(".workspace-page-header:visible h1")
+        heading.wait_for(state="visible")
+        expect(heading).to_have_text("新建抽取与构建", timeout=60_000)
 
         if name == "mobile":
             if "open" in (sidebar.get_attribute("class") or ""):
@@ -163,9 +166,9 @@ def test_workspace_navigation_branding_and_responsive_layout(
             resizer.press("ArrowRight")
             after = sidebar.bounding_box()
             assert before and after and after["width"] > before["width"]
-            assert page.evaluate(
-                "localStorage.getItem('prismke.workspace.sidebar.width')"
-            ) is not None
+            assert (
+                page.evaluate("localStorage.getItem('prismke.workspace.sidebar.width')") is not None
+            )
 
         overflow = page.evaluate("document.documentElement.scrollWidth - window.innerWidth")
         assert overflow <= 1
@@ -186,16 +189,17 @@ def test_every_workspace_page_is_reachable_from_grouped_navigation(
         page.goto(workspace_url, wait_until="domcontentloaded", timeout=60_000)
         page.locator("#workspace-logo img").wait_for(state="visible")
 
-        for group_index, (_, (_, pages)) in enumerate(NAVIGATION_GROUPS.items()):
+        for group_index, (_, (group_label, pages)) in enumerate(NAVIGATION_GROUPS.items()):
             if group_index:
-                _select_next_option(page, "navigation-group")
-            for page_index, (_, page_id) in enumerate(pages):
-                if page_index:
-                    _select_next_option(page, "navigation-page")
+                _select_option(page, "navigation-group", group_label)
+            for page_label, page_id in pages:
+                if len(pages) > 1:
+                    page.locator("#navigation-page").wait_for(state="visible", timeout=60_000)
+                    _select_option(page, "navigation-page", page_label)
                 heading = page.locator(".workspace-page-header:visible h1")
                 heading.wait_for(state="visible")
                 expected_title = PAGE_META[page_id][0]
-                expect(heading).to_have_text(expected_title)
+                expect(heading).to_have_text(expected_title, timeout=60_000)
                 assert heading.inner_text() == expected_title
                 _write_screenshot(
                     page,

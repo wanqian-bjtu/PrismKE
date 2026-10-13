@@ -8,6 +8,7 @@ from typing import Any, TypedDict, cast
 
 from langgraph.graph import END, START, StateGraph
 
+from src.core.errors import PDFParserBlockedError
 from src.core.execution_control import ExecutionPaused, current_execution
 from src.domain import TaskMode, WorkflowState
 from src.governance.validation import ValidationService
@@ -112,7 +113,9 @@ class PrismKEWorkflow:
                 raise
             except Exception as exc:
                 self._record_provider_failure(state, exc)
-                state.status = "failed"
+                state.status = (
+                    "parser_blocked" if isinstance(exc, PDFParserBlockedError) else "failed"
+                )
                 state.failed_node = name
                 state.current_node = name
                 state.retry_count += 1
@@ -143,7 +146,9 @@ class PrismKEWorkflow:
                 raise
             except Exception as exc:
                 self._record_provider_failure(state, exc)
-                state.status = "failed"
+                state.status = (
+                    "parser_blocked" if isinstance(exc, PDFParserBlockedError) else "failed"
+                )
                 state.failed_node = name
                 state.current_node = name
                 state.retry_count += 1

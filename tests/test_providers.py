@@ -249,9 +249,7 @@ async def test_openai_provider_grounds_catalog_ids_to_source_surface_forms() -> 
         "model",
         transport=httpx.MockTransport(handler),
     )
-    result = await provider.extract(
-        ExtractionRequest(document=document, output_schema=schema)
-    )
+    result = await provider.extract(ExtractionRequest(document=document, output_schema=schema))
     assert result.candidates[0].subject.name == "北辰实验室"
     assert result.candidates[0].object.name == "AuroraGraph"
 

@@ -2,9 +2,9 @@
 
 PrismKE 是一个面向通用多模态知识图谱构建的研究型项目，目标是实现模式引导、证据感知、可审核和可持续更新的知识抽取流程。
 
-当前稳定版本为 `v0.10.0`。v0.8 将研究工作台重构为左侧导航与右侧主工作区；v0.9 新增不可变审核案例库、BGE-M3 案例检索和受预算约束的 Reflection；v0.9.2 增加历史测试事实的受控治理与 Neo4j 测试实例守卫；v0.10 建立三个语义 Agent，并完成研究工作台的视觉与配置收尾。系统同时保留持久化任务管理、安全取消、审核纠正、统一校验、语义实体治理、Neo4j 与补偿回滚。软件版本与流程协议版本独立管理；旧运行继续使用对应发布版本处理，生产服务升级需单独执行。
+当前稳定版本为 `v0.12.0`。v0.8 将研究工作台重构为左侧导航与右侧主工作区；v0.9 新增不可变审核案例库、BGE-M3 案例检索和受预算约束的 Reflection；v0.9.2 增加历史测试事实的受控治理与 Neo4j 测试实例守卫；v0.10 建立三个语义 Agent，并完成研究工作台的视觉与配置收尾；v0.11 增加多文档批次与六种任务模式；v0.12 增加 PyMuPDF 与 MinerU 双层 PDF 解析和可审计的证据派生链。系统同时保留持久化任务管理、安全取消、审核纠正、统一校验、语义实体治理、Neo4j 与补偿回滚。软件版本与流程协议版本独立管理；旧运行继续使用对应发布版本处理，生产服务升级需单独执行。
 
-当前正式版本为 `v0.11.0`，软件版本与流程协议均为 `0.11.0`。它新增多文件批次、JSONPath 证据、旧 DOC 隔离转换，以及六种独立抽取/构建任务。Git 发布不替换生产 v0.9.2 服务，生产升级仍需单独执行。
+`v0.12.0` 软件版本与流程协议均为 `0.12.0`。该版本增加 PyMuPDF 与 MinerU 双层 PDF 解析、可审计的解析路由、派生资产清单及人工降级机制；Git 发布不替换生产 v0.9.2 服务。
 
 `v0.10.0` 包含三个有结构化交接与决策轨迹的语义 Agent：多模态抽取、实体与事实治理、知识融合与审核。LangGraph 仍是确定性协调器，GraphStore 仍执行硬校验和事务提交；灰区模型建议受显式开关和预算约束。研究工作台提供可调宽侧栏、Schema 文件/文本输入、会话级模型配置、OCR 自动设备选择和中英混合识别，具体边界见 [v0.10 前端视觉验收](docs/PrismKE-v0.10前端视觉验收.md)。本次 Git 发布不替换生产服务。职责、命令和边界见 [v0.10 三 Agent 架构说明](docs/PrismKE-v0.10三Agent架构与验收.md)。
 
@@ -28,7 +28,8 @@ PrismKE 是一个面向通用多模态知识图谱构建的研究型项目，目
 - 旧 DOC 先由 LibreOffice headless 在隔离配置目录中转换为 DOCX；原文件与派生文件分别记录哈希和工具版本。缺少转换器、转换超时或派生文件异常时明确失败。
 - 普通 JSON 按 JSONPath 展开标量并保留数组顺序，Evidence 同时校验原文件哈希、JSONPath 和字段值哈希。
 - Markdown、HTML 和 DOCX 中的图片会与邻近文字、alt 或图注一同进入 `DocumentIR`。
-- PDF 保留文本页码和 bbox，抽取内嵌光栅图片，并为扫描页或矢量较重页面生成页面图。
+- v0.12 默认先由 PyMuPDF 只读预检 PDF。普通文本型 PDF 继续使用 PyMuPDF；扫描件、表格、绘图或多栏密集文档路由到本机 MinerU 4.0.12 Standard。请求模式、复杂度指标、路由原因、解析器版本和配置指纹均进入运行快照。
+- MinerU Markdown 仅用于预览；页码、bbox、表格、图片、公式和派生关系从 MiddleJson 转换到 `DocumentIR`/`EvidenceRef`，并同时校验原 PDF 与派生产物哈希。MinerU 失败时自动模式进入阻断，只有具名操作者填写原因后才可降级到 PyMuPDF。
 - PaddleOCR 3.x 将扫描页和图片文字转为带像素 bbox 的 OCR 文本块。
 - 小于 `64×64` 的装饰图默认跳过；远程图片默认禁止下载。
 
@@ -147,6 +148,24 @@ uv sync --extra dev --extra neo4j --extra web
 ```bash
 uv sync --extra dev --extra neo4j --extra web --extra embedding
 ```
+
+### MinerU 高精度 PDF 解析
+
+MinerU 不安装进 PrismKE 主环境。Linux 服务器先确认数据盘至少有 10 GiB 可用，再执行：
+
+```bash
+bash scripts/install_mineru.sh
+bash scripts/start_mineru.sh
+bash scripts/status_mineru.sh
+```
+
+服务固定监听 `127.0.0.1:18020`，默认单工作器、单并发。停止命令为：
+
+```bash
+bash scripts/stop_mineru.sh
+```
+
+Windows 和 CI 无需安装 MinerU，使用 Mock V1 服务测试。完整路由、证据和人工降级边界见 [v0.12 双层 PDF 解析说明](docs/PrismKE-v0.12双层PDF解析架构与操作.md)。
 
 `uv sync` 在项目内创建 `.venv`。启动脚本优先使用该环境中的 `python` 和
 `prismke`；其它安装方式可设置 `PRISMKE_PYTHON_BIN` 与 `PRISMKE_CLI_BIN`。

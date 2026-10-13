@@ -16,9 +16,7 @@ from src.workflow import PrismKEService
 
 def fixture(tmp_path: Path, schema_path: Path) -> tuple[PrismKEService, str]:
     sample = tmp_path / "sample.md"
-    sample.write_text(
-        "WorkspaceDemo | developed_by | TestOrg | Software | Organization | 0.92\n"
-    )
+    sample.write_text("WorkspaceDemo | developed_by | TestOrg | Software | Organization | 0.92\n")
     service = PrismKEService(Settings(_env_file=None, runtime_dir=tmp_path / "runtime"))
     state, created = service.create_run(sample, schema_path, "mock")
     assert created
@@ -206,9 +204,12 @@ def test_neo4j_password_is_private_clearable_and_conflict_safe(tmp_path: Path) -
     audit = settings.audit_path.read_text(encoding="utf-8")
     assert secret not in audit
     assert "replacement" not in audit
-    assert PrismKEService(
-        Settings(_env_file=None, runtime_dir=settings.runtime_dir)
-    ).settings.neo4j_password is None
+    assert (
+        PrismKEService(
+            Settings(_env_file=None, runtime_dir=settings.runtime_dir)
+        ).settings.neo4j_password
+        is None
+    )
 
 
 def test_workspace_provider_defaults_and_setting_controls(tmp_path: Path) -> None:

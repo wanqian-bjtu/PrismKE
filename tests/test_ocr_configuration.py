@@ -96,7 +96,6 @@ def test_ocr_language_modes(configured: str, engine: str) -> None:
 
 def test_equivalent_chinese_modes_keep_provider_fingerprint() -> None:
     fingerprints = {
-        PaddleOCRProvider(device="cpu", lang=mode).fingerprint()
-        for mode in ("mixed", "zh", "ch")
+        PaddleOCRProvider(device="cpu", lang=mode).fingerprint() for mode in ("mixed", "zh", "ch")
     }
     assert len(fingerprints) == 1

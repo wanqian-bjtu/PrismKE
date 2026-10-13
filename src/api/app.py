@@ -38,6 +38,7 @@ from src.api.models import (
     EntityReviewRequest,
     ExtractionReviewRequest,
     MergeProposalRequest,
+    PDFParserFallbackRequest,
     RequestReconciliationRequest,
     ResumeRequest,
     ReviewRequest,
@@ -54,7 +55,7 @@ from src.core.errors import (
     TaskModeCommitError,
 )
 from src.core.settings import Settings
-from src.domain import EntitySourceMode, ProvidedEntity, TaskMode
+from src.domain import EntitySourceMode, PDFParseMode, ProvidedEntity, TaskMode
 from src.persistence.execution import ExecutionConflict
 from src.workflow import PrismKEService
 
@@ -106,9 +107,7 @@ def _provided_entities(value: str | None) -> list[ProvidedEntity]:
             raise TypeError
         return [ProvidedEntity.model_validate(item) for item in payload]
     except (TypeError, ValueError, orjson.JSONDecodeError) as exc:
-        raise HTTPException(
-            status_code=422, detail={"code": "INVALID_ENTITY_LIST"}
-        ) from exc
+        raise HTTPException(status_code=422, detail={"code": "INVALID_ENTITY_LIST"}) from exc
 
 
 def create_app(
@@ -162,6 +161,10 @@ def create_app(
 
     api = APIRouter(prefix="/api/v1", dependencies=[Depends(authorize)])
 
+    @api.get("/pdf-parsers/status")
+    async def pdf_parsers_status() -> object:
+        return await service.pdf_parser_status()
+
     @api.post("/runs", response_model=RunAccepted, status_code=202)
     async def create_run(
         document: Annotated[UploadFile, File()],
@@ -181,6 +184,7 @@ def create_app(
         task_mode: Annotated[TaskMode, Form()] = TaskMode.KNOWLEDGE_GRAPH_CONSTRUCTION,
         entity_source_mode: Annotated[EntitySourceMode, Form()] = EntitySourceMode.AUTO,
         provided_entities_json: Annotated[str | None, Form()] = None,
+        pdf_parse_mode: Annotated[PDFParseMode, Form()] = PDFParseMode.AUTO,
     ) -> RunAccepted:
         service.executions.ensure_accepting()
         if service.review_metadata:
@@ -209,6 +213,7 @@ def create_app(
             task_mode=task_mode,
             entity_source_mode=entity_source_mode,
             provided_entities=_provided_entities(provided_entities_json),
+            pdf_parse_mode=pdf_parse_mode,
         )
         if created:
             service.executions.enqueue(state.run_id, "execute")
@@ -226,6 +231,22 @@ def create_app(
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="run not found") from exc
         except ValueError as exc:
+            raise HTTPException(status_code=409, detail={"code": str(exc)}) from exc
+
+    @api.get("/runs/{run_id}/pdf-parse")
+    async def pdf_parse_status(run_id: str) -> object:
+        try:
+            return service.pdf_parse_view(run_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="run not found") from exc
+
+    @api.post("/runs/{run_id}/pdf-parser-fallback", status_code=202)
+    async def pdf_parser_fallback(run_id: str, request: PDFParserFallbackRequest) -> object:
+        try:
+            return service.approve_pdf_parser_fallback(run_id, **request.model_dump())
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="run not found") from exc
+        except (ValueError, ExecutionConflict) as exc:
             raise HTTPException(status_code=409, detail={"code": str(exc)}) from exc
 
     @api.post("/runs/{run_id}/results/{target_type}/{target_id}/review")
@@ -269,6 +290,7 @@ def create_app(
         entity_source_mode: Annotated[EntitySourceMode, Form()] = EntitySourceMode.AUTO,
         provided_entities_json: Annotated[str | None, Form()] = None,
         operator: Annotated[str | None, Form()] = None,
+        pdf_parse_mode: Annotated[PDFParseMode, Form()] = PDFParseMode.AUTO,
     ) -> object:
         if len(documents) > settings.max_batch_files:
             raise HTTPException(
@@ -313,6 +335,7 @@ def create_app(
                 semantic_advisor_name=semantic_advisor,
                 agent_token_budget=agent_token_budget,
                 operator=operator,
+                pdf_parse_mode=pdf_parse_mode,
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail={"code": str(exc)}) from exc
@@ -348,9 +371,7 @@ def create_app(
         batch_id: str, item_id: str, request: BatchExcludeRequest
     ) -> object:
         try:
-            return service.exclude_batch_item(
-                batch_id, item_id, request.operator, request.reason
-            )
+            return service.exclude_batch_item(batch_id, item_id, request.operator, request.reason)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="batch not found") from exc
         except KeyError as exc:
@@ -359,9 +380,7 @@ def create_app(
             raise HTTPException(status_code=409, detail={"code": str(exc)}) from exc
 
     @api.post("/batches/{batch_id}/confirm-commit")
-    async def confirm_batch_commit(
-        batch_id: str, request: BatchCommitRequest
-    ) -> object:
+    async def confirm_batch_commit(batch_id: str, request: BatchCommitRequest) -> object:
         try:
             return await service.confirm_batch_commit(batch_id, request.reviewer)
         except FileNotFoundError as exc:

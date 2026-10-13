@@ -69,6 +69,14 @@ from src.domain.knowledge import (
     RevisionDiff,
     utc_now,
 )
+from src.domain.pdf import (
+    PDFComplexityReport,
+    PDFComplexityThresholds,
+    PDFParseDecision,
+    PDFParseMode,
+    PDFParserFallbackEvent,
+    PDFParserName,
+)
 from src.domain.reviews import CorrectionGuard, ReviewCorrection, ReviewEvent
 from src.domain.schema import (
     AttributeDef,
@@ -200,4 +208,10 @@ __all__ = [
     "BatchItem",
     "BatchRun",
     "BatchResult",
+    "PDFParseMode",
+    "PDFParserName",
+    "PDFComplexityThresholds",
+    "PDFComplexityReport",
+    "PDFParseDecision",
+    "PDFParserFallbackEvent",
 ]

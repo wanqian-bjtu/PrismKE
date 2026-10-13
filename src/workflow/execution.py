@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from filelock import FileLock, Timeout
 
-from src.core.errors import LegacyCheckpointError
+from src.core.errors import LegacyCheckpointError, PDFParserBlockedError
 from src.core.execution_control import ExecutionPaused, current_execution
 from src.core.ids import canonical_hash, file_sha256
 from src.domain.execution import (
@@ -121,11 +121,15 @@ class ExecutionManager:
     @staticmethod
     def business_status(
         state: WorkflowState,
-    ) -> Literal["awaiting_review", "awaiting_commit", "completed", "failed", "interrupted"]:
+    ) -> Literal[
+        "awaiting_review", "awaiting_commit", "completed", "failed", "interrupted", "parser_blocked"
+    ]:
         if state.status == "completed":
             return "completed"
         if state.status == "failed":
             return "failed"
+        if state.status == "parser_blocked":
+            return "parser_blocked"
         if state.status == "awaiting_review":
             return "awaiting_review"
         if state.current_node == "prepare_graph_commit":
@@ -293,9 +297,7 @@ class ExecutionManager:
             visual_total,
             sum(c.provider == "vlm" and c.status == "succeeded" for c in calls),
         )
-        ocr_total = (
-            sum(asset.requires_ocr for asset in document.media_assets) if document else 0
-        )
+        ocr_total = sum(asset.requires_ocr for asset in document.media_assets) if document else 0
         node_order = [
             "ingest",
             "parse_document",
@@ -366,9 +368,7 @@ class ExecutionManager:
             ),
         ]
 
-    def reconcile_request(
-        self, run_id: str, decision: RequestReconciliation
-    ) -> dict[str, Any]:
+    def reconcile_request(self, run_id: str, decision: RequestReconciliation) -> dict[str, Any]:
         self.compatible(self.service.show_run(run_id))
         event = self.repository.reconcile_request(run_id, decision)
         return {
@@ -622,10 +622,15 @@ class ExecutionManager:
                     )
                     continue
                 self.failures[task.run_id] = exc
-                error = type(exc).__name__
+                parser_blocked = isinstance(exc, PDFParserBlockedError)
+                error = exc.code if isinstance(exc, PDFParserBlockedError) else type(exc).__name__
 
-                def fail(t: ExecutionTask, code: str = error) -> None:
-                    t.status = "failed"
+                def fail(
+                    t: ExecutionTask,
+                    code: str = error,
+                    blocked: bool = parser_blocked,
+                ) -> None:
+                    t.status = "parser_blocked" if blocked else "failed"
                     t.error_code = code
 
                 self.repository.change(task.run_id, fail)

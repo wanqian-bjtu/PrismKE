@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from src.core.errors import UnsupportedDocumentError
-from src.domain import DocumentIR, SourceDocument
+from src.domain import DocumentIR, PDFComplexityThresholds, PDFParseMode, SourceDocument
 from src.parsing.adapters import (
     DOCXParser,
     HTMLParser,
@@ -16,6 +16,8 @@ from src.parsing.adapters import (
     detect_media_type,
 )
 from src.parsing.base import ParserAdapter
+from src.parsing.mineru import MinerUV1Client
+from src.parsing.pdf_router import RoutedPDFParser
 
 
 class ParserRegistry:
@@ -27,7 +29,20 @@ class ParserRegistry:
         derived_dir: Path | None = None,
         libreoffice_bin: Path | None = None,
         conversion_timeout_seconds: int = 120,
+        pdf_parse_mode: PDFParseMode = PDFParseMode.AUTO,
+        pdf_thresholds: PDFComplexityThresholds | None = None,
+        mineru_client: MinerUV1Client | None = None,
+        pdf_fallback_approved: bool = False,
     ) -> None:
+        lightweight_pdf = PDFParser(asset_dir)
+        routed_pdf = RoutedPDFParser(
+            lightweight_pdf,
+            mineru_client
+            or MinerUV1Client("http://127.0.0.1:18020", Path("runtime/derived-documents")),
+            mode=pdf_parse_mode,
+            thresholds=pdf_thresholds,
+            fallback_approved=pdf_fallback_approved,
+        )
         self._parsers = parsers or [
             TextParser(),
             MarkdownParser(asset_dir, allow_remote_assets),
@@ -40,7 +55,7 @@ class ParserRegistry:
                 conversion_timeout_seconds,
             ),
             DOCXParser(asset_dir),
-            PDFParser(asset_dir),
+            routed_pdf,
             ImageParser(asset_dir),
         ]
 

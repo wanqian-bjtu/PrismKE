@@ -7,7 +7,7 @@ from pathlib import Path
 from src.agents.entity_governance_agent import EntityGovernanceAgent
 from src.agents.fusion_review_agent import FusionReviewAgent
 from src.agents.multimodal_extraction_agent import MultimodalExtractionAgent
-from src.core.errors import EvidenceIntegrityError, GraphIntegrityError
+from src.core.errors import EvidenceIntegrityError, GraphIntegrityError, PDFParserBlockedError
 from src.core.execution_control import current_execution
 from src.core.ids import canonical_hash, stable_id
 from src.domain import (
@@ -93,7 +93,17 @@ class WorkflowNodes:
         return state
 
     async def parse_document(self, state: WorkflowState) -> WorkflowState:
-        state.document = await self.parsers.parse(SourceDocument(path=state.input_path))
+        try:
+            state.document = await self.parsers.parse(SourceDocument(path=state.input_path))
+        except PDFParserBlockedError as exc:
+            from src.domain import PDFParseDecision
+
+            if exc.decision is not None:
+                state.pdf_parse_decision = PDFParseDecision.model_validate(exc.decision)
+                state.pdf_parse_decision.mineru_status = "blocked"
+            state.status = "parser_blocked"
+            raise
+        state.pdf_parse_decision = state.document.pdf_parse_decision
         state.warnings.extend(state.document.warnings)
         return state
 
@@ -170,14 +180,10 @@ class WorkflowNodes:
             state.validation, [*candidate_issues, *item_issues]
         )
         evidence_ids = {
-            evidence_id
-            for candidate in state.candidates
-            for evidence_id in candidate.evidence_ids
+            evidence_id for candidate in state.candidates for evidence_id in candidate.evidence_ids
         }
         evidence_ids.update(
-            evidence_id
-            for mention in mentions.values()
-            for evidence_id in mention.evidence_ids
+            evidence_id for mention in mentions.values() for evidence_id in mention.evidence_ids
         )
         evidence_ids.update(
             evidence_id
@@ -185,9 +191,7 @@ class WorkflowNodes:
             for evidence_id in attribute.evidence_ids
         )
         evidence_ids.update(
-            evidence_id
-            for event in state.candidate_events
-            for evidence_id in event.evidence_ids
+            evidence_id for event in state.candidate_events for evidence_id in event.evidence_ids
         )
         state.extraction_result = TaskExtractionResult(
             task_mode=state.task_mode,
@@ -203,9 +207,7 @@ class WorkflowNodes:
             warnings=state.warnings,
             review_required_ids=list(dict.fromkeys(state.extraction_review_required_ids)),
         )
-        state.status = (
-            "awaiting_review" if state.extraction_review_required_ids else "completed"
-        )
+        state.status = "awaiting_review" if state.extraction_review_required_ids else "completed"
         return state
 
     async def prepare_graph_commit(self, state: WorkflowState) -> WorkflowState:

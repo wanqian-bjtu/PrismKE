@@ -19,6 +19,7 @@ from src.domain import (
     BatchResult,
     BatchRun,
     EntitySourceMode,
+    PDFParseMode,
     ProvidedEntity,
     ReviewDecision,
     TaskMode,
@@ -202,6 +203,7 @@ def run(
         Path | None, typer.Option("--entities", exists=True, dir_okay=False)
     ] = None,
     output: Annotated[Path | None, typer.Option("--output", dir_okay=False)] = None,
+    pdf_parser: Annotated[PDFParseMode, typer.Option("--pdf-parser")] = PDFParseMode.AUTO,
 ) -> None:
     """Run one document in the selected extraction or construction mode."""
     provided = (
@@ -228,6 +230,7 @@ def run(
             task_mode=task_mode,
             entity_source_mode=entity_source_mode,
             provided_entities=provided,
+            pdf_parse_mode=pdf_parser,
         )
     )
     console.print(f"run_id={state.run_id} status={state.status}")
@@ -259,6 +262,7 @@ def run_batch(
     ] = None,
     operator: Annotated[str, typer.Option("--operator")] = "CLI",
     output: Annotated[Path | None, typer.Option("--output", dir_okay=False)] = None,
+    pdf_parser: Annotated[PDFParseMode, typer.Option("--pdf-parser")] = PDFParseMode.AUTO,
 ) -> None:
     """Run a bounded multi-document batch and export per-file results."""
     provided = (
@@ -280,12 +284,16 @@ def run_batch(
                 ocr_provider_name=ocr_provider,
                 vlm_provider_name=vlm_provider,
                 operator=operator,
+                pdf_parse_mode=pdf_parser,
             )
-            for run_id in dict.fromkeys(
-                item.run_id for item in batch.items if item.run_id
-            ):
+            for run_id in dict.fromkeys(item.run_id for item in batch.items if item.run_id):
                 state = service.show_run(run_id)
-                if state.status not in {"completed", "awaiting_review", "failed"}:
+                if state.status not in {
+                    "completed",
+                    "awaiting_review",
+                    "failed",
+                    "parser_blocked",
+                }:
                     await service.execute_run(run_id)
             batch = service.refresh_batch(batch.id)
             return batch, service.batch_results(batch.id)
@@ -309,6 +317,32 @@ def run_batch(
 def show_run(run_id: str) -> None:
     """Print the latest serialized state of a run."""
     _print_model(PrismKEService().show_run(run_id))
+
+
+@app.command("pdf-parser-fallback")
+def pdf_parser_fallback(
+    run_id: str,
+    operator: Annotated[str, typer.Option("--operator")],
+    reason: Annotated[str, typer.Option("--reason")],
+    expected_version: Annotated[int | None, typer.Option("--expected-version")] = None,
+    request_id: Annotated[str | None, typer.Option("--request-id")] = None,
+) -> None:
+    """Confirm an audited PyMuPDF retry for an auto-routed blocked PDF."""
+    service = PrismKEService()
+    version = (
+        expected_version
+        if expected_version is not None
+        else int(service.executions.view(run_id)["version"])
+    )
+    _print_model(
+        service.approve_pdf_parser_fallback(
+            run_id,
+            operator,
+            reason,
+            request_id or uuid4().hex,
+            version,
+        )
+    )
 
 
 @app.command("agent-traces")

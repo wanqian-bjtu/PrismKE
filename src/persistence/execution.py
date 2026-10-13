@@ -9,12 +9,14 @@ from typing import Any
 
 import orjson
 
+from src.core.ids import canonical_hash
 from src.domain.execution import (
     ExecutionEvent,
     ExecutionTask,
     RequestReconciliation,
     RequestReconciliationEvent,
 )
+from src.domain.pdf import PDFParserFallbackEvent
 
 
 class ExecutionConflict(ValueError):
@@ -56,6 +58,17 @@ class ExecutionRepository:
                 CREATE TRIGGER IF NOT EXISTS immutable_request_reconciliations_delete
                     BEFORE DELETE ON request_reconciliations
                     BEGIN SELECT RAISE(ABORT, 'immutable reconciliation'); END;
+                CREATE TABLE IF NOT EXISTS pdf_parser_fallbacks (
+                    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT NOT NULL, request_id TEXT NOT NULL,
+                    fingerprint TEXT NOT NULL, payload BLOB NOT NULL,
+                    UNIQUE(run_id, request_id));
+                CREATE TRIGGER IF NOT EXISTS immutable_pdf_parser_fallbacks_update
+                    BEFORE UPDATE ON pdf_parser_fallbacks
+                    BEGIN SELECT RAISE(ABORT, 'immutable PDF parser fallback'); END;
+                CREATE TRIGGER IF NOT EXISTS immutable_pdf_parser_fallbacks_delete
+                    BEFORE DELETE ON pdf_parser_fallbacks
+                    BEGIN SELECT RAISE(ABORT, 'immutable PDF parser fallback'); END;
             """)
 
     @contextmanager
@@ -219,20 +232,34 @@ class ExecutionRepository:
 
     def unknown(self, run_id: str, *, include_sent: bool = True) -> int:
         with self.connect() as db:
-            return int(
-                db.execute(
-                    """SELECT count(*) FROM requests WHERE run_id=? AND
-                (status='unknown' OR (status='sent' AND ?) OR
-                 (status='completed' AND usage_known=0))""",
-                    (run_id, int(include_sent)),
-                ).fetchone()[0]
+            rows = db.execute(
+                "SELECT r.key,r.status,r.metadata,r.usage_known,x.payload "
+                "FROM requests r LEFT JOIN results x "
+                "ON x.run_id=r.run_id AND x.key=r.key WHERE r.run_id=?",
+                (run_id,),
+            ).fetchall()
+        unknown = 0
+        for _, status, metadata_bytes, usage_known, result_bytes in rows:
+            metadata = dict(orjson.loads(metadata_bytes))
+            result = dict(orjson.loads(result_bytes)) if result_bytes else {}
+            recoverable_mineru = bool(
+                status == "sent" and metadata.get("provider") == "mineru" and result.get("job_id")
             )
+            if (
+                status == "unknown"
+                or (status == "completed" and not usage_known)
+                or (status == "sent" and include_sent and not recoverable_mineru)
+            ):
+                unknown += 1
+        return unknown
 
     def requests(self, run_id: str) -> list[dict[str, Any]]:
         with self.connect() as db:
             rows = db.execute(
-                "SELECT key,status,metadata,usage_known FROM requests "
-                "WHERE run_id=? ORDER BY rowid",
+                "SELECT r.key,r.status,r.metadata,r.usage_known,x.payload "
+                "FROM requests r LEFT JOIN results x "
+                "ON x.run_id=r.run_id AND x.key=r.key "
+                "WHERE r.run_id=? ORDER BY r.rowid",
                 (run_id,),
             ).fetchall()
         return [
@@ -241,8 +268,14 @@ class ExecutionRepository:
                 "status": status,
                 "metadata": dict(orjson.loads(metadata)),
                 "usage_known": bool(usage_known),
+                "recoverable": bool(
+                    status == "sent"
+                    and dict(orjson.loads(metadata)).get("provider") == "mineru"
+                    and response
+                    and dict(orjson.loads(response)).get("job_id")
+                ),
             }
-            for key, status, metadata, usage_known in rows
+            for key, status, metadata, usage_known, response in rows
         ]
 
     def reconcile_request(
@@ -251,9 +284,7 @@ class ExecutionRepository:
         now = datetime.now(UTC)
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            task_row = db.execute(
-                "SELECT payload FROM tasks WHERE run_id=?", (run_id,)
-            ).fetchone()
+            task_row = db.execute("SELECT payload FROM tasks WHERE run_id=?", (run_id,)).fetchone()
             if task_row is None:
                 raise ExecutionConflict("EXECUTION_NOT_REGISTERED")
             task = ExecutionTask.model_validate(orjson.loads(task_row[0]))
@@ -301,12 +332,69 @@ class ExecutionRepository:
     def reconciliations(self, run_id: str) -> list[RequestReconciliationEvent]:
         with self.connect() as db:
             rows = db.execute(
-                "SELECT seq,payload FROM request_reconciliations "
-                "WHERE run_id=? ORDER BY seq",
+                "SELECT seq,payload FROM request_reconciliations WHERE run_id=? ORDER BY seq",
                 (run_id,),
             ).fetchall()
         return [
             RequestReconciliationEvent(sequence=sequence, **orjson.loads(payload))
+            for sequence, payload in rows
+        ]
+
+    def record_pdf_fallback(
+        self, event: PDFParserFallbackEvent
+    ) -> tuple[PDFParserFallbackEvent, ExecutionTask]:
+        fingerprint = canonical_hash(
+            [
+                event.operator.strip(),
+                event.reason.strip(),
+                event.expected_execution_version,
+                event.from_parser,
+                event.to_parser,
+            ]
+        )
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            previous = db.execute(
+                "SELECT fingerprint,payload FROM pdf_parser_fallbacks "
+                "WHERE run_id=? AND request_id=?",
+                (event.run_id, event.request_id),
+            ).fetchone()
+            task_row = db.execute(
+                "SELECT payload FROM tasks WHERE run_id=?", (event.run_id,)
+            ).fetchone()
+            if task_row is None:
+                raise ExecutionConflict("EXECUTION_NOT_REGISTERED")
+            task = ExecutionTask.model_validate(orjson.loads(task_row[0]))
+            if previous:
+                if previous[0] != fingerprint:
+                    raise ExecutionConflict("REQUEST_ID_REUSED")
+                return PDFParserFallbackEvent.model_validate(orjson.loads(previous[1])), task
+            if task.version != event.expected_execution_version:
+                raise ExecutionConflict("STALE_EXECUTION_VERSION")
+            payload = event.model_dump(mode="json", exclude={"sequence"})
+            cursor = db.execute(
+                "INSERT INTO pdf_parser_fallbacks(run_id,request_id,fingerprint,payload) "
+                "VALUES (?,?,?,?)",
+                (event.run_id, event.request_id, fingerprint, orjson.dumps(payload)),
+            )
+            if cursor.lastrowid is None:
+                raise ExecutionConflict("PDF_FALLBACK_EVENT_NOT_SAVED")
+            payload["sequence"] = cursor.lastrowid
+            task.version += 1
+            task.status = "interrupted"
+            task.error_code = None
+            task.reason = "PDF_PARSER_FALLBACK_APPROVED"
+            self._write(db, task)
+        return PDFParserFallbackEvent.model_validate(payload), task
+
+    def pdf_fallbacks(self, run_id: str) -> list[PDFParserFallbackEvent]:
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT seq,payload FROM pdf_parser_fallbacks WHERE run_id=? ORDER BY seq",
+                (run_id,),
+            ).fetchall()
+        return [
+            PDFParserFallbackEvent(sequence=sequence, **orjson.loads(payload))
             for sequence, payload in rows
         ]
 

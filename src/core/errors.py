@@ -15,6 +15,39 @@ class DocumentConversionError(PrismKEError):
     """Raised when a legacy document cannot be converted safely."""
 
 
+class PDFParserBlockedError(PrismKEError):
+    """Raised when a selected high-precision parser cannot safely finish."""
+
+    def __init__(self, code: str, message: str, *, decision: object | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.decision = decision
+
+
+class MinerUUnavailableError(PDFParserBlockedError):
+    def __init__(
+        self, message: str = "MinerU service is unavailable", *, decision: object | None = None
+    ) -> None:
+        super().__init__("MINERU_UNAVAILABLE", message, decision=decision)
+
+
+class MinerUParseError(PDFParserBlockedError):
+    def __init__(
+        self, message: str = "MinerU parsing failed", *, decision: object | None = None
+    ) -> None:
+        super().__init__("MINERU_PARSE_FAILED", message, decision=decision)
+
+
+class MinerUEvidenceError(PDFParserBlockedError):
+    def __init__(
+        self,
+        message: str = "MinerU evidence package is invalid",
+        *,
+        decision: object | None = None,
+    ) -> None:
+        super().__init__("MINERU_EVIDENCE_INVALID", message, decision=decision)
+
+
 class TaskModeCommitError(PrismKEError):
     """Raised when an extraction-only task attempts a graph commit."""
 
