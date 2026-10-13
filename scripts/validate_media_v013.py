@@ -224,7 +224,7 @@ async def _run(
     )
     schema = _schema()
     report: dict[str, Any] = {
-        "code_version": "0.13.0.dev0",
+        "code_version": "0.13.0",
         "graph_backend": "none",
         "production_graph_access": False,
         "token_limit": budget.limit,
