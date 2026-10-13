@@ -351,6 +351,114 @@ def agent_traces(run_id: str) -> None:
     _print_model(PrismKEService().show_run(run_id).agent_traces)
 
 
+@app.command("list-media")
+def list_media_command(
+    document_id: Annotated[str | None, typer.Option("--document-id")] = None,
+    media_type: Annotated[str | None, typer.Option("--media-type")] = None,
+) -> None:
+    """List active media occurrences without exposing blobs or server paths."""
+
+    async def execute() -> object:
+        service = PrismKEService()
+        try:
+            contents = {
+                item.id: item for item in await service.graph_store.list_media_contents()
+            }
+            return [
+                {
+                    "occurrence": item.model_dump(mode="json"),
+                    "content": contents[item.media_content_id].model_dump(mode="json"),
+                }
+                for item in await service.graph_store.list_media_occurrences()
+                if item.active
+                and (document_id is None or item.document_id == document_id)
+                and (
+                    media_type is None
+                    or contents[item.media_content_id].asset_type.value == media_type
+                )
+            ]
+        finally:
+            await service.close()
+
+    _print_model(asyncio.run(execute()))
+
+
+@app.command("show-media")
+def show_media_command(occurrence_id: str) -> None:
+    """Show one media occurrence, its immutable content and graph assertions."""
+
+    async def execute() -> object:
+        service = PrismKEService()
+        try:
+            occurrence = await service.graph_store.get_media_occurrence(occurrence_id)
+            if occurrence is None:
+                raise typer.BadParameter(f"media occurrence not found: {occurrence_id}")
+            content = next(
+                (
+                    item
+                    for item in await service.graph_store.list_media_contents()
+                    if item.id == occurrence.media_content_id
+                ),
+                None,
+            )
+            return {
+                "occurrence": occurrence.model_dump(mode="json"),
+                "content": content.model_dump(mode="json") if content else None,
+                "relations": [
+                    item.model_dump(mode="json")
+                    for item in await service.graph_store.list_media_relations()
+                    if item.occurrence_id == occurrence_id
+                ],
+                "visual_assertions": [
+                    item.model_dump(mode="json")
+                    for item in await service.graph_store.list_visual_assertions()
+                    if item.occurrence_id == occurrence_id
+                ],
+            }
+        finally:
+            await service.close()
+
+    _print_model(asyncio.run(execute()))
+
+
+@app.command("list-visual-reviews")
+def list_visual_reviews_command(run_id: str) -> None:
+    """List versioned visual review tasks and decisions for one run."""
+    state = PrismKEService().show_run(run_id)
+    _print_model(
+        {
+            "tasks": [item.model_dump(mode="json") for item in state.visual_review_tasks],
+            "events": [item.model_dump(mode="json") for item in state.visual_review_events],
+        }
+    )
+
+
+@app.command("review-visual")
+def review_visual_command(
+    run_id: str,
+    task_id: str,
+    decision: Annotated[Literal["approve", "reject", "defer"], typer.Option("--decision")],
+    reviewer: Annotated[str, typer.Option("--reviewer")],
+    reason: Annotated[str, typer.Option("--reason")],
+    expected_version: Annotated[int, typer.Option("--expected-version", min=0)],
+    request_id: Annotated[str | None, typer.Option("--request-id")] = None,
+) -> None:
+    """Record one idempotent visual decision with optimistic version checking."""
+    _print_model(
+        asyncio.run(
+            PrismKEService().review_visual(
+                run_id,
+                task_id,
+                decision,
+                reviewer,
+                reason,
+                request_id or uuid4().hex,
+                expected_version,
+            )
+        )
+    )
+
+
 @app.command("list-cases")
 def list_cases_command(
     case_type: Annotated[str | None, typer.Option("--type")] = None,

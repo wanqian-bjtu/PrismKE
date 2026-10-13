@@ -12,9 +12,13 @@ from src.domain import (
     EvidenceRef,
     GraphCommit,
     GraphHealth,
+    GraphMediaContent,
+    GraphMediaOccurrence,
+    GraphMediaRelation,
     GraphNeighborhood,
     GraphRevision,
     RevisionDiff,
+    VisualAssertion,
 )
 
 
@@ -38,6 +42,16 @@ class GraphStore(Protocol):
     async def upsert_entity_embeddings(self, embeddings: list[EntityEmbedding]) -> None: ...
 
     async def list_claims(self) -> list[Claim]: ...
+
+    async def list_media_occurrences(self) -> list[GraphMediaOccurrence]: ...
+
+    async def list_media_contents(self) -> list[GraphMediaContent]: ...
+
+    async def get_media_occurrence(self, occurrence_id: str) -> GraphMediaOccurrence | None: ...
+
+    async def list_media_relations(self) -> list[GraphMediaRelation]: ...
+
+    async def list_visual_assertions(self) -> list[VisualAssertion]: ...
 
     async def latest_revision(self) -> GraphRevision | None: ...
 

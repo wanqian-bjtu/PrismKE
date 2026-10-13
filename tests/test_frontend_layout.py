@@ -26,6 +26,8 @@ EXPECTED_PAGE_IDS = {
     "validation",
     "evidence",
     "graph",
+    "media",
+    "visual-review",
     "governance",
     "corrections",
     "revisions",
@@ -38,10 +40,10 @@ EXPECTED_PAGE_IDS = {
 
 def test_navigation_groups_cover_every_workspace_page_once() -> None:
     page_ids = all_page_ids()
-    assert len(page_ids) == 15
+    assert len(page_ids) == 17
     assert len(page_ids) == len(set(page_ids))
     assert set(page_ids) == EXPECTED_PAGE_IDS == set(PAGE_META)
-    assert len(NAVIGATION_GROUPS) == 9
+    assert len(NAVIGATION_GROUPS) == 10
     for group_id in NAVIGATION_GROUPS:
         choices = page_choices(group_id)
         assert choices

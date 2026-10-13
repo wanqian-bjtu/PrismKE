@@ -22,6 +22,10 @@ NAVIGATION_GROUPS: dict[str, tuple[str, tuple[tuple[str, str], ...]]] = {
         ),
     ),
     "evidence-graph": ("证据与图谱", (("证据", "evidence"), ("图谱", "graph"))),
+    "media-knowledge": (
+        "媒体知识",
+        (("媒体资产", "media"), ("视觉审核", "visual-review")),
+    ),
     "governance": ("实体治理", (("实体治理", "governance"),)),
     "history": (
         "历史与版本",
@@ -45,6 +49,8 @@ PAGE_META: dict[str, tuple[str, str]] = {
     "corrections": ("审核历史与纠正", "预览并应用可追溯的历史决定纠正"),
     "evidence": ("证据", "按运行和事实定位文本或视觉证据"),
     "graph": ("图谱", "检索实体并浏览有限邻域"),
+    "media": ("媒体资产", "查看可校验的图片、图表、表格和公式出现记录"),
+    "visual-review": ("视觉审核", "审核图片描绘关系、视觉属性与区域证据"),
     "governance": ("实体治理", "管理候选、合并、拆分与实体历史"),
     "cases": ("案例库", "查询审核案例及其索引状态"),
     "reflection": ("Reflection", "查看问题修复、案例使用与预算记录"),

@@ -275,6 +275,7 @@ class PrismKEService:
             run_counts[execution_status] = run_counts.get(execution_status, 0) + 1
             pending_reviews += sum(t.status == "pending" for t in state.entity_review_tasks)
             pending_reviews += sum(t.status == "pending" for t in state.review_tasks)
+            pending_reviews += sum(t.status == "pending" for t in state.visual_review_tasks)
             blocking_issues += state.validation.blocking_count
         return {
             "run_counts": run_counts,
@@ -1981,6 +1982,7 @@ class PrismKEService:
         state = self.show_run(run_id)
         entity_pending = sum(item.status == "pending" for item in state.entity_review_tasks)
         claim_pending = sum(item.status == "pending" for item in state.review_tasks)
+        visual_pending = sum(item.status == "pending" for item in state.visual_review_tasks)
         retry_commit = state.status == "failed" and state.failed_node == "commit_graph"
         sync_pending = bool(self.reviews.repository.pending(run_id))
         execution = self.executions.view(run_id)
@@ -1991,6 +1993,7 @@ class PrismKEService:
             "execution": execution,
             "entity_pending": entity_pending,
             "claim_pending": claim_pending,
+            "visual_pending": visual_pending,
             "validation_pending": state.validation.blocking_count,
             "isolated": state.review_workspace,
             "review_sync_pending": sync_pending,
@@ -1999,6 +2002,7 @@ class PrismKEService:
             and not sync_pending
             and not entity_pending
             and not claim_pending
+            and not visual_pending
             and not state.validation.blocking_count
             and state.status != "completed"
             and state.current_node != "prepare_graph_commit"
@@ -2010,12 +2014,16 @@ class PrismKEService:
             and (state.current_node == "prepare_graph_commit" or retry_commit)
             and not entity_pending
             and not claim_pending
+            and not visual_pending
             and not state.validation.blocking_count
             and (not state.submission_confirmed or retry_commit),
             "submission": {
                 "entities": len(state.graph_commit.entities),
                 "claims": len(state.graph_commit.claims),
                 "conflicts": len(state.graph_commit.conflicts),
+                "media_occurrences": len(state.graph_commit.media_occurrences),
+                "media_relations": len(state.graph_commit.media_relations),
+                "visual_assertions": len(state.graph_commit.visual_assertions),
                 "evidence": len(state.graph_commit.evidence),
                 "revision_id": state.graph_commit.revision.id,
                 "parent_id": state.graph_commit.revision.parent_id,
@@ -2203,6 +2211,152 @@ class PrismKEService:
                 request_id,
             )
 
+    async def review_visual(
+        self,
+        run_id: str,
+        task_id: str,
+        decision: Literal["approve", "reject", "defer"],
+        reviewer: str,
+        reason: str,
+        request_id: str,
+        expected_version: int,
+    ) -> WorkflowState:
+        from src.domain import (
+            GraphMediaRelation,
+            VisualAssertion,
+            VisualReviewEvent,
+            utc_now,
+        )
+
+        if not reviewer.strip() or not reason.strip() or not request_id.strip():
+            raise ValueError("VISUAL_REVIEW_REQUIRES_IDENTITY_REASON_REQUEST")
+        with self.runs.mutation_lock(run_id):
+            state = self.show_run(run_id)
+            prior = next(
+                (item for item in state.visual_review_events if item.request_id == request_id),
+                None,
+            )
+            if prior is not None:
+                if prior.task_id != task_id or prior.decision != decision:
+                    raise ValueError("VISUAL_REVIEW_REQUEST_CONFLICT")
+                return state
+            task = next((item for item in state.visual_review_tasks if item.id == task_id), None)
+            if task is None:
+                raise KeyError("visual review task not found")
+            if task.version != expected_version:
+                raise ValueError("VISUAL_REVIEW_VERSION_CONFLICT")
+            if task.status == "resolved":
+                raise ValueError("VISUAL_REVIEW_ALREADY_RESOLVED")
+            event_id = stable_id("visual-review-event", run_id, task_id, request_id)
+            event = VisualReviewEvent(
+                id=event_id,
+                request_id=request_id,
+                run_id=run_id,
+                task_id=task_id,
+                target_type=task.target_type,
+                target_id=task.target_id,
+                decision=decision,
+                reviewer=reviewer.strip(),
+                reason=reason.strip(),
+                expected_version=expected_version,
+                resulting_version=expected_version + 1,
+            )
+            if decision == "approve" and task.target_type == "media_relation":
+                relation_candidate = next(
+                    item
+                    for item in state.candidate_media_relations
+                    if item.id == task.target_id
+                )
+                if relation_candidate.target_entity_id is None:
+                    raise ValueError("VISUAL_REVIEW_TARGET_ENTITY_UNRESOLVED")
+                relation = GraphMediaRelation(
+                    id=stable_id(
+                        "media-relation",
+                        relation_candidate.occurrence_id,
+                        relation_candidate.relation_type,
+                        relation_candidate.target_entity_id,
+                        *sorted(relation_candidate.evidence_ids),
+                    ),
+                    occurrence_id=relation_candidate.occurrence_id,
+                    relation_type=relation_candidate.relation_type,
+                    target_entity_id=relation_candidate.target_entity_id,
+                    evidence_ids=relation_candidate.evidence_ids,
+                    source_candidate_id=relation_candidate.id,
+                    approved_review_event_id=event.id,
+                )
+                state.media_relations = [
+                    *[item for item in state.media_relations if item.id != relation.id],
+                    relation,
+                ]
+            elif decision == "approve":
+                assertion_candidate = next(
+                    item
+                    for item in state.candidate_visual_assertions
+                    if item.id == task.target_id
+                )
+                if assertion_candidate.subject_entity_id is None:
+                    raise ValueError("VISUAL_REVIEW_SUBJECT_UNRESOLVED")
+                assertion = VisualAssertion(
+                    id=stable_id(
+                        "visual-assertion",
+                        assertion_candidate.subject_entity_id,
+                        assertion_candidate.predicate,
+                        canonical_hash(assertion_candidate.normalized_value),
+                        assertion_candidate.occurrence_id,
+                        *sorted(assertion_candidate.evidence_ids),
+                    ),
+                    occurrence_id=assertion_candidate.occurrence_id,
+                    subject_entity_id=assertion_candidate.subject_entity_id,
+                    predicate=assertion_candidate.predicate,
+                    normalized_value=assertion_candidate.normalized_value,
+                    value_type=assertion_candidate.value_type,
+                    assertion_kind=assertion_candidate.assertion_kind,
+                    evidence_ids=assertion_candidate.evidence_ids,
+                    source_candidate_id=assertion_candidate.id,
+                    approved_review_event_id=event.id,
+                )
+                state.visual_assertions = [
+                    *[item for item in state.visual_assertions if item.id != assertion.id],
+                    assertion,
+                ]
+            task.version += 1
+            task.last_event_id = event.id
+            task.decision = decision
+            task.reviewer = reviewer.strip()
+            task.reason = reason.strip()
+            if decision != "defer":
+                task.status = "resolved"
+                task.resolved_at = utc_now()
+            state.visual_review_events.append(event)
+            pending = [
+                item.target_id for item in state.visual_review_tasks if item.status == "pending"
+            ]
+            if state.extraction_result is not None:
+                state.extraction_result.visual_review_required_ids = pending
+            if (
+                not pending
+                and not any(item.status == "pending" for item in state.entity_review_tasks)
+                and not any(item.status == "pending" for item in state.review_tasks)
+            ):
+                state.status = "running" if state.task_mode.permits_graph_commit else "completed"
+            if state.task_mode.permits_graph_commit:
+                recorded = await self.review_workflow(state).record_review(state)
+                if not recorded:
+                    self.runs.save(state)
+            else:
+                self.runs.save(state)
+            self.audit.record(
+                "review_visual",
+                run_id,
+                {
+                    "task_id": task_id,
+                    "decision": decision,
+                    "reviewer": reviewer.strip(),
+                    "event_id": event.id,
+                },
+            )
+            return state
+
     async def resume(self, run_id: str) -> WorkflowState:
         return await self.executions.run_wait(run_id, "resume")
 
@@ -2217,6 +2371,7 @@ class PrismKEService:
             state.validation.blocking_count
             or any(task.status == "pending" for task in state.entity_review_tasks)
             or any(task.status == "pending" for task in state.review_tasks)
+            or any(task.status == "pending" for task in state.visual_review_tasks)
         ):
             raise ValueError("pending reviews must be resolved before continuation")
         workflow = self.review_workflow(state)
@@ -2245,6 +2400,7 @@ class PrismKEService:
             state.validation.blocking_count
             or any(task.status == "pending" for task in state.entity_review_tasks)
             or any(task.status == "pending" for task in state.review_tasks)
+            or any(task.status == "pending" for task in state.visual_review_tasks)
         ):
             raise ValueError("pending reviews prevent graph submission")
         if state.graph_commit is None or (state.submission_confirmed and not retry_commit):

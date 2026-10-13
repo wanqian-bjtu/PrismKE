@@ -440,6 +440,197 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             "handoffs": [item.model_dump(mode="json") for item in state.agent_handoffs],
         }
 
+    async def media_rows(
+        document_id: str, media_type: str
+    ) -> tuple[list[list[Any]], Any]:
+        contents = {item.id: item for item in await service.graph_store.list_media_contents()}
+        relations = await service.graph_store.list_media_relations()
+        assertions = await service.graph_store.list_visual_assertions()
+        rows: list[list[Any]] = []
+        choices: list[tuple[str, str]] = []
+        for occurrence in await service.graph_store.list_media_occurrences():
+            content = contents.get(occurrence.media_content_id)
+            if content is None or not occurrence.active:
+                continue
+            if document_id.strip() and occurrence.document_id != document_id.strip():
+                continue
+            if media_type != "全部" and content.asset_type.value != media_type:
+                continue
+            verified = await service.evidence_store.verify(occurrence.evidence_id)
+            relation_count = sum(
+                item.active and item.occurrence_id == occurrence.id for item in relations
+            )
+            assertion_count = sum(
+                item.active and item.occurrence_id == occurrence.id for item in assertions
+            )
+            rows.append(
+                [
+                    occurrence.id,
+                    content.asset_type.value,
+                    occurrence.document_id,
+                    occurrence.page_number or "",
+                    occurrence.caption,
+                    "有效" if verified else "无效",
+                    relation_count + assertion_count,
+                ]
+            )
+            choices.append(
+                (
+                    f"{content.asset_type.value} · "
+                    f"{occurrence.caption or occurrence.id[:16]}",
+                    occurrence.id,
+                )
+            )
+        return rows, gr.update(
+            choices=choices,
+            value=choices[0][1] if choices else None,
+        )
+
+    async def media_detail(occurrence_id: str | None) -> tuple[dict[str, Any], str | None]:
+        if not occurrence_id:
+            return {}, None
+        occurrence = await service.graph_store.get_media_occurrence(occurrence_id)
+        if occurrence is None:
+            raise gr.Error("媒体出现记录不存在")
+        content = next(
+            (
+                item
+                for item in await service.graph_store.list_media_contents()
+                if item.id == occurrence.media_content_id
+            ),
+            None,
+        )
+        evidence, preview = await show_evidence(occurrence.evidence_id)
+        return (
+            {
+                "occurrence": occurrence.model_dump(mode="json"),
+                "content": content.model_dump(mode="json") if content else None,
+                "evidence": evidence,
+                "relations": [
+                    item.model_dump(mode="json")
+                    for item in await service.graph_store.list_media_relations()
+                    if item.occurrence_id == occurrence_id
+                ],
+                "visual_assertions": [
+                    item.model_dump(mode="json")
+                    for item in await service.graph_store.list_visual_assertions()
+                    if item.occurrence_id == occurrence_id
+                ],
+            },
+            preview,
+        )
+
+    async def linked_media(target_type: str, target_id: str | None) -> list[list[Any]]:
+        if not target_id:
+            return []
+        relations = await service.graph_store.list_media_relations()
+        occurrence_ids = {
+            item.occurrence_id
+            for item in relations
+            if item.active
+            and (
+                (target_type == "entity" and item.target_entity_id == target_id)
+                or (target_type == "claim" and item.target_claim_id == target_id)
+            )
+        }
+        contents = {item.id: item for item in await service.graph_store.list_media_contents()}
+        return [
+            [
+                item.id,
+                contents[item.media_content_id].asset_type.value,
+                item.document_id,
+                item.page_number or "",
+                item.caption,
+                item.evidence_id,
+            ]
+            for item in await service.graph_store.list_media_occurrences()
+            if item.active and item.id in occurrence_ids and item.media_content_id in contents
+        ]
+
+    async def claim_linked_media(claim_id: str | None) -> list[list[Any]]:
+        return await linked_media("claim", claim_id)
+
+    async def entity_linked_media(entity_id: str | None) -> list[list[Any]]:
+        return await linked_media("entity", entity_id)
+
+    def visual_review_rows(run_id: str | None) -> tuple[list[list[Any]], Any]:
+        if not run_id:
+            return [], gr.update(choices=[], value=None)
+        state = service.show_run(run_id)
+        choices: list[tuple[str, str]] = []
+        rows: list[list[Any]] = []
+        for task in state.visual_review_tasks:
+            label = f"{task.target_type} · {task.target_id[:18]} · {task.status}"
+            choices.append((label, task.id))
+            rows.append(
+                [
+                    task.id,
+                    task.target_type,
+                    task.target_id,
+                    task.status,
+                    task.decision or "",
+                    task.version,
+                    ", ".join(task.reasons),
+                ]
+            )
+        return rows, gr.update(choices=choices, value=choices[0][1] if choices else None)
+
+    async def visual_review_detail(
+        run_id: str | None, task_id: str | None
+    ) -> tuple[dict[str, Any], str | None, int]:
+        if not run_id or not task_id:
+            return {}, None, 0
+        state = service.show_run(run_id)
+        task = next((item for item in state.visual_review_tasks if item.id == task_id), None)
+        if task is None:
+            raise gr.Error("视觉审核任务不存在")
+        if task.target_type == "media_relation":
+            relation_candidate = next(
+                item for item in state.candidate_media_relations if item.id == task.target_id
+            )
+            occurrence_id = relation_candidate.occurrence_id
+            candidate_payload = relation_candidate.model_dump(mode="json")
+        else:
+            assertion_candidate = next(
+                item for item in state.candidate_visual_assertions if item.id == task.target_id
+            )
+            occurrence_id = assertion_candidate.occurrence_id
+            candidate_payload = assertion_candidate.model_dump(mode="json")
+        occurrence = next(
+            item for item in state.media_occurrences if item.id == occurrence_id
+        )
+        evidence, preview = await show_evidence(occurrence.evidence_id)
+        return (
+            {
+                "task": task.model_dump(mode="json"),
+                "candidate": candidate_payload,
+                "occurrence": occurrence.model_dump(mode="json"),
+                "evidence": evidence,
+            },
+            preview,
+            task.version,
+        )
+
+    async def submit_visual_review(
+        run_id: str,
+        task_id: str,
+        decision: str,
+        reviewer: str,
+        reason: str,
+        expected_version: int,
+    ) -> tuple[str, list[list[Any]], Any]:
+        state = await service.review_visual(
+            run_id,
+            task_id,
+            cast(Literal["approve", "reject", "defer"], decision),
+            reviewer,
+            reason,
+            uuid4().hex,
+            int(expected_version),
+        )
+        rows, choices = visual_review_rows(state.run_id)
+        return f"审核已保存：`{decision}` · 运行 `{state.run_id}`", rows, choices
+
     async def review_claim(
         run_id: str, claim_id: str, decision: str
     ) -> tuple[dict[str, Any], list[list[Any]]]:
@@ -772,7 +963,8 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         text = (
             f"业务：{progress['status']}\n执行：{execution['status']}\n"
             f"节点：{execution['node']}\n实体待审：{progress['entity_pending']} · "
-            f"事实待审：{progress['claim_pending']} · 校验：{progress['validation_pending']}"
+            f"事实待审：{progress['claim_pending']} · "
+            f"视觉待审：{progress['visual_pending']} · 校验：{progress['validation_pending']}"
         )
         return gr.update(choices=choices, value=run_id), text
 
@@ -1157,6 +1349,18 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 evidence_button.click(
                     show_evidence, [evidence_id], [evidence_metadata, evidence_preview]
                 )
+                with gr.Accordion("Claim 关联图片", open=False):
+                    claim_media_button = gr.Button("查看 Claim 关联媒体")
+                    claim_media_table = gr.Dataframe(
+                        headers=["Occurrence ID", "类型", "文档", "页码", "标题", "Evidence ID"],
+                        interactive=False,
+                        wrap=True,
+                    )
+                claim_media_button.click(
+                    claim_linked_media,
+                    evidence_claim,
+                    claim_media_table,
+                )
 
             with gr.Tab("图谱", id="graph"):
                 page_header(gr, "graph")
@@ -1183,6 +1387,120 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 with gr.Accordion("技术详情", open=False, elem_classes="technical-detail"):
                     graph_output = gr.JSON(label="实体邻域")
                 graph_button.click(neighborhood, [entity_id, depth], [graph_plot, graph_output])
+                with gr.Accordion("实体关联图片", open=False):
+                    entity_media_button = gr.Button("展开实体关联媒体")
+                    entity_media_table = gr.Dataframe(
+                        headers=["Occurrence ID", "类型", "文档", "页码", "标题", "Evidence ID"],
+                        interactive=False,
+                        wrap=True,
+                    )
+                entity_media_button.click(
+                    entity_linked_media,
+                    entity_id,
+                    entity_media_table,
+                )
+
+            with gr.Tab("媒体资产", id="media"):
+                page_header(gr, "media")
+                with gr.Row():
+                    media_document_filter = gr.Textbox(label="文档 ID", placeholder="留空显示全部")
+                    media_type_filter = gr.Dropdown(
+                        ["全部", "image", "chart", "table", "formula", "page_render"],
+                        value="全部",
+                        label="媒体类型",
+                    )
+                media_refresh = gr.Button("刷新媒体资产")
+                media_table = gr.Dataframe(
+                    headers=[
+                        "Occurrence ID",
+                        "类型",
+                        "文档",
+                        "页码",
+                        "标题",
+                        "证据哈希",
+                        "关联知识",
+                    ],
+                    interactive=False,
+                    wrap=True,
+                    label="可查询媒体对象",
+                )
+                media_selector = gr.Dropdown(label="选择媒体出现记录", choices=[])
+                with gr.Row(equal_height=False):
+                    media_preview = gr.Image(label="受控证据预览", type="filepath")
+                    with gr.Accordion(
+                        "媒体、实体与 Claim 详情",
+                        open=False,
+                        elem_classes="technical-detail",
+                    ):
+                        media_detail_output = gr.JSON(label="媒体详情")
+                media_refresh.click(
+                    media_rows,
+                    [media_document_filter, media_type_filter],
+                    [media_table, media_selector],
+                )
+                media_selector.change(
+                    media_detail,
+                    media_selector,
+                    [media_detail_output, media_preview],
+                )
+
+            with gr.Tab("视觉审核", id="visual-review"):
+                page_header(gr, "visual-review")
+                with gr.Row():
+                    visual_review_run = gr.Dropdown(label="运行", choices=[])
+                    visual_review_refresh = gr.Button("刷新视觉审核队列")
+                visual_review_table = gr.Dataframe(
+                    headers=["Task ID", "对象类型", "候选 ID", "状态", "决定", "版本", "原因"],
+                    interactive=False,
+                    wrap=True,
+                    label="视觉审核任务",
+                )
+                visual_review_selector = gr.Dropdown(label="选择任务", choices=[])
+                with gr.Row(equal_height=False):
+                    visual_review_preview = gr.Image(label="区域证据", type="filepath")
+                    with gr.Accordion(
+                        "候选、实体与 Schema 约束",
+                        open=True,
+                        elem_classes="technical-detail",
+                    ):
+                        visual_review_detail_output = gr.JSON(label="审核详情")
+                with gr.Row():
+                    visual_review_decision = gr.Dropdown(
+                        [("批准", "approve"), ("拒绝", "reject"), ("暂缓", "defer")],
+                        value="approve",
+                        label="审核决定",
+                    )
+                    visual_review_reviewer = gr.Textbox(label="审核人", value="管理员")
+                visual_review_reason = gr.Textbox(label="审核原因")
+                visual_review_version = gr.Number(label="任务版本", value=0, interactive=False)
+                visual_review_submit = gr.Button("提交视觉审核", variant="primary")
+                visual_review_outcome = gr.Markdown("尚未提交视觉审核")
+                visual_review_refresh.click(
+                    visual_review_rows,
+                    visual_review_run,
+                    [visual_review_table, visual_review_selector],
+                )
+                visual_review_selector.change(
+                    visual_review_detail,
+                    [visual_review_run, visual_review_selector],
+                    [
+                        visual_review_detail_output,
+                        visual_review_preview,
+                        visual_review_version,
+                    ],
+                )
+                visual_review_submit.click(
+                    submit_visual_review,
+                    [
+                        visual_review_run,
+                        visual_review_selector,
+                        visual_review_decision,
+                        visual_review_reviewer,
+                        visual_review_reason,
+                        visual_review_version,
+                    ],
+                    [visual_review_outcome, visual_review_table, visual_review_selector],
+                )
 
             with gr.Tab("实体治理", id="governance"):
                 page_header(gr, "governance")
@@ -1514,6 +1832,16 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         ).then(claim_evidence, [evidence_run, evidence_claim], evidence_id)
         demo.load(evidence_runs, outputs=reflection_run)
         demo.load(evidence_runs, outputs=agent_run)
+        demo.load(evidence_runs, outputs=visual_review_run).then(
+            visual_review_rows,
+            visual_review_run,
+            [visual_review_table, visual_review_selector],
+        )
+        demo.load(
+            media_rows,
+            [media_document_filter, media_type_filter],
+            [media_table, media_selector],
+        )
         demo.load(
             case_rows,
             [

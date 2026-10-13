@@ -28,6 +28,16 @@ from src.domain.knowledge import (
     GraphRevision,
     ReviewTask,
 )
+from src.domain.media import (
+    CandidateMediaRelation,
+    CandidateVisualAssertion,
+    GraphMediaContent,
+    GraphMediaOccurrence,
+    GraphMediaRelation,
+    VisualAssertion,
+    VisualReviewEvent,
+    VisualReviewTask,
+)
 from src.domain.pdf import PDFParseDecision, PDFParseMode
 from src.domain.schema import OutputSchema
 from src.domain.tasks import (
@@ -175,6 +185,14 @@ class WorkflowState(BaseModel):
     claims: list[Claim] = Field(default_factory=list)
     conflicts: list[ConflictSet] = Field(default_factory=list)
     review_tasks: list[ReviewTask] = Field(default_factory=list)
+    media_contents: list[GraphMediaContent] = Field(default_factory=list)
+    media_occurrences: list[GraphMediaOccurrence] = Field(default_factory=list)
+    candidate_media_relations: list[CandidateMediaRelation] = Field(default_factory=list)
+    candidate_visual_assertions: list[CandidateVisualAssertion] = Field(default_factory=list)
+    media_relations: list[GraphMediaRelation] = Field(default_factory=list)
+    visual_assertions: list[VisualAssertion] = Field(default_factory=list)
+    visual_review_tasks: list[VisualReviewTask] = Field(default_factory=list)
+    visual_review_events: list[VisualReviewEvent] = Field(default_factory=list)
     normalization_issues: dict[str, str] = Field(default_factory=dict)
     validation: ValidationResult = Field(default_factory=ValidationResult)
     validation_decisions: list[ValidationReviewDecision] = Field(default_factory=list)

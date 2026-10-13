@@ -21,9 +21,15 @@ from src.domain import (
     GraphChange,
     GraphCommit,
     GraphHealth,
+    GraphMediaContent,
+    GraphMediaOccurrence,
+    GraphMediaRelation,
     GraphNeighborhood,
     GraphRevision,
     RevisionDiff,
+    VisualAssertion,
+    VisualReviewEvent,
+    visual_value_matches,
 )
 from src.governance.validation import ValidationService
 from src.governance.validation.context import (
@@ -85,6 +91,11 @@ class Neo4jGraphStore:
                     "ConflictSet",
                     "Revision",
                     "RevisionChange",
+                    "MediaContent",
+                    "MediaOccurrence",
+                    "MediaRelation",
+                    "VisualAssertion",
+                    "VisualReviewEvent",
                 )
             ]
             statements.extend(
@@ -95,6 +106,8 @@ class Neo4jGraphStore:
                     "ON (n.relation_id, n.status)",
                     "CREATE INDEX revision_created IF NOT EXISTS FOR (n:Revision) "
                     "ON (n.created_at)",
+                    "CREATE CONSTRAINT media_content_hash IF NOT EXISTS "
+                    "FOR (n:MediaContent) REQUIRE n.content_hash IS UNIQUE",
                     "CREATE VECTOR INDEX entity_embedding_bge_m3 IF NOT EXISTS "
                     "FOR (n:Entity) ON (n.embedding) OPTIONS {indexConfig: {"
                     "`vector.dimensions`: 1024, `vector.similarity_function`: 'cosine'}}",
@@ -184,6 +197,10 @@ class Neo4jGraphStore:
                 "claim": "Claim",
                 "conflict": "ConflictSet",
                 "entity_operation": "EntityOperation",
+                "media_content": "MediaContent",
+                "media_occurrence": "MediaOccurrence",
+                "media_relation": "MediaRelation",
+                "visual_assertion": "VisualAssertion",
             }
             for change in transaction.revision.changes:
                 result = await tx.run(
@@ -402,6 +419,235 @@ class Neo4jGraphStore:
                         "MATCH ()-[r:MERGED_INTO {operation_id: $operation_id}]->() DELETE r",
                         operation_id=operation.id,
                     )
+        for event in transaction.visual_review_events:
+            await tx.run(
+                "MERGE (n:VisualReviewEvent {id: $id}) "
+                "ON CREATE SET n.request_id=$request_id, n.payload=$payload "
+                "ON MATCH SET n.payload=CASE WHEN n.payload=$payload THEN n.payload ELSE null END",
+                id=event.id,
+                request_id=event.request_id,
+                payload=_dump(event),
+            )
+            result = await tx.run(
+                "MATCH (n:VisualReviewEvent {id: $id}) RETURN n.payload AS payload", id=event.id
+            )
+            row = await result.single()
+            if row is None or row["payload"] is None:
+                raise GraphIntegrityError(
+                    f"visual review event already exists with different content: {event.id}"
+                )
+        for content in transaction.media_contents:
+            result = await tx.run(
+                "OPTIONAL MATCH (same:MediaContent {content_hash: $content_hash}) "
+                "RETURN same.id AS existing_id, same.payload AS existing_payload",
+                content_hash=content.content_hash,
+            )
+            same = await result.single()
+            if same is not None and same["existing_id"] not in {None, content.id}:
+                raise GraphIntegrityError(f"duplicate media content hash: {content.content_hash}")
+            if (
+                same is not None
+                and same["existing_payload"] is not None
+                and _load(same["existing_payload"], GraphMediaContent) != content
+            ):
+                raise GraphIntegrityError(f"immutable media content changed: {content.id}")
+            await tx.run(
+                "MERGE (n:MediaContent {id: $id}) "
+                "SET n.content_hash=$content_hash, n.asset_type=$asset_type, n.payload=$payload",
+                id=content.id,
+                content_hash=content.content_hash,
+                asset_type=content.asset_type.value,
+                payload=_dump(content),
+            )
+        for occurrence in transaction.media_occurrences:
+            result = await tx.run(
+                "MATCH (d:Document {id: $document_id}), "
+                "(c:MediaContent {id: $content_id}), (e:Evidence {id: $evidence_id}) "
+                "MERGE (n:MediaOccurrence {id: $id}) "
+                "SET n.active=$active, n.tx_to=$tx_to, n.payload=$payload "
+                "MERGE (d)-[:CONTAINS]->(n) "
+                "MERGE (n)-[:INSTANCE_OF]->(c) "
+                "MERGE (n)-[:SUPPORTED_BY]->(e) RETURN n.id AS id",
+                document_id=occurrence.document_id,
+                content_id=occurrence.media_content_id,
+                evidence_id=occurrence.evidence_id,
+                id=occurrence.id,
+                active=occurrence.active,
+                tx_to=occurrence.tx_to.isoformat() if occurrence.tx_to else None,
+                payload=_dump(occurrence),
+            )
+            if await result.single() is None:
+                raise GraphIntegrityError(
+                    f"media occurrence {occurrence.id} has dangling references"
+                )
+        for relation in transaction.media_relations:
+            target_label = "Entity" if relation.target_entity_id else "Claim"
+            target_id = relation.target_entity_id or relation.target_claim_id
+            if relation.relation_type.value == "DEPICTS" and not relation.approved_review_event_id:
+                raise GraphIntegrityError("DEPICTS requires an approved visual review")
+            if relation.approved_review_event_id:
+                result = await tx.run(
+                    "MATCH (e:VisualReviewEvent {id: $id}) RETURN e.payload AS payload",
+                    id=relation.approved_review_event_id,
+                )
+                event_row = await result.single()
+                if event_row is None:
+                    raise GraphIntegrityError("media relation review event is missing")
+                relation_event = _load(event_row["payload"], VisualReviewEvent)
+                if (
+                    relation_event.decision != "approve"
+                    or relation_event.target_type != "media_relation"
+                    or relation_event.target_id != relation.source_candidate_id
+                ):
+                    raise GraphIntegrityError(
+                        "media relation review event does not approve relation"
+                    )
+            result = await tx.run(
+                "MATCH (e:Evidence) WHERE e.id IN $ids RETURN collect(e.id) AS ids",
+                ids=relation.evidence_ids,
+            )
+            found_evidence = set((await result.single())["ids"])
+            if found_evidence != set(relation.evidence_ids):
+                raise GraphIntegrityError(
+                    f"media relation {relation.id} references missing evidence"
+                )
+            if relation.target_claim_id:
+                target_claim = current_claims.get(relation.target_claim_id)
+                if target_claim is None or target_claim.status.value not in {
+                    "approved",
+                    "auto_approved",
+                }:
+                    raise GraphIntegrityError("SUPPORTS requires an approved claim")
+                support_occurrence = next(
+                    (
+                        item
+                        for item in transaction.media_occurrences
+                        if item.id == relation.occurrence_id
+                    ),
+                    None,
+                )
+                if support_occurrence is None:
+                    occurrence_result = await tx.run(
+                        "MATCH (o:MediaOccurrence {id: $id}) RETURN o.payload AS payload",
+                        id=relation.occurrence_id,
+                    )
+                    occurrence_row = await occurrence_result.single()
+                    support_occurrence = (
+                        _load(occurrence_row["payload"], GraphMediaOccurrence)
+                        if occurrence_row is not None
+                        else None
+                    )
+                if (
+                    support_occurrence is None
+                    or support_occurrence.evidence_id not in target_claim.evidence_ids
+                ):
+                    raise GraphIntegrityError("SUPPORTS evidence does not support target claim")
+            result = await tx.run(
+                f"MATCH (o:MediaOccurrence {{id: $occurrence_id}}), "
+                f"(target:{target_label} {{id: $target_id}}) "
+                "MERGE (r:MediaRelation {id: $id}) "
+                "SET r.relation_type=$relation_type, r.active=$active, r.payload=$payload "
+                "MERGE (r)-[:FROM_OCCURRENCE]->(o) "
+                "MERGE (r)-[:TARGET]->(target) RETURN o.id AS occurrence_id",
+                occurrence_id=relation.occurrence_id,
+                target_id=target_id,
+                id=relation.id,
+                relation_type=relation.relation_type.value,
+                active=relation.active,
+                payload=_dump(relation),
+            )
+            if await result.single() is None:
+                raise GraphIntegrityError(f"media relation {relation.id} has dangling references")
+            direct_type = relation.relation_type.value
+            if relation.active:
+                await tx.run(
+                    f"MATCH (o:MediaOccurrence {{id: $occurrence_id}}), "
+                    f"(target:{target_label} {{id: $target_id}}) "
+                    f"MERGE (o)-[edge:{direct_type} "
+                    "{relation_id: $relation_id}]->(target)",
+                    occurrence_id=relation.occurrence_id,
+                    target_id=target_id,
+                    relation_id=relation.id,
+                )
+            else:
+                await tx.run(
+                    f"MATCH (:MediaOccurrence {{id: $occurrence_id}})-"
+                    f"[edge:{direct_type} {{relation_id: $relation_id}}]->() DELETE edge",
+                    occurrence_id=relation.occurrence_id,
+                    relation_id=relation.id,
+                )
+        for assertion in transaction.visual_assertions:
+            attribute_ids = {
+                attribute.id
+                for schema in (
+                    transaction.validation_context.schemas.values()
+                    if transaction.validation_context
+                    else []
+                )
+                for attribute in schema.attributes
+            }
+            if assertion.predicate not in attribute_ids:
+                raise GraphIntegrityError(
+                    f"visual assertion predicate is not in schema: {assertion.predicate}"
+                )
+            definition = next(
+                (
+                    attribute
+                    for schema in (
+                        transaction.validation_context.schemas.values()
+                        if transaction.validation_context
+                        else []
+                    )
+                    for attribute in schema.attributes
+                    if attribute.id == assertion.predicate
+                ),
+                None,
+            )
+            if definition is None or not visual_value_matches(
+                assertion.normalized_value, definition.value_type
+            ):
+                raise GraphIntegrityError(
+                    f"visual assertion value type is invalid: {assertion.id}"
+                )
+            event_result = await tx.run(
+                "MATCH (event:VisualReviewEvent {id: $event_id}) "
+                "RETURN event.payload AS payload",
+                event_id=assertion.approved_review_event_id,
+            )
+            event_row = await event_result.single()
+            if event_row is None:
+                raise GraphIntegrityError("visual assertion review event is missing")
+            assertion_event = _load(event_row["payload"], VisualReviewEvent)
+            if (
+                assertion_event.decision != "approve"
+                or assertion_event.target_type != "visual_assertion"
+                or assertion_event.target_id != assertion.source_candidate_id
+            ):
+                raise GraphIntegrityError(
+                    "visual assertion review event does not approve assertion"
+                )
+            result = await tx.run(
+                "MATCH (o:MediaOccurrence {id: $occurrence_id}), "
+                "(entity:Entity {id: $entity_id}), "
+                "(event:VisualReviewEvent {id: $event_id}) "
+                "MERGE (a:VisualAssertion {id: $id}) "
+                "SET a.predicate=$predicate, a.active=$active, a.tx_to=$tx_to, a.payload=$payload "
+                "MERGE (o)-[:HAS_ASSERTION]->(a) "
+                "MERGE (a)-[:ABOUT]->(entity) "
+                "MERGE (a)-[:APPROVED_BY]->(event) RETURN a.id AS id",
+                occurrence_id=assertion.occurrence_id,
+                entity_id=assertion.subject_entity_id,
+                event_id=assertion.approved_review_event_id,
+                id=assertion.id,
+                predicate=assertion.predicate,
+                active=assertion.active,
+                tx_to=assertion.tx_to.isoformat() if assertion.tx_to else None,
+                payload=_dump(assertion),
+            )
+            if await result.single() is None:
+                raise GraphIntegrityError(
+                    f"visual assertion {assertion.id} has dangling references"
+                )
         revision = transaction.revision
         await tx.run(
             "CREATE (r:Revision {id: $id, run_id: $run_id, parent_id: $parent_id, "
@@ -431,6 +677,10 @@ class Neo4jGraphStore:
                 "claim": "Claim",
                 "conflict": "ConflictSet",
                 "entity_operation": "EntityOperation",
+                "media_content": "MediaContent",
+                "media_occurrence": "MediaOccurrence",
+                "media_relation": "MediaRelation",
+                "visual_assertion": "VisualAssertion",
             }[change.resource_type]
             await tx.run(
                 f"MATCH (c:RevisionChange {{id: $change_id}}), "
@@ -446,6 +696,22 @@ class Neo4jGraphStore:
     async def commit(self, transaction: GraphCommit) -> None:
         bind_commit_provenance(transaction)
         transaction = transaction.model_copy(deep=True)
+        if self.evidence_store is None and transaction.media_contents:
+            raise GraphIntegrityError("media commit requires an evidence store")
+        if self.evidence_store is not None:
+            from hashlib import sha256
+
+            for content in transaction.media_contents:
+                payload = await self.evidence_store.get_blob(content.blob_hash)
+                if sha256(payload).hexdigest() != content.content_hash:
+                    raise GraphIntegrityError(
+                        f"media content hash verification failed: {content.id}"
+                    )
+            for occurrence in transaction.media_occurrences:
+                if not await self.evidence_store.verify(occurrence.evidence_id):
+                    raise GraphIntegrityError(
+                        f"media occurrence evidence is invalid: {occurrence.id}"
+                    )
         await self._ensure_schema()
         async with self.driver.session(database=self.database) as session:
             await session.execute_write(self._commit_tx, transaction)
@@ -587,6 +853,30 @@ class Neo4jGraphStore:
     async def list_claims(self) -> list[Claim]:
         return [_load(item, Claim) for item in await self._list_payloads("Claim")]
 
+    async def list_media_occurrences(self) -> list[GraphMediaOccurrence]:
+        return [
+            _load(item, GraphMediaOccurrence)
+            for item in await self._list_payloads("MediaOccurrence")
+        ]
+
+    async def list_media_contents(self) -> list[GraphMediaContent]:
+        return [
+            _load(item, GraphMediaContent) for item in await self._list_payloads("MediaContent")
+        ]
+
+    async def get_media_occurrence(self, occurrence_id: str) -> GraphMediaOccurrence | None:
+        return await self._get("MediaOccurrence", occurrence_id, GraphMediaOccurrence)
+
+    async def list_media_relations(self) -> list[GraphMediaRelation]:
+        return [
+            _load(item, GraphMediaRelation) for item in await self._list_payloads("MediaRelation")
+        ]
+
+    async def list_visual_assertions(self) -> list[VisualAssertion]:
+        return [
+            _load(item, VisualAssertion) for item in await self._list_payloads("VisualAssertion")
+        ]
+
     async def latest_revision(self) -> GraphRevision | None:
         revisions = await self.list_revisions(limit=1)
         return revisions[0] if revisions else None
@@ -654,6 +944,18 @@ class Neo4jGraphStore:
             entity_ids=sorted({item for revision in selected for item in revision.entity_ids}),
             claim_ids=sorted({item for revision in selected for item in revision.claim_ids}),
             conflict_ids=sorted({item for revision in selected for item in revision.conflict_ids}),
+            media_content_ids=sorted(
+                {item for revision in selected for item in revision.media_content_ids}
+            ),
+            media_occurrence_ids=sorted(
+                {item for revision in selected for item in revision.media_occurrence_ids}
+            ),
+            media_relation_ids=sorted(
+                {item for revision in selected for item in revision.media_relation_ids}
+            ),
+            visual_assertion_ids=sorted(
+                {item for revision in selected for item in revision.visual_assertion_ids}
+            ),
         )
 
     async def rollback_revision(self, revision_id: str) -> GraphRevision:
@@ -670,6 +972,10 @@ class Neo4jGraphStore:
         claims: list[Claim] = []
         conflicts: list[ConflictSet] = []
         entity_operations: list[EntityOperation] = []
+        media_contents: list[GraphMediaContent] = []
+        media_occurrences: list[GraphMediaOccurrence] = []
+        media_relations: list[GraphMediaRelation] = []
+        visual_assertions: list[VisualAssertion] = []
         current_claims = {item.id: item for item in await self.list_claims()}
         inverse: list[GraphChange] = []
         now = datetime.now(UTC)
@@ -678,6 +984,10 @@ class Neo4jGraphStore:
             "claim": 1,
             "conflict": 2,
             "entity": 3,
+            "visual_assertion": 0,
+            "media_relation": 0,
+            "media_occurrence": 1,
+            "media_content": 4,
         }
         ordered_changes = sorted(
             reversed(target.changes),
@@ -738,7 +1048,7 @@ class Neo4jGraphStore:
                     current_conflict.model_dump(mode="json") if current_conflict else None
                 )
                 replacement_payload = replacement_conflict.model_dump(mode="json")
-            else:
+            elif change.resource_type == "entity_operation":
                 current_operation = await self._get(
                     "EntityOperation", change.resource_id, EntityOperation
                 )
@@ -757,6 +1067,80 @@ class Neo4jGraphStore:
                     current_operation.model_dump(mode="json") if current_operation else None
                 )
                 replacement_payload = replacement_operation.model_dump(mode="json")
+            elif change.resource_type == "media_content":
+                current_content = await self._get(
+                    "MediaContent", change.resource_id, GraphMediaContent
+                )
+                if current_content is None:
+                    continue
+                if change.action == "create":
+                    replacement_content = current_content
+                    action = "close"
+                elif change.before is not None:
+                    replacement_content = GraphMediaContent.model_validate(change.before)
+                    action = "restore"
+                else:
+                    continue
+                media_contents.append(replacement_content)
+                current_payload = current_content.model_dump(mode="json")
+                replacement_payload = replacement_content.model_dump(mode="json")
+            elif change.resource_type == "media_occurrence":
+                current_occurrence = await self._get(
+                    "MediaOccurrence", change.resource_id, GraphMediaOccurrence
+                )
+                if change.action == "create" and current_occurrence is not None:
+                    replacement_occurrence = current_occurrence.model_copy(
+                        update={"active": False, "tx_to": now}
+                    )
+                    action = "close"
+                elif change.before is not None:
+                    replacement_occurrence = GraphMediaOccurrence.model_validate(change.before)
+                    action = "restore"
+                else:
+                    continue
+                media_occurrences.append(replacement_occurrence)
+                current_payload = (
+                    current_occurrence.model_dump(mode="json") if current_occurrence else None
+                )
+                replacement_payload = replacement_occurrence.model_dump(mode="json")
+            elif change.resource_type == "media_relation":
+                current_relation = await self._get(
+                    "MediaRelation", change.resource_id, GraphMediaRelation
+                )
+                if change.action == "create" and current_relation is not None:
+                    replacement_relation = current_relation.model_copy(
+                        update={"active": False, "tx_to": now}
+                    )
+                    action = "close"
+                elif change.before is not None:
+                    replacement_relation = GraphMediaRelation.model_validate(change.before)
+                    action = "restore"
+                else:
+                    continue
+                media_relations.append(replacement_relation)
+                current_payload = (
+                    current_relation.model_dump(mode="json") if current_relation else None
+                )
+                replacement_payload = replacement_relation.model_dump(mode="json")
+            else:
+                current_assertion = await self._get(
+                    "VisualAssertion", change.resource_id, VisualAssertion
+                )
+                if change.action == "create" and current_assertion is not None:
+                    replacement_assertion = current_assertion.model_copy(
+                        update={"active": False, "tx_to": now}
+                    )
+                    action = "close"
+                elif change.before is not None:
+                    replacement_assertion = VisualAssertion.model_validate(change.before)
+                    action = "restore"
+                else:
+                    continue
+                visual_assertions.append(replacement_assertion)
+                current_payload = (
+                    current_assertion.model_dump(mode="json") if current_assertion else None
+                )
+                replacement_payload = replacement_assertion.model_dump(mode="json")
             if current_payload != change.after:
                 raise GraphIntegrityError("STALE_ROLLBACK_RESOURCE: re-preview required")
             inverse.append(
@@ -775,6 +1159,10 @@ class Neo4jGraphStore:
             entity_ids=[item.id for item in entities],
             claim_ids=[item.id for item in claims],
             conflict_ids=[item.id for item in conflicts],
+            media_content_ids=[item.id for item in media_contents],
+            media_occurrence_ids=[item.id for item in media_occurrences],
+            media_relation_ids=[item.id for item in media_relations],
+            visual_assertion_ids=[item.id for item in visual_assertions],
             changes=inverse,
             created_at=now,
         )
@@ -788,6 +1176,10 @@ class Neo4jGraphStore:
                 claims=claims,
                 conflicts=conflicts,
                 entity_operations=entity_operations,
+                media_contents=media_contents,
+                media_occurrences=media_occurrences,
+                media_relations=media_relations,
+                visual_assertions=visual_assertions,
                 revision=revision,
                 validation_context=context,
             )

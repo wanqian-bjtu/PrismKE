@@ -47,6 +47,7 @@ from src.api.models import (
     RuntimeSettingsUpdate,
     SplitProposalRequest,
     ValidationExcludeRequest,
+    VisualReviewRequest,
 )
 from src.core.errors import (
     GraphIntegrityError,
@@ -164,6 +165,150 @@ def create_app(
     @api.get("/pdf-parsers/status")
     async def pdf_parsers_status() -> object:
         return await service.pdf_parser_status()
+
+    @api.get("/media")
+    async def list_media(
+        document_id: str | None = None,
+        entity_id: str | None = None,
+        claim_id: str | None = None,
+        media_type: str | None = None,
+        review_status: Literal["pending", "resolved"] | None = None,
+    ) -> object:
+        occurrences = await service.graph_store.list_media_occurrences()
+        contents = {item.id: item for item in await service.graph_store.list_media_contents()}
+        relations = await service.graph_store.list_media_relations()
+        relation_occurrences = {
+            item.occurrence_id
+            for item in relations
+            if (entity_id is None or item.target_entity_id == entity_id)
+            and (claim_id is None or item.target_claim_id == claim_id)
+        }
+        review_occurrence_ids: set[str] = set()
+        if review_status is not None:
+            for state in service.runs.list():
+                target_ids = {
+                    item.target_id
+                    for item in state.visual_review_tasks
+                    if item.status == review_status
+                }
+                review_occurrence_ids.update(
+                    item.occurrence_id
+                    for item in state.candidate_media_relations
+                    if item.id in target_ids
+                )
+                review_occurrence_ids.update(
+                    item.occurrence_id
+                    for item in state.candidate_visual_assertions
+                    if item.id in target_ids
+                )
+        result = []
+        for occurrence in occurrences:
+            content = contents.get(occurrence.media_content_id)
+            if content is None or not occurrence.active:
+                continue
+            if document_id and occurrence.document_id != document_id:
+                continue
+            if media_type and content.asset_type.value != media_type:
+                continue
+            if (entity_id or claim_id) and occurrence.id not in relation_occurrences:
+                continue
+            occurrence_relations = [
+                item for item in relations if item.occurrence_id == occurrence.id and item.active
+            ]
+            if review_status is not None and occurrence.id not in review_occurrence_ids:
+                continue
+            result.append(
+                {
+                    "occurrence": occurrence.model_dump(mode="json"),
+                    "content": content.model_dump(mode="json"),
+                    "relations": [item.model_dump(mode="json") for item in occurrence_relations],
+                }
+            )
+        return result
+
+    @api.get("/media/{occurrence_id}")
+    async def media_detail(occurrence_id: str) -> object:
+        occurrence = await service.graph_store.get_media_occurrence(occurrence_id)
+        if occurrence is None:
+            raise HTTPException(status_code=404, detail="media occurrence not found")
+        contents = {item.id: item for item in await service.graph_store.list_media_contents()}
+        content = contents.get(occurrence.media_content_id)
+        if content is None:
+            raise HTTPException(status_code=409, detail="media content is missing")
+        return {
+            "occurrence": occurrence,
+            "content": content,
+            "relations": [
+                item
+                for item in await service.graph_store.list_media_relations()
+                if item.occurrence_id == occurrence_id
+            ],
+            "visual_assertions": [
+                item
+                for item in await service.graph_store.list_visual_assertions()
+                if item.occurrence_id == occurrence_id
+            ],
+        }
+
+    @api.get("/entities/{entity_id}/media")
+    async def entity_media(entity_id: str) -> object:
+        occurrence_ids = {
+            item.occurrence_id
+            for item in await service.graph_store.list_media_relations()
+            if item.target_entity_id == entity_id and item.active
+        }
+        return [
+            item
+            for item in await service.graph_store.list_media_occurrences()
+            if item.id in occurrence_ids and item.active
+        ]
+
+    @api.get("/claims/{claim_id}/media")
+    async def claim_media(claim_id: str) -> object:
+        occurrence_ids = {
+            item.occurrence_id
+            for item in await service.graph_store.list_media_relations()
+            if item.target_claim_id == claim_id and item.active
+        }
+        return [
+            item
+            for item in await service.graph_store.list_media_occurrences()
+            if item.id in occurrence_ids and item.active
+        ]
+
+    @api.get("/runs/{run_id}/visual-reviews")
+    async def visual_reviews(run_id: str) -> object:
+        try:
+            state = service.show_run(run_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="run not found") from exc
+        return {
+            "tasks": state.visual_review_tasks,
+            "events": state.visual_review_events,
+            "candidate_media_relations": state.candidate_media_relations,
+            "candidate_visual_assertions": state.candidate_visual_assertions,
+        }
+
+    @api.post("/runs/{run_id}/visual-reviews/{task_id}/decision")
+    async def decide_visual_review(
+        run_id: str, task_id: str, request: VisualReviewRequest
+    ) -> object:
+        try:
+            return await service.review_visual(
+                run_id,
+                task_id,
+                request.decision,
+                request.reviewer,
+                request.reason,
+                request.request_id,
+                request.expected_version,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            code = str(exc)
+            status_code = 409 if "CONFLICT" in code or "RESOLVED" in code else 422
+            raise HTTPException(status_code=status_code, detail={"code": code}) from exc
 
     @api.post("/runs", response_model=RunAccepted, status_code=202)
     async def create_run(
