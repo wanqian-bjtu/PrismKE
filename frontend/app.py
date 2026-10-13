@@ -1788,19 +1788,29 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
               if (window.innerWidth > 900) applyWidth(localStorage.getItem(storageKey));
               if (!window.__prismkeNavigationBound) {
                 window.__prismkeNavigationBound = true;
-                const navigate = event => {
-                  const input = event.target;
-                  if (!(input instanceof HTMLInputElement)) return;
-                  if (!input.closest('#navigation-page')) return;
+                const navigateLabel = rawLabel => {
                   const aliases = {'版本管理': '版本', '系统状态': '健康状态'};
-                  const label = aliases[input.value] || input.value;
+                  const label = aliases[rawLabel] || rawLabel;
                   const target = Array.from(
                     document.querySelectorAll('#workspace-tabs button')
                   ).find((button) => button.textContent.trim() === label);
                   target?.click();
                 };
+                const navigate = event => {
+                  const input = event.target;
+                  if (!(input instanceof HTMLInputElement)) return;
+                  if (!input.closest('#navigation-page')) return;
+                  navigateLabel(input.value);
+                };
                 document.addEventListener('input', navigate, true);
                 document.addEventListener('change', navigate, true);
+                document.addEventListener('click', event => {
+                  const option = event.target.closest?.('[role="option"]');
+                  if (!option) return;
+                  const input = document.querySelector('#navigation-page input');
+                  if (input?.getAttribute('aria-expanded') !== 'true') return;
+                  navigateLabel(option.textContent.trim());
+                }, true);
               }
               let resizer = sidebar.querySelector('#workspace-resizer');
               if (!resizer) {
