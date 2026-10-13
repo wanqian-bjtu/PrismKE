@@ -1739,23 +1739,6 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             trigger_mode="multiple",
             concurrency_limit=None,
             queue=False,
-            js="""(page) => {
-              const labels = {
-                overview: '总览', build: '新建构建', execution: '执行任务',
-                'entity-review': '实体审核', 'claim-review': '事实审核',
-                validation: '校验问题', evidence: '证据', graph: '图谱',
-                media: '媒体资产', 'visual-review': '视觉审核',
-                governance: '实体治理', corrections: '审核历史与纠正',
-                revisions: '版本', cases: '案例库', reflection: 'Reflection',
-                agents: 'Agent 协作', health: '健康状态'
-              };
-              const label = labels[page];
-              const target = Array.from(
-                document.querySelectorAll('#workspace-tabs button')
-              ).find((button) => button.textContent.trim() === label);
-              target?.click();
-              return page;
-            }""",
         )
         schema_source.change(
             switch_schema_source,
@@ -1803,6 +1786,22 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 return width;
               };
               if (window.innerWidth > 900) applyWidth(localStorage.getItem(storageKey));
+              if (!window.__prismkeNavigationBound) {
+                window.__prismkeNavigationBound = true;
+                const navigate = event => {
+                  const input = event.target;
+                  if (!(input instanceof HTMLInputElement)) return;
+                  if (!input.closest('#navigation-page')) return;
+                  const aliases = {'版本管理': '版本', '系统状态': '健康状态'};
+                  const label = aliases[input.value] || input.value;
+                  const target = Array.from(
+                    document.querySelectorAll('#workspace-tabs button')
+                  ).find((button) => button.textContent.trim() === label);
+                  target?.click();
+                };
+                document.addEventListener('input', navigate, true);
+                document.addEventListener('change', navigate, true);
+              }
               let resizer = sidebar.querySelector('#workspace-resizer');
               if (!resizer) {
                 resizer = document.createElement('div');
