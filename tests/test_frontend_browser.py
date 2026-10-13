@@ -177,11 +177,24 @@ def test_workspace_navigation_branding_and_responsive_layout(
 
 
 @pytest.mark.browser
-def test_every_workspace_page_is_reachable_from_grouped_navigation(
+@pytest.mark.parametrize(
+    ("group_id", "group_label", "pages"),
+    [
+        (group_id, group_label, pages)
+        for group_id, (group_label, pages) in NAVIGATION_GROUPS.items()
+    ],
+    ids=list(NAVIGATION_GROUPS),
+)
+def test_workspace_group_pages_are_reachable(
     workspace_url: str,
     tmp_path: Path,
+    group_id: str,
+    group_label: str,
+    pages: tuple[tuple[str, str], ...],
 ) -> None:
-    screenshot_root = Path(os.environ.get("PRISMKE_SCREENSHOT_DIR", tmp_path)) / "pages"
+    screenshot_root = (
+        Path(os.environ.get("PRISMKE_SCREENSHOT_DIR", tmp_path)) / "pages" / group_id
+    )
     screenshot_root.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
@@ -189,29 +202,26 @@ def test_every_workspace_page_is_reachable_from_grouped_navigation(
         page.goto(workspace_url, wait_until="domcontentloaded", timeout=60_000)
         page.locator("#workspace-logo img").wait_for(state="visible")
 
-        for group_index, (_, (group_label, pages)) in enumerate(NAVIGATION_GROUPS.items()):
-            if group_index:
-                page.reload(wait_until="domcontentloaded", timeout=60_000)
-                page.locator("#workspace-logo img").wait_for(state="visible")
-                _select_option(page, "navigation-group", group_label)
-                if len(pages) > 1:
-                    expect(page.locator("#navigation-page input")).to_have_value(
-                        pages[0][0], timeout=60_000
-                    )
-            for page_label, page_id in pages:
-                if len(pages) > 1:
-                    page.locator("#navigation-page").wait_for(state="visible", timeout=60_000)
-                    _select_option(page, "navigation-page", page_label)
-                heading = page.locator(".workspace-page-header:visible h1")
-                heading.wait_for(state="visible")
-                expected_title = PAGE_META[page_id][0]
-                expect(heading).to_have_text(expected_title, timeout=60_000)
-                assert heading.inner_text() == expected_title
-                _write_screenshot(
-                    page,
-                    screenshot_root / f"desktop-{page_id}.png",
-                    full_page=False,
+        if group_id != "overview":
+            _select_option(page, "navigation-group", group_label)
+            if len(pages) > 1:
+                expect(page.locator("#navigation-page input")).to_have_value(
+                    pages[0][0], timeout=60_000
                 )
-                page.wait_for_timeout(750)
+        for page_label, page_id in pages:
+            if len(pages) > 1:
+                page.locator("#navigation-page").wait_for(state="visible", timeout=60_000)
+                _select_option(page, "navigation-page", page_label)
+            heading = page.locator(".workspace-page-header:visible h1")
+            heading.wait_for(state="visible")
+            expected_title = PAGE_META[page_id][0]
+            expect(heading).to_have_text(expected_title, timeout=60_000)
+            assert heading.inner_text() == expected_title
+            _write_screenshot(
+                page,
+                screenshot_root / f"desktop-{page_id}.png",
+                full_page=False,
+            )
+            page.wait_for_timeout(750)
 
         browser.close()
