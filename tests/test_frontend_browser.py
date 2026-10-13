@@ -191,6 +191,8 @@ def test_every_workspace_page_is_reachable_from_grouped_navigation(
 
         for group_index, (_, (group_label, pages)) in enumerate(NAVIGATION_GROUPS.items()):
             if group_index:
+                page.reload(wait_until="domcontentloaded", timeout=60_000)
+                page.locator("#workspace-logo img").wait_for(state="visible")
                 _select_option(page, "navigation-group", group_label)
                 if len(pages) > 1:
                     expect(page.locator("#navigation-page input")).to_have_value(
