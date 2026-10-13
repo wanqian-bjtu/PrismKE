@@ -1791,10 +1791,10 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 const navigateLabel = rawLabel => {
                   const aliases = {'版本管理': '版本', '系统状态': '健康状态'};
                   const label = aliases[rawLabel] || rawLabel;
-                  const target = Array.from(
+                  const targets = Array.from(
                     document.querySelectorAll('#workspace-tabs button')
-                  ).find((button) => button.textContent.trim() === label);
-                  target?.click();
+                  ).filter((button) => button.textContent.trim() === label);
+                  targets.at(-1)?.click();
                 };
                 const navigate = event => {
                   const input = event.target;
