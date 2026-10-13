@@ -1807,8 +1807,6 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 document.addEventListener('click', event => {
                   const option = event.target.closest?.('[role="option"]');
                   if (!option) return;
-                  const input = document.querySelector('#navigation-page input');
-                  if (input?.getAttribute('aria-expanded') !== 'true') return;
                   navigateLabel(option.textContent.trim());
                 }, true);
               }
