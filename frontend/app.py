@@ -1809,6 +1809,13 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                   if (!option) return;
                   navigateLabel(option.textContent.trim());
                 }, true);
+                let lastPageLabel = document.querySelector('#navigation-page input')?.value;
+                window.__prismkeNavigationTimer = window.setInterval(() => {
+                  const input = document.querySelector('#navigation-page input');
+                  if (!input || input.value === lastPageLabel) return;
+                  lastPageLabel = input.value;
+                  navigateLabel(input.value);
+                }, 100);
               }
               let resizer = sidebar.querySelector('#workspace-resizer');
               if (!resizer) {
