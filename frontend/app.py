@@ -1712,22 +1712,20 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     health_output = gr.JSON(label="服务状态")
                 health_button.click(health, outputs=[health_output])
 
-        def switch_group(group_id: str) -> Any:
+        def switch_group(group_id: str) -> tuple[Any, Any]:
             choices = page_choices(group_id)
             target = first_page(group_id)
-            return gr.update(choices=choices, value=target, visible=len(choices) > 1)
+            return (
+                gr.update(choices=choices, value=target, visible=len(choices) > 1),
+                gr.update(selected=target),
+            )
 
-        group_change = navigation_group.change(
+        navigation_group.change(
             switch_group,
             navigation_group,
-            navigation_page,
+            [navigation_page, workspace_tabs],
         )
-        group_change.then(
-            lambda group_id: gr.update(selected=first_page(group_id)),
-            navigation_group,
-            workspace_tabs,
-        )
-        navigation_page.change(
+        navigation_page.input(
             lambda page: gr.update(selected=page),
             navigation_page,
             workspace_tabs,
