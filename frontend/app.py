@@ -1881,6 +1881,27 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
               const sidebar = document.querySelector('#workspace-sidebar');
               const toggle = sidebar?.querySelector('button[aria-label="Toggle Sidebar"]');
               if (!sidebar) return;
+              const localizeErrorToasts = root => {
+                if (root.matches?.('.toast-title') && root.textContent.trim() === 'Error') {
+                  root.textContent = '错误';
+                }
+                root.querySelectorAll?.('.toast-title').forEach(title => {
+                  if (title.textContent.trim() === 'Error') title.textContent = '错误';
+                });
+              };
+              localizeErrorToasts(document);
+              if (!window.__prismkeToastLocaleBound) {
+                window.__prismkeToastLocaleBound = true;
+                window.__prismkeToastLocaleObserver = new MutationObserver(records => {
+                  records.forEach(record => record.addedNodes.forEach(node => {
+                    if (node instanceof Element) localizeErrorToasts(node);
+                  }));
+                });
+                window.__prismkeToastLocaleObserver.observe(document.body, {
+                  childList: true,
+                  subtree: true,
+                });
+              }
               const storageKey = 'prismke.workspace.sidebar.width';
               const clamp = value => Math.max(260, Math.min(520, value));
               const applyWidth = value => {
