@@ -8,6 +8,13 @@ from typing import Any, Literal, cast
 from PIL import Image
 
 from frontend.layout import page_header
+from frontend.presentation import (
+    dropdown_kwargs,
+    dropdown_update,
+    empty_dropdown_kwargs,
+    guard_ui,
+    status_label,
+)
 from src.core.ids import stable_id
 from src.domain import ReviewDecision
 from src.workflow import PrismKEService
@@ -23,7 +30,9 @@ class ReviewController:
             label = state.run_id
             if state.review_workspace and state.document:
                 label = state.document.source_filename or "隔离导入文档"
-            choices.append((f"{label} · {state.status} · {state.run_id}", state.run_id))
+            choices.append(
+                (f"{label} · {status_label(state.status)} · {state.run_id}", state.run_id)
+            )
         return choices
 
     async def queue(
@@ -160,9 +169,13 @@ def build_review_tabs(service: PrismKEService) -> None:
 
 def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
     service = controller.service
+    run_choices = controller.runs()
     page_header(gr, "entity-review" if kind == "entity" else "claim-review")
     with gr.Row():
-        run = gr.Dropdown(controller.runs(), label="运行", value=None)
+        run = gr.Dropdown(
+            label="运行",
+            **dropdown_kwargs(run_choices, empty_label="暂无运行"),
+        )
         status = gr.Dropdown(
             [("待审核", "pending"), ("已处理", "resolved"), ("全部", "all")],
             value="pending",
@@ -179,7 +192,7 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
     )
     task_ids = gr.State([])
     task_version = gr.State(None)
-    task = gr.Dropdown(label="选择任务", choices=[], value=None)
+    task = gr.Dropdown(label="选择任务", **empty_dropdown_kwargs("暂无审核任务"))
     with gr.Row():
         with gr.Column(min_width=280):
             description = gr.Textbox(
@@ -206,7 +219,9 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
                 label="候选评分",
             )
             candidate = gr.Dropdown(
-                label="链接候选", choices=[], value=None, visible=kind == "entity"
+                label="链接候选",
+                visible=kind == "entity",
+                **empty_dropdown_kwargs("暂无候选实体"),
             )
             neighbor_button = gr.Button("查看所选候选邻域", visible=kind == "entity")
             with gr.Accordion(
@@ -216,7 +231,7 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
                 elem_classes="technical-detail",
             ):
                 neighbor = gr.JSON(label="候选邻域", visible=kind == "entity")
-            evidence_choice = gr.Dropdown(label="当前对象证据", choices=[], value=None)
+            evidence_choice = gr.Dropdown(label="当前对象证据", **empty_dropdown_kwargs("暂无证据"))
             evidence_text = gr.Textbox(label="证据原文与位置", lines=8, interactive=False)
             evidence_image = gr.Image(label="证据区域", type="filepath", visible=False)
         with gr.Column(min_width=280):
@@ -224,7 +239,9 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
                 label="冲突对方事实", lines=8, interactive=False, visible=kind == "claim"
             )
             peer_evidence = gr.Dropdown(
-                label="对方证据", choices=[], value=None, visible=kind == "claim"
+                label="对方证据",
+                visible=kind == "claim",
+                **empty_dropdown_kwargs("暂无对方证据"),
             )
             peer_text = gr.Textbox(
                 label="对方原文与位置", lines=8, interactive=False, visible=kind == "claim"
@@ -260,17 +277,24 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
         p = service.review_progress(rid) if rid else {}
         return (
             [
-                [row["label"], row["status"], "；".join(row["flags"]), "；".join(row["reasons"])]
+                [
+                    row["label"],
+                    status_label(row["status"]),
+                    "；".join(row["flags"]),
+                    "；".join(row["reasons"]),
+                ]
                 for row in rows
             ],
             [row["id"] for row in rows],
-            gr.update(
-                choices=[(row["label"], row["id"]) for row in rows],
+            dropdown_update(
+                gr,
+                [(row["label"], row["id"]) for row in rows],
+                empty_label="暂无审核任务",
                 value=rows[0]["id"] if rows else None,
             ),
             f"实体待审核 {p.get('entity_pending', 0)} · 事实待审核 {p.get('claim_pending', 0)} · "
             f"校验待处理 {p.get('validation_pending', 0)} · "
-            f"{p.get('status', '未选择运行')} · {p.get('node', '')}"
+            f"{status_label(p.get('status', '未选择运行'))} · {p.get('node', '')}"
             + (" · 同步待恢复：继续与写图已禁用" if p.get("review_sync_pending") else ""),
             gr.update(interactive=p.get("can_resume", False)),
             p.get("submission"),
@@ -284,10 +308,10 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
                 "",
                 "",
                 [],
-                gr.update(choices=[], value=None),
-                gr.update(choices=[], value=None),
+                dropdown_update(gr, [], empty_label="暂无候选实体"),
+                dropdown_update(gr, [], empty_label="暂无证据"),
                 "",
-                gr.update(choices=[], value=None),
+                dropdown_update(gr, [], empty_label="暂无对方证据"),
                 "",
                 gr.update(interactive=False),
                 gr.update(value=None),
@@ -352,10 +376,20 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
             description_text,
             "\n".join([*detail["risk_flags"], *detail["task"]["reasons"]]),
             score_rows,
-            gr.update(choices=choices, value=None),
-            gr.update(choices=ids, value=ids[0] if ids else None),
+            dropdown_update(gr, choices, empty_label="暂无候选实体"),
+            dropdown_update(
+                gr,
+                ids,
+                empty_label="暂无证据",
+                value=ids[0] if ids else None,
+            ),
             peer_label,
-            gr.update(choices=peer_ids, value=peer_ids[0] if peer_ids else None),
+            dropdown_update(
+                gr,
+                peer_ids,
+                empty_label="暂无对方证据",
+                value=peer_ids[0] if peer_ids else None,
+            ),
             effect,
             gr.update(interactive=detail["task"]["status"] == "pending"),
             gr.update(
@@ -381,11 +415,8 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
     async def submit_task(
         rid: str, tid: str, decision: str, cid: str | None, person: str, note: str, version: int
     ) -> str:
-        try:
-            await controller.submit(rid, tid, kind, decision, cid, person, note, version)
-            return "已记录当前审核，尚未自动提交图谱。"
-        except Exception as exc:
-            raise gr.Error(str(exc)) from exc
+        await controller.submit(rid, tid, kind, decision, cid, person, note, version)
+        return "已记录当前审核，尚未自动提交图谱。"
 
     async def continue_run(rid: str) -> str:
         await service.resume(rid)
@@ -393,19 +424,23 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
 
     async def commit_run(rid: str, person: str, confirmed: bool) -> str:
         if not confirmed:
-            raise gr.Error("请先确认隔离图谱提交摘要")
+            raise ValueError("请先确认隔离图谱提交摘要")
         await service.confirm_review_commit(rid, person)
         return "已写入隔离图谱。"
 
     async def show_neighbor(cid: str | None) -> Any:
         if not cid:
-            raise gr.Error("请选择候选实体")
+            raise ValueError("请选择候选实体")
         return (await service.graph_store.get_neighborhood(cid)).model_dump(mode="json")
 
     def select_row(ids: list[str], event: Any) -> Any:
         return gr.update(value=ids[event.index[0]])
 
     select_row.__annotations__["event"] = gr.SelectData
+
+    def refresh_runs() -> Any:
+        choices = controller.runs()
+        return dropdown_update(gr, choices, empty_label="暂无运行")
 
     queue_inputs = [run, status, risk]
     queue_outputs = [table, task_ids, task, progress, resume, preview, commit, confirm]
@@ -423,30 +458,42 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
         task_version,
     ]
     for trigger in (run.change, status.change, risk.change):
-        trigger(load_queue, queue_inputs, queue_outputs).then(load_task, [run, task], task_outputs)
-    refresh.click(lambda: gr.update(choices=controller.runs()), outputs=[run]).then(
-        load_queue,
+        trigger(guard_ui(gr, load_queue, 8), queue_inputs, queue_outputs).then(
+            guard_ui(gr, load_task, 11), [run, task], task_outputs
+        )
+    refresh.click(refresh_runs, outputs=[run]).then(
+        guard_ui(gr, load_queue, 8),
         queue_inputs,
         queue_outputs,
-    ).then(load_task, [run, task], task_outputs)
-    table.select(select_row, [task_ids], [task]).then(load_task, [run, task], task_outputs)
-    task.input(load_task, [run, task], task_outputs)
-    evidence_choice.change(evidence, [run, evidence_choice], [evidence_text, evidence_image])
-    peer_evidence.change(evidence, [run, peer_evidence], [peer_text, peer_image])
-    neighbor_button.click(show_neighbor, [candidate], [neighbor])
+    ).then(guard_ui(gr, load_task, 11), [run, task], task_outputs)
+    table.select(guard_ui(gr, select_row), [task_ids], [task]).then(
+        guard_ui(gr, load_task, 11), [run, task], task_outputs
+    )
+    task.input(guard_ui(gr, load_task, 11), [run, task], task_outputs)
+    evidence_choice.change(
+        guard_ui(gr, evidence, 2),
+        [run, evidence_choice],
+        [evidence_text, evidence_image],
+    )
+    peer_evidence.change(guard_ui(gr, evidence, 2), [run, peer_evidence], [peer_text, peer_image])
+    neighbor_button.click(guard_ui(gr, show_neighbor), [candidate], [neighbor])
     submit.click(
-        submit_task, [run, task, action, candidate, reviewer, comment, task_version], [outcome]
+        guard_ui(gr, submit_task),
+        [run, task, action, candidate, reviewer, comment, task_version],
+        [outcome],
     ).then(
-        load_queue,
+        guard_ui(gr, load_queue, 8),
         queue_inputs,
         queue_outputs,
-    ).then(load_task, [run, task], task_outputs)
+    ).then(guard_ui(gr, load_task, 11), [run, task], task_outputs)
     for button, fn, inputs in (
         (resume, continue_run, [run]),
         (commit, commit_run, [run, reviewer, confirm]),
     ):
-        button.click(fn, inputs, [outcome]).then(load_queue, queue_inputs, queue_outputs).then(
-            load_task,
+        button.click(guard_ui(gr, fn), inputs, [outcome]).then(
+            guard_ui(gr, load_queue, 8), queue_inputs, queue_outputs
+        ).then(
+            guard_ui(gr, load_task, 11),
             [run, task],
             task_outputs,
         )

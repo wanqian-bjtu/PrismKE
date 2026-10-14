@@ -97,6 +97,26 @@ def _write_screenshot(page: Page, path: Path, *, full_page: bool) -> None:
 
 
 @pytest.mark.browser
+def test_schema_error_uses_one_chinese_toast_and_preserves_output(
+    workspace_url: str, tmp_path: Path
+) -> None:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 900})
+        page.goto(workspace_url, wait_until="domcontentloaded", timeout=60_000)
+        page.get_by_role("button", name="校验 Schema", exact=True).click()
+
+        toast = page.locator(".toast-wrap, [role='alert']").filter(has_text="错误").last
+        toast.wait_for(state="visible", timeout=15_000)
+        expect(toast).to_contain_text("错误")
+        expect(toast).to_contain_text("请上传 Schema 文件")
+        expect(page.get_by_text("尚未校验 Schema", exact=True)).to_be_visible()
+        assert page.get_by_text("Error", exact=True).count() == 0
+        _write_screenshot(page, tmp_path / "chinese-error-toast.png", full_page=False)
+        browser.close()
+
+
+@pytest.mark.browser
 @pytest.mark.parametrize(
     ("name", "width", "height"),
     [
@@ -192,9 +212,7 @@ def test_workspace_group_pages_are_reachable(
     group_label: str,
     pages: tuple[tuple[str, str], ...],
 ) -> None:
-    screenshot_root = (
-        Path(os.environ.get("PRISMKE_SCREENSHOT_DIR", tmp_path)) / "pages" / group_id
-    )
+    screenshot_root = Path(os.environ.get("PRISMKE_SCREENSHOT_DIR", tmp_path)) / "pages" / group_id
     screenshot_root.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
