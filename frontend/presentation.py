@@ -210,7 +210,13 @@ def notify_error(error: BaseException | str) -> str:
         logger.warning("UI action failed: %s", error)
     from gradio.helpers import log_message
 
-    log_message(message, level="error", title="错误", duration=10, visible=True)
+    log_message(
+        message,
+        level=cast(Any, "error"),
+        title="错误",
+        duration=10,
+        visible=True,
+    )
     return message
 
 
