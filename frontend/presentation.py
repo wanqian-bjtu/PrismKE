@@ -6,14 +6,11 @@ import hashlib
 import inspect
 import logging
 import re
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Callable, Sequence
 from functools import wraps
-from typing import Any, ParamSpec, TypeVar, cast
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
-
-P = ParamSpec("P")
-R = TypeVar("R")
 
 EMPTY_VALUE = ""
 
@@ -229,17 +226,17 @@ def _skipped_outputs(gr: Any, output_count: int) -> Any:
 
 def guard_ui(
     gr: Any,
-    function: Callable[P, R] | Callable[P, Awaitable[R]],
+    function: Callable[..., Any],
     output_count: int = 1,
-) -> Callable[P, Any]:
+) -> Callable[..., Any]:
     """Catch UI-bound failures, notify once, and preserve every output component."""
 
     if inspect.iscoroutinefunction(function):
 
         @wraps(function)
-        async def async_guard(*args: P.args, **kwargs: P.kwargs) -> Any:
+        async def async_guard(*args: Any, **kwargs: Any) -> Any:
             try:
-                return await cast(Callable[P, Awaitable[R]], function)(*args, **kwargs)
+                return await function(*args, **kwargs)
             except Exception as exc:
                 notify_error(exc)
                 return _skipped_outputs(gr, output_count)
@@ -247,9 +244,9 @@ def guard_ui(
         return async_guard
 
     @wraps(function)
-    def sync_guard(*args: P.args, **kwargs: P.kwargs) -> Any:
+    def sync_guard(*args: Any, **kwargs: Any) -> Any:
         try:
-            return cast(Callable[P, R], function)(*args, **kwargs)
+            return function(*args, **kwargs)
         except Exception as exc:
             notify_error(exc)
             return _skipped_outputs(gr, output_count)
