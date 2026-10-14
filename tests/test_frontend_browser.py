@@ -110,6 +110,7 @@ def test_schema_error_uses_one_chinese_toast_and_preserves_output(
         toast.wait_for(state="visible", timeout=15_000)
         expect(toast).to_contain_text("错误")
         expect(toast).to_contain_text("请上传 Schema 文件")
+        assert page.get_by_text("错误", exact=True).count() == 1
         expect(page.get_by_text("尚未校验 Schema", exact=True)).to_be_visible()
         assert page.get_by_text("Error", exact=True).count() == 0
         _write_screenshot(page, tmp_path / "chinese-error-toast.png", full_page=False)
