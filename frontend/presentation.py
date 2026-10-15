@@ -10,6 +10,8 @@ from collections.abc import Callable, Sequence
 from functools import wraps
 from typing import Any, cast
 
+from frontend.i18n import DEFAULT_LOCALE, LocaleCode, normalize_locale, tr
+
 logger = logging.getLogger(__name__)
 
 EMPTY_VALUE = ""
@@ -108,29 +110,34 @@ _ERROR_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 
-def display_label(value: Any, mapping: dict[str, str]) -> str:
+def display_label(
+    value: Any,
+    mapping: dict[str, str],
+    locale: object = DEFAULT_LOCALE,
+) -> str:
     """Return a localized display label without changing the stored value."""
 
     if value is None:
         return ""
     raw = value.value if hasattr(value, "value") else str(value)
-    return mapping.get(raw, raw)
+    label = mapping.get(raw, raw)
+    return tr(label, locale) if label != raw else raw
 
 
-def media_type_label(value: Any) -> str:
-    return display_label(value, MEDIA_TYPE_LABELS)
+def media_type_label(value: Any, locale: object = DEFAULT_LOCALE) -> str:
+    return display_label(value, MEDIA_TYPE_LABELS, locale)
 
 
-def status_label(value: Any) -> str:
-    return display_label(value, STATUS_LABELS)
+def status_label(value: Any, locale: object = DEFAULT_LOCALE) -> str:
+    return display_label(value, STATUS_LABELS, locale)
 
 
-def decision_label(value: Any) -> str:
-    return display_label(value, DECISION_LABELS)
+def decision_label(value: Any, locale: object = DEFAULT_LOCALE) -> str:
+    return display_label(value, DECISION_LABELS, locale)
 
 
-def visual_target_label(value: Any) -> str:
-    return display_label(value, VISUAL_TARGET_LABELS)
+def visual_target_label(value: Any, locale: object = DEFAULT_LOCALE) -> str:
+    return display_label(value, VISUAL_TARGET_LABELS, locale)
 
 
 def normalize_optional(value: Any) -> Any | None:
@@ -178,29 +185,34 @@ def _raw_error_message(error: BaseException | str) -> str:
     return str(message if message is not None else error).strip()
 
 
-def error_message(error: BaseException | str) -> str:
+def error_message(error: BaseException | str, locale: object = DEFAULT_LOCALE) -> str:
     """Translate expected failures and redact unknown internal exceptions."""
 
     raw = _raw_error_message(error)
     if not raw:
-        return "操作失败，请刷新后重试。"
+        return tr("操作失败，请刷新后重试。", locale)
     if raw.startswith("Schema 文本无效"):
-        return "Schema 内容格式无效，请检查 JSON/YAML 语法和字段约束。"
+        return tr("Schema 内容格式无效，请检查 JSON/YAML 语法和字段约束。", locale)
     if raw.startswith("请") or re.search(r"[\u4e00-\u9fff]", raw):
-        return raw
+        return tr(raw, locale)
     for pattern, message in _ERROR_PATTERNS:
         if pattern.search(raw):
-            return message
+            return tr(message, locale)
     reference = hashlib.sha256(
         f"{type(error).__name__}:{raw}".encode("utf-8", errors="replace")
     ).hexdigest()[:8]
-    return f"操作失败，请刷新后重试；如问题持续，请联系管理员。错误编号：{reference}。"
+    if normalize_locale(locale) == "zh-CN":
+        return f"操作失败，请刷新后重试；如问题持续，请联系管理员。错误编号：{reference}。"
+    return (
+        "The operation failed. Refresh and try again. If it persists, contact the "
+        f"administrator with error reference: {reference}."
+    )
 
 
-def notify_error(error: BaseException | str) -> str:
+def notify_error(error: BaseException | str, locale: LocaleCode = DEFAULT_LOCALE) -> str:
     """Show one top-right red notification without raising into output components."""
 
-    message = error_message(error)
+    message = error_message(error, locale)
     if isinstance(error, BaseException):
         logger.exception("UI action failed", exc_info=error)
     else:
@@ -210,7 +222,7 @@ def notify_error(error: BaseException | str) -> str:
     log_message(
         message,
         level=cast(Any, "error"),
-        title="错误",
+        title="错误" if locale == "zh-CN" else "Error",
         duration=10,
         visible=True,
     )

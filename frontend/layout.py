@@ -84,8 +84,16 @@ def all_page_ids() -> tuple[str, ...]:
     return tuple(page_id for _, pages in NAVIGATION_GROUPS.values() for _, page_id in pages)
 
 
-def build_brand_header(gr: Any, version: str) -> None:
+def build_brand_header(gr: Any, version: str) -> Any:
     with gr.Column(elem_id="workspace-brand", elem_classes="workspace-brand-band"):
+        language_switch = gr.Checkbox(
+            value=False,
+            label="EN / CH",
+            show_label=False,
+            container=False,
+            elem_id="language-switch",
+            elem_classes="language-switch",
+        )
         gr.Image(
             value=str(logo_path()),
             format="png",
@@ -101,6 +109,7 @@ def build_brand_header(gr: Any, version: str) -> None:
             f'<p class="workspace-tagline">{TAGLINE}</p>'
             f'<p class="workspace-version">Development build · {version}</p>'
         )
+    return language_switch
 
 
 def page_header(gr: Any, page_id: str) -> None:

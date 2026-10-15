@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import orjson
 
+from frontend.i18n import browser_i18n_bootstrap_js
 from frontend.layout import (
     build_brand_header,
     first_page,
@@ -1289,11 +1290,15 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     f"{'已配置' if public_settings['neo4j_password'] else '未配置'}  \n"
                     "页面不回显旧密码；新值保存到权限为 600 的私密运行配置。"
                 )
-                config_operator = gr.Textbox(label="配置操作者", value="管理员")
+                config_operator = gr.Textbox(
+                    label="配置操作者",
+                    value="管理员",
+                    elem_id="config-operator",
+                )
                 save_config = gr.Button("保存设置", variant="primary")
                 config_outcome = gr.Textbox(label="设置结果", interactive=False)
 
-        build_brand_header(gr, __version__)
+        language_switch = build_brand_header(gr, __version__)
 
         with gr.Tabs(selected="overview", elem_id="workspace-tabs") as workspace_tabs:
             with gr.Tab("总览", id="overview"):
@@ -1875,33 +1880,24 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             [schema_source, schema_input, schema_text],
             schema_result,
         )
+        language_switch.input(
+            fn=None,
+            inputs=language_switch,
+            outputs=None,
+            js="""checked => {
+              window.PrismKEI18n?.setLocale(checked ? 'zh-CN' : 'en', true);
+            }""",
+            queue=False,
+        )
         demo.load(
             fn=None,
-            js="""() => {
+            js=(
+                """() => {"""
+                + browser_i18n_bootstrap_js()
+                + """
               const sidebar = document.querySelector('#workspace-sidebar');
               const toggle = sidebar?.querySelector('button[aria-label="Toggle Sidebar"]');
               if (!sidebar) return;
-              const localizeErrorToasts = root => {
-                if (root.matches?.('.toast-title') && root.textContent.trim() === 'Error') {
-                  root.textContent = '错误';
-                }
-                root.querySelectorAll?.('.toast-title').forEach(title => {
-                  if (title.textContent.trim() === 'Error') title.textContent = '错误';
-                });
-              };
-              localizeErrorToasts(document);
-              if (!window.__prismkeToastLocaleBound) {
-                window.__prismkeToastLocaleBound = true;
-                window.__prismkeToastLocaleObserver = new MutationObserver(records => {
-                  records.forEach(record => record.addedNodes.forEach(node => {
-                    if (node instanceof Element) localizeErrorToasts(node);
-                  }));
-                });
-                window.__prismkeToastLocaleObserver.observe(document.body, {
-                  childList: true,
-                  subtree: true,
-                });
-              }
               const storageKey = 'prismke.workspace.sidebar.width';
               const clamp = value => Math.max(260, Math.min(520, value));
               const applyWidth = value => {
@@ -1916,7 +1912,12 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
               if (!window.__prismkeNavigationBound) {
                 window.__prismkeNavigationBound = true;
                 const navigateLabel = rawLabel => {
-                  const aliases = {'版本管理': '版本', '系统状态': '健康状态'};
+                  const aliases = {
+                    '版本管理': '版本',
+                    '系统状态': '健康状态',
+                    'Revision management': 'Version',
+                    'System status': 'Health status',
+                  };
                   const label = aliases[rawLabel] || rawLabel;
                   const targets = Array.from(
                     document.querySelectorAll('#workspace-tabs button')
@@ -1951,7 +1952,12 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 resizer.tabIndex = 0;
                 resizer.setAttribute('role', 'separator');
                 resizer.setAttribute('aria-orientation', 'vertical');
-                resizer.setAttribute('aria-label', '调整工作区宽度');
+                resizer.setAttribute(
+                  'aria-label',
+                  window.PrismKEI18n?.getLocale() === 'zh-CN'
+                    ? '调整工作区宽度'
+                    : 'Resize workspace sidebar'
+                );
                 sidebar.appendChild(resizer);
                 let dragging = false;
                 resizer.addEventListener('pointerdown', event => {
@@ -1988,7 +1994,8 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
               if (window.innerWidth <= 520 && sidebar?.classList.contains('open')) {
                 toggle?.click();
               }
-            }""",
+            }"""
+            ),
         )
         refresh_context.click(
             guard_ui(gr, sidebar_run, 2), [current_run], [current_run, run_context]

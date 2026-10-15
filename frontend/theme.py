@@ -109,6 +109,7 @@ APP_CSS = r"""
 #workspace-resizer[data-dragging="true"]::after { background: var(--prism-blue); }
 
 #workspace-brand {
+  position: relative;
   box-sizing: border-box;
   width: 100%;
   min-height: 178px;
@@ -120,6 +121,92 @@ APP_CSS = r"""
   border: 0;
   gap: 3px !important;
 }
+
+#language-switch {
+  position: absolute !important;
+  z-index: 60;
+  top: 18px;
+  right: 28px;
+  width: 112px !important;
+  min-width: 112px !important;
+  height: 36px !important;
+  min-height: 36px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden;
+  border: 1px solid #b9c8dc !important;
+  border-radius: 20px !important;
+  background: #e8eef8 !important;
+  box-shadow: none !important;
+  cursor: pointer;
+}
+
+#prismke-workspace:not(.i18n-ready) { visibility: hidden; }
+
+#language-switch::before {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  top: 2px;
+  left: 2px;
+  width: 53px;
+  height: 30px;
+  border-radius: 17px;
+  background: #ffffff;
+  box-shadow: 0 1px 4px rgba(23, 32, 51, 0.22);
+  transition: transform 180ms ease;
+  pointer-events: none;
+}
+
+#language-switch:has(input:checked)::before { transform: translateX(54px); }
+
+#language-switch::after {
+  content: "EN\00a0\00a0\00a0\00a0\00a0\00a0\00a0 CH";
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--prism-blue);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 36px;
+  letter-spacing: 0;
+  pointer-events: none;
+}
+
+#language-switch .wrap,
+#language-switch label {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  cursor: pointer !important;
+}
+
+#language-switch input[type="checkbox"] {
+  position: absolute !important;
+  z-index: 4 !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  opacity: 0 !important;
+  cursor: pointer !important;
+}
+
+#language-switch span { opacity: 0 !important; }
+
+#language-switch:focus-within {
+  outline: 3px solid rgba(233, 162, 26, 0.42) !important;
+  outline-offset: 2px;
+}
+
+.toast-wrap,
+.toast-container { top: 66px !important; }
 
 #workspace-logo {
   width: min(468px, 70vw) !important;
@@ -232,8 +319,8 @@ APP_CSS = r"""
   outline-offset: 1px;
 }
 
-.gradio-container table { font-size: 13px; }
-.gradio-container .table-wrap { overflow-x: auto !important; }
+table { font-size: 13px; }
+.table-wrap { overflow-x: auto !important; }
 
 @media (max-width: 900px) {
   .gradio-container .sidebar-parent { padding-left: 0 !important; }
@@ -245,6 +332,10 @@ APP_CSS = r"""
     margin-left: 0;
     padding: 14px 18px 12px;
   }
+  #language-switch {
+    top: 14px;
+    right: 18px;
+  }
   #workspace-tabs { width: calc(100% - 24px); padding-top: 14px; }
   #workspace-tabs { max-width: none; margin: 0 auto; }
   .workspace-page-header { align-items: flex-start; flex-direction: column; gap: 5px; }
@@ -252,6 +343,24 @@ APP_CSS = r"""
 }
 
 @media (max-width: 520px) {
+  #language-switch {
+    top: 10px;
+    right: 12px;
+    width: 92px !important;
+    min-width: 92px !important;
+    height: 32px !important;
+    min-height: 32px !important;
+  }
+  #language-switch::before {
+    width: 43px;
+    height: 26px;
+  }
+  #language-switch:has(input:checked)::before { transform: translateX(44px); }
+  #language-switch::after {
+    content: "EN\00a0\00a0\00a0\00a0\00a0 CH";
+    font-size: 12px;
+    line-height: 32px;
+  }
   #workspace-sidebar.open {
     left: 0 !important;
     transform: translateX(0) !important;
@@ -266,6 +375,28 @@ APP_CSS = r"""
   .workspace-version { font-size: 11px; }
   #workspace-tabs { width: calc(100% - 16px); padding-bottom: 24px; }
   .workspace-page-header h1 { font-size: 21px; }
-  .gradio-container { overflow-x: hidden !important; }
+  .table-wrap {
+    max-width: 100% !important;
+    overflow-x: auto !important;
+  }
+  .table-wrap table {
+    width: max-content !important;
+    min-width: 100% !important;
+  }
+  .table-wrap th,
+  .table-wrap td {
+    min-width: 96px;
+    white-space: nowrap !important;
+    word-break: normal !important;
+  }
+  .table-wrap .header.text.wrap {
+    white-space: nowrap !important;
+    word-break: normal !important;
+  }
+  #prismke-workspace { overflow-x: hidden !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #language-switch::before { transition: none; }
 }
 """

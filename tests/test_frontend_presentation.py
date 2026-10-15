@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 import frontend.presentation as presentation
+from frontend.i18n import EN_BY_ZH, normalize_locale, tr
 
 
 class FakeGradio:
@@ -24,12 +25,23 @@ class FakeGradio:
 
 
 def test_user_facing_enum_labels_keep_internal_values_separate() -> None:
-    assert presentation.media_type_label("image") == "图片"
-    assert presentation.media_type_label("page_render") == "页面渲染"
-    assert presentation.status_label("running") == "运行中"
-    assert presentation.decision_label("defer") == "暂缓"
-    assert presentation.visual_target_label("visual_assertion") == "视觉断言"
+    assert presentation.media_type_label("image") == "Image"
+    assert presentation.media_type_label("page_render") == "Page render"
+    assert presentation.status_label("running") == "Running"
+    assert presentation.decision_label("defer") == "Defer"
+    assert presentation.visual_target_label("visual_assertion") == "Visual assertion"
+    assert presentation.media_type_label("image", "zh-CN") == "图片"
+    assert presentation.status_label("running", "zh-CN") == "运行中"
     assert presentation.media_type_label("future_type") == "future_type"
+
+
+def test_locale_catalog_has_stable_defaults_and_complete_pairs() -> None:
+    assert normalize_locale(None) == "en"
+    assert normalize_locale("invalid") == "en"
+    assert normalize_locale("zh-CN") == "zh-CN"
+    assert tr("工作区") == "Workspace"
+    assert tr("工作区", "zh-CN") == "工作区"
+    assert all(source and translated for source, translated in EN_BY_ZH.items())
 
 
 def test_empty_dropdown_is_disabled_and_sentinel_normalizes_to_none() -> None:
@@ -59,25 +71,35 @@ def test_empty_dropdown_is_disabled_and_sentinel_normalizes_to_none() -> None:
     [
         (
             "reviewer, reason and request_id are required",
-            "请填写审核人、审核原因和请求编号。",
+            "Enter the reviewer, review reason, and request ID.",
         ),
-        ("stale version 3", "当前数据版本已更新，请刷新页面后重试。"),
-        ("请上传 Schema 文件", "请上传 Schema 文件"),
+        ("stale version 3", "The data version has changed. Refresh the page and try again."),
+        ("请上传 Schema 文件", "Upload a Schema file."),
         (
             "Schema 文本无效: internal parser details",
-            "Schema 内容格式无效，请检查 JSON/YAML 语法和字段约束。",
+            "The Schema is invalid. Check its JSON/YAML syntax and field constraints.",
         ),
     ],
 )
-def test_expected_errors_have_stable_chinese_messages(raw: str, expected: str) -> None:
+def test_expected_errors_have_stable_english_messages(raw: str, expected: str) -> None:
     assert presentation.error_message(ValueError(raw)) == expected
+
+
+def test_expected_errors_can_be_rendered_in_chinese() -> None:
+    error = ValueError("reviewer, reason and request_id are required")
+    assert presentation.error_message(error, "zh-CN") == "请填写审核人、审核原因和请求编号。"
 
 
 def test_unknown_error_is_redacted_and_has_reference_number() -> None:
     message = presentation.error_message(RuntimeError("secret backend traceback in English"))
     assert "secret backend traceback" not in message
-    assert message.startswith("操作失败，请刷新后重试")
-    assert "错误编号：" in message
+    assert message.startswith("The operation failed. Refresh and try again")
+    assert "error reference:" in message
+    chinese = presentation.error_message(
+        RuntimeError("secret backend traceback in English"), "zh-CN"
+    )
+    assert chinese.startswith("操作失败，请刷新后重试")
+    assert "错误编号：" in chinese
 
 
 @pytest.mark.asyncio
@@ -97,7 +119,7 @@ async def test_guard_preserves_all_outputs_and_notifies_once(
 
     result = await presentation.guard_ui(gr, fail, 2)()
     assert result == tuple(gr.skips)
-    assert notifications == ["请先选择媒体出现记录"]
+    assert notifications == ["Select a media occurrence first."]
 
 
 def test_frontend_never_raises_gradio_error_directly() -> None:
@@ -117,3 +139,58 @@ def test_frontend_never_raises_gradio_error_directly() -> None:
             ):
                 violations.append(f"{path.name}:{node.lineno}")
     assert violations == []
+
+
+def test_gradio_literal_ui_strings_are_registered_for_english() -> None:
+    root = Path(__file__).resolve().parents[1] / "frontend"
+    component_names = {
+        "Accordion",
+        "Button",
+        "Checkbox",
+        "Dataframe",
+        "Dropdown",
+        "File",
+        "HTML",
+        "Image",
+        "JSON",
+        "Markdown",
+        "Number",
+        "Radio",
+        "Slider",
+        "Tab",
+        "Textbox",
+    }
+    positional_text = {"Accordion", "Button", "HTML", "Markdown", "Tab"}
+    visible_keywords = {"headers", "info", "label", "placeholder", "value"}
+    normalized_catalog = {" ".join(source.split()) for source in EN_BY_ZH}
+    missing: list[str] = []
+
+    for path in root.glob("*.py"):
+        if path.name == "i18n.py":
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            if not isinstance(node.func.value, ast.Name) or node.func.value.id != "gr":
+                continue
+            component = node.func.attr
+            if component not in component_names:
+                continue
+            values = [keyword.value for keyword in node.keywords if keyword.arg in visible_keywords]
+            if component in positional_text and node.args:
+                values.append(node.args[0])
+            for value in values:
+                for literal in ast.walk(value):
+                    if not isinstance(literal, ast.Constant) or not isinstance(literal.value, str):
+                        continue
+                    text = literal.value
+                    normalized = " ".join(text.split())
+                    if (
+                        any("\u4e00" <= character <= "\u9fff" for character in text)
+                        and text not in EN_BY_ZH
+                        and normalized not in normalized_catalog
+                    ):
+                        missing.append(f"{path.name}:{node.lineno}:{text!r}")
+
+    assert missing == []

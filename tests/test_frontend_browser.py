@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import socket
 import subprocess
@@ -13,6 +14,7 @@ import httpx
 import pytest
 from playwright.sync_api import Page, expect, sync_playwright
 
+from frontend.i18n import LOCALE_STORAGE_KEY, tr
 from frontend.layout import NAVIGATION_GROUPS, PAGE_META
 
 
@@ -96,24 +98,95 @@ def _write_screenshot(page: Page, path: Path, *, full_page: bool) -> None:
     raise last_error
 
 
+def _visible_nontechnical_chinese(page: Page) -> list[str]:
+    return page.evaluate(
+        """
+        () => {
+          const results = [];
+          const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+          let node;
+          while ((node = walker.nextNode())) {
+            const parent = node.parentElement;
+            const ignored = 'pre, code, textarea, script, style, [data-prismke-no-i18n]';
+            if (!parent || parent.closest(ignored)) continue;
+            const style = getComputedStyle(parent);
+            if (style.display === 'none' || style.visibility === 'hidden') continue;
+            const text = (node.textContent || '').trim();
+            if (/[\u4e00-\u9fff]/.test(text)) results.push(text);
+          }
+          return [...new Set(results)];
+        }
+        """
+    )
+
+
 @pytest.mark.browser
-def test_schema_error_uses_one_chinese_toast_and_preserves_output(
+def test_default_english_schema_error_and_chinese_switch_preserve_output(
     workspace_url: str, tmp_path: Path
 ) -> None:
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         page = browser.new_page(viewport={"width": 1440, "height": 900})
+        page.add_init_script(f"localStorage.removeItem('{LOCALE_STORAGE_KEY}')")
         page.goto(workspace_url, wait_until="domcontentloaded", timeout=60_000)
-        page.get_by_role("button", name="校验 Schema", exact=True).click()
+        expect(page.locator("html")).to_have_attribute("lang", "en", timeout=15_000)
+        expect(page.get_by_text("Workspace", exact=True)).to_be_visible()
+        page.get_by_role("button", name="Validate Schema", exact=True).click()
 
-        toast = page.locator(".toast-wrap, [role='alert']").filter(has_text="错误").last
+        toast = page.locator(".toast-wrap, [role='alert']").filter(has_text="Error").last
         toast.wait_for(state="visible", timeout=15_000)
-        expect(toast).to_contain_text("错误")
-        expect(toast).to_contain_text("请上传 Schema 文件")
-        assert page.get_by_text("错误", exact=True).count() == 1
+        expect(toast).to_contain_text("Upload a Schema file.")
+        expect(page.get_by_text("Schema has not been validated", exact=True)).to_be_visible()
+
+        page.get_by_text("Models and graph storage", exact=True).click()
+        operator = page.locator("#config-operator textarea, #config-operator input")
+        operator.fill("paper-demo")
+        page.locator("#language-switch input[type='checkbox']").click()
+        expect(page.locator("html")).to_have_attribute("lang", "zh-CN", timeout=15_000)
+        expect(page.get_by_text("工作区", exact=True)).to_be_visible()
+        expect(operator).to_have_value("paper-demo")
+        page.get_by_role("button", name="校验 Schema", exact=True).click()
+        chinese_toast = page.locator(".toast-wrap, [role='alert']").filter(has_text="错误").last
+        chinese_toast.wait_for(state="visible", timeout=15_000)
+        expect(chinese_toast).to_contain_text("请上传 Schema 文件")
         expect(page.get_by_text("尚未校验 Schema", exact=True)).to_be_visible()
-        assert page.get_by_text("Error", exact=True).count() == 0
-        _write_screenshot(page, tmp_path / "chinese-error-toast.png", full_page=False)
+        page.reload(wait_until="domcontentloaded")
+        expect(page.locator("html")).to_have_attribute("lang", "zh-CN", timeout=15_000)
+        _write_screenshot(page, tmp_path / "bilingual-error-toast.png", full_page=False)
+        browser.close()
+
+
+@pytest.mark.browser
+def test_locale_storage_keyboard_tab_sync_and_session_isolation(workspace_url: str) -> None:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        context = browser.new_context()
+        page = context.new_page()
+        page.add_init_script(
+            f"localStorage.setItem('{LOCALE_STORAGE_KEY}', 'unsupported-locale')"
+        )
+        page.goto(workspace_url, wait_until="domcontentloaded", timeout=60_000)
+        expect(page.locator("html")).to_have_attribute("lang", "en", timeout=15_000)
+
+        switch = page.locator("#language-switch input[type='checkbox']")
+        switch.focus()
+        switch.press("Enter")
+        expect(page.locator("html")).to_have_attribute("lang", "zh-CN", timeout=15_000)
+        expect(page.locator("#language-switch")).to_have_attribute("aria-checked", "true")
+        assert page.evaluate(f"localStorage.getItem('{LOCALE_STORAGE_KEY}')") == "zh-CN"
+
+        sibling = context.new_page()
+        sibling.goto(workspace_url, wait_until="domcontentloaded", timeout=60_000)
+        expect(sibling.locator("html")).to_have_attribute("lang", "zh-CN", timeout=15_000)
+        sibling_switch = sibling.locator("#language-switch input[type='checkbox']")
+        sibling_switch.focus()
+        sibling_switch.press("Space")
+        expect(sibling.locator("html")).to_have_attribute("lang", "en", timeout=15_000)
+        expect(page.locator("html")).to_have_attribute("lang", "en", timeout=15_000)
+
+        isolated = browser.new_context().new_page()
+        isolated.goto(workspace_url, wait_until="domcontentloaded", timeout=60_000)
+        expect(isolated.locator("html")).to_have_attribute("lang", "en", timeout=15_000)
         browser.close()
 
 
@@ -138,6 +211,7 @@ def test_workspace_navigation_branding_and_responsive_layout(
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         page = browser.new_page(viewport={"width": width, "height": height})
+        page.add_init_script(f"localStorage.removeItem('{LOCALE_STORAGE_KEY}')")
         page.goto(workspace_url, wait_until="domcontentloaded", timeout=60_000)
 
         logo = page.locator("#workspace-logo img")
@@ -164,11 +238,11 @@ def test_workspace_navigation_branding_and_responsive_layout(
                 "document.querySelector('#workspace-sidebar').classList.contains('open')"
             )
 
-        _select_option(page, "navigation-group", "构建与执行")
+        _select_option(page, "navigation-group", tr("构建与执行"))
         page.locator("#navigation-page").wait_for(state="visible")
         heading = page.locator(".workspace-page-header:visible h1")
         heading.wait_for(state="visible")
-        expect(heading).to_have_text("新建抽取与构建", timeout=60_000)
+        expect(heading).to_have_text(tr("新建抽取与构建"), timeout=60_000)
 
         if name == "mobile":
             if "open" in (sidebar.get_attribute("class") or ""):
@@ -190,6 +264,18 @@ def test_workspace_navigation_branding_and_responsive_layout(
             assert (
                 page.evaluate("localStorage.getItem('prismke.workspace.sidebar.width')") is not None
             )
+
+        if name == "mobile":
+            table_metrics = page.locator(".virtual-table-viewport:visible").evaluate_all(
+                """elements => elements.map(element => ({
+                  clientWidth: element.clientWidth,
+                  scrollWidth: element.scrollWidth,
+                  headerWhiteSpace: getComputedStyle(element.querySelector('th span')).whiteSpace,
+                }))"""
+            )
+            assert table_metrics
+            assert any(item["scrollWidth"] > item["clientWidth"] for item in table_metrics)
+            assert all(item["headerWhiteSpace"] == "nowrap" for item in table_metrics)
 
         overflow = page.evaluate("document.documentElement.scrollWidth - window.innerWidth")
         assert overflow <= 1
@@ -218,24 +304,35 @@ def test_workspace_group_pages_are_reachable(
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         page = browser.new_page(viewport={"width": 1440, "height": 900})
+        page.add_init_script(f"localStorage.removeItem('{LOCALE_STORAGE_KEY}')")
         page.goto(workspace_url, wait_until="domcontentloaded", timeout=60_000)
         page.locator("#workspace-logo img").wait_for(state="visible")
 
         if group_id != "overview":
-            _select_option(page, "navigation-group", group_label)
+            _select_option(page, "navigation-group", tr(group_label))
             if len(pages) > 1:
                 expect(page.locator("#navigation-page input")).to_have_value(
-                    pages[0][0], timeout=60_000
+                    tr(pages[0][0]), timeout=60_000
                 )
         for page_label, page_id in pages:
             if len(pages) > 1:
                 page.locator("#navigation-page").wait_for(state="visible", timeout=60_000)
-                _select_option(page, "navigation-page", page_label)
+                _select_option(page, "navigation-page", tr(page_label))
             heading = page.locator(".workspace-page-header:visible h1")
             heading.wait_for(state="visible")
-            expected_title = PAGE_META[page_id][0]
+            expected_title = tr(PAGE_META[page_id][0])
             expect(heading).to_have_text(expected_title, timeout=60_000)
             assert heading.inner_text() == expected_title
+            page.wait_for_timeout(150)
+            chinese = _visible_nontechnical_chinese(page)
+            assert chinese == [], json.dumps(chinese, ensure_ascii=True)
+            switch = page.locator("#language-switch input[type='checkbox']")
+            switch.click()
+            expect(page.locator("html")).to_have_attribute("lang", "zh-CN", timeout=15_000)
+            expect(heading).to_have_text(PAGE_META[page_id][0], timeout=15_000)
+            switch.click()
+            expect(page.locator("html")).to_have_attribute("lang", "en", timeout=15_000)
+            expect(heading).to_have_text(expected_title, timeout=15_000)
             _write_screenshot(
                 page,
                 screenshot_root / f"desktop-{page_id}.png",
