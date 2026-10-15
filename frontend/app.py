@@ -15,6 +15,15 @@ from frontend.layout import (
     page_choices,
     page_header,
 )
+from frontend.presentation import (
+    decision_label,
+    dropdown_update,
+    empty_dropdown_kwargs,
+    guard_ui,
+    media_type_label,
+    status_label,
+    visual_target_label,
+)
 from frontend.review import build_review_tabs
 from frontend.schema_input import resolve_schema, schema_summary
 from frontend.theme import APP_CSS
@@ -48,7 +57,8 @@ def _state_status(state: Any, execution: dict[str, Any] | None = None) -> str:
     warning_count = len(getattr(state, "warnings", []))
     error_count = len(getattr(state, "errors", []))
     return (
-        f"**业务状态** `{state.status}` · **执行状态** `{execution_status}` · "
+        f"**业务状态** `{status_label(state.status)}` · "
+        f"**执行状态** `{status_label(execution_status)}` · "
         f"**当前节点** `{state.current_node or '等待中'}`  \n"
         f"警告 {warning_count} · 错误 {error_count}"
     )
@@ -62,7 +72,7 @@ def _claim_rows(state: Any) -> list[list[Any]]:
             claim.relation_id,
             claim.object_entity_id or claim.object_literal,
             claim.confidence,
-            claim.status.value,
+            status_label(claim.status.value),
             ", ".join(claim.evidence_ids),
         ]
         for claim in state.claims
@@ -78,7 +88,7 @@ def _claim_rows(state: Any) -> list[list[Any]]:
             "实体提及",
             mention.entity_type,
             mention.confidence,
-            decisions.get(mention.id, "candidate"),
+            decision_label(decisions.get(mention.id, "candidate")),
             ", ".join(mention.evidence_ids),
         ]
         for mention in result.entities
@@ -90,7 +100,7 @@ def _claim_rows(state: Any) -> list[list[Any]]:
             claim.relation,
             claim.object.name if hasattr(claim.object, "name") else claim.object,
             claim.confidence,
-            decisions.get(claim.id, "candidate"),
+            decision_label(decisions.get(claim.id, "candidate")),
             ", ".join(claim.evidence_ids),
         ]
         for claim in result.relations
@@ -102,7 +112,7 @@ def _claim_rows(state: Any) -> list[list[Any]]:
             f"属性：{attribute.field}",
             str(attribute.value),
             attribute.confidence,
-            decisions.get(attribute.id, "candidate"),
+            decision_label(decisions.get(attribute.id, "candidate")),
             ", ".join(attribute.evidence_ids),
         ]
         for attribute in result.attributes
@@ -114,7 +124,7 @@ def _claim_rows(state: Any) -> list[list[Any]]:
             f"事件：{event.event_type}",
             orjson.dumps([item.model_dump(mode="json") for item in event.arguments]).decode(),
             event.confidence,
-            decisions.get(event.id, "candidate"),
+            decision_label(decisions.get(event.id, "candidate")),
             ", ".join(event.evidence_ids),
         ]
         for event in result.events
@@ -237,7 +247,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         rows = [
             [
                 item.filename,
-                item.status.value,
+                status_label(item.status.value),
                 item.run_id or "",
                 item.reused_from_item_id or "",
                 item.failure_code or "",
@@ -252,13 +262,16 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             first_run_id,
             batch.id,
             rows,
-            gr.update(
-                choices=[(item.filename, item.id) for item in batch.items],
+            dropdown_update(
+                gr,
+                [(item.filename, item.id) for item in batch.items],
+                empty_label="暂无批次文件",
                 value=batch.items[0].id if batch.items else None,
             ),
-            gr.update(
-                choices=_review_target_choices(state) if state else [],
-                value=None,
+            dropdown_update(
+                gr,
+                _review_target_choices(state) if state else [],
+                empty_label="暂无审核对象",
             ),
         )
 
@@ -270,7 +283,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             rows = [
                 [
                     item.filename,
-                    item.status.value,
+                    status_label(item.status.value),
                     item.run_id or "",
                     item.reused_from_item_id or "",
                     item.failure_code or "",
@@ -283,13 +296,16 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 batch.model_dump(mode="json"),
                 _claim_rows(state) if state else [],
                 rows,
-                gr.update(
-                    choices=[(item.filename, item.id) for item in batch.items],
+                dropdown_update(
+                    gr,
+                    [(item.filename, item.id) for item in batch.items],
+                    empty_label="暂无批次文件",
                     value=batch.items[0].id if batch.items else None,
                 ),
-                gr.update(
-                    choices=_review_target_choices(state) if state else [],
-                    value=None,
+                dropdown_update(
+                    gr,
+                    _review_target_choices(state) if state else [],
+                    empty_label="暂无审核对象",
                 ),
             )
         status, summary, claims = load_run(run_id)
@@ -299,22 +315,30 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             summary,
             claims,
             [],
-            gr.update(choices=[], value=None),
-            gr.update(choices=_review_target_choices(state), value=None),
+            dropdown_update(gr, [], empty_label="暂无批次文件"),
+            dropdown_update(
+                gr,
+                _review_target_choices(state),
+                empty_label="暂无审核对象",
+            ),
         )
 
     def select_batch_result(batch_id: str, item_id: str) -> tuple[str, list[list[Any]], Any]:
         if not batch_id or not item_id:
-            return "", [], gr.update(choices=[], value=None)
+            return "", [], dropdown_update(gr, [], empty_label="暂无审核对象")
         batch = service.refresh_batch(batch_id)
         item = next((candidate for candidate in batch.items if candidate.id == item_id), None)
         if item is None or not item.run_id:
-            return "", [], gr.update(choices=[], value=None)
+            return "", [], dropdown_update(gr, [], empty_label="暂无审核对象")
         state = service.show_run(item.run_id)
         return (
             item.run_id,
             _claim_rows(state),
-            gr.update(choices=_review_target_choices(state), value=None),
+            dropdown_update(
+                gr,
+                _review_target_choices(state),
+                empty_label="暂无审核对象",
+            ),
         )
 
     def review_extraction_result(
@@ -349,7 +373,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         rows = [
             [
                 item.filename,
-                item.status.value,
+                status_label(item.status.value),
                 item.run_id or "",
                 item.reused_from_item_id or "",
                 item.failure_code or "",
@@ -360,8 +384,10 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             f"**批次状态** `{batch.status.value}` · 文件 {len(batch.items)}",
             batch.model_dump(mode="json"),
             rows,
-            gr.update(
-                choices=[(item.filename, item.id) for item in batch.items],
+            dropdown_update(
+                gr,
+                [(item.filename, item.id) for item in batch.items],
+                empty_label="暂无批次文件",
                 value=batch.items[0].id if batch.items else None,
             ),
             message,
@@ -440,9 +466,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             "handoffs": [item.model_dump(mode="json") for item in state.agent_handoffs],
         }
 
-    async def media_rows(
-        document_id: str, media_type: str
-    ) -> tuple[list[list[Any]], Any]:
+    async def media_rows(document_id: str, media_type: str) -> tuple[list[list[Any]], Any]:
         contents = {item.id: item for item in await service.graph_store.list_media_contents()}
         relations = await service.graph_store.list_media_relations()
         assertions = await service.graph_store.list_visual_assertions()
@@ -466,7 +490,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             rows.append(
                 [
                     occurrence.id,
-                    content.asset_type.value,
+                    media_type_label(content.asset_type.value),
                     occurrence.document_id,
                     occurrence.page_number or "",
                     occurrence.caption,
@@ -476,13 +500,15 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             )
             choices.append(
                 (
-                    f"{content.asset_type.value} · "
+                    f"{media_type_label(content.asset_type.value)} · "
                     f"{occurrence.caption or occurrence.id[:16]}",
                     occurrence.id,
                 )
             )
-        return rows, gr.update(
-            choices=choices,
+        return rows, dropdown_update(
+            gr,
+            choices,
+            empty_label="暂无媒体出现记录",
             value=choices[0][1] if choices else None,
         )
 
@@ -491,7 +517,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             return {}, None
         occurrence = await service.graph_store.get_media_occurrence(occurrence_id)
         if occurrence is None:
-            raise gr.Error("媒体出现记录不存在")
+            raise ValueError("媒体出现记录不存在")
         content = next(
             (
                 item
@@ -537,7 +563,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         return [
             [
                 item.id,
-                contents[item.media_content_id].asset_type.value,
+                media_type_label(contents[item.media_content_id].asset_type.value),
                 item.document_id,
                 item.page_number or "",
                 item.caption,
@@ -555,25 +581,33 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
 
     def visual_review_rows(run_id: str | None) -> tuple[list[list[Any]], Any]:
         if not run_id:
-            return [], gr.update(choices=[], value=None)
+            return [], dropdown_update(gr, [], empty_label="暂无审核任务")
         state = service.show_run(run_id)
         choices: list[tuple[str, str]] = []
         rows: list[list[Any]] = []
         for task in state.visual_review_tasks:
-            label = f"{task.target_type} · {task.target_id[:18]} · {task.status}"
+            label = (
+                f"{visual_target_label(task.target_type)} · {task.target_id[:18]} · "
+                f"{status_label(task.status)}"
+            )
             choices.append((label, task.id))
             rows.append(
                 [
                     task.id,
-                    task.target_type,
+                    visual_target_label(task.target_type),
                     task.target_id,
-                    task.status,
-                    task.decision or "",
+                    status_label(task.status),
+                    decision_label(task.decision),
                     task.version,
                     ", ".join(task.reasons),
                 ]
             )
-        return rows, gr.update(choices=choices, value=choices[0][1] if choices else None)
+        return rows, dropdown_update(
+            gr,
+            choices,
+            empty_label="暂无审核任务",
+            value=choices[0][1] if choices else None,
+        )
 
     async def visual_review_detail(
         run_id: str | None, task_id: str | None
@@ -583,7 +617,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         state = service.show_run(run_id)
         task = next((item for item in state.visual_review_tasks if item.id == task_id), None)
         if task is None:
-            raise gr.Error("视觉审核任务不存在")
+            raise ValueError("视觉审核任务不存在")
         if task.target_type == "media_relation":
             relation_candidate = next(
                 item for item in state.candidate_media_relations if item.id == task.target_id
@@ -596,9 +630,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             )
             occurrence_id = assertion_candidate.occurrence_id
             candidate_payload = assertion_candidate.model_dump(mode="json")
-        occurrence = next(
-            item for item in state.media_occurrences if item.id == occurrence_id
-        )
+        occurrence = next(item for item in state.media_occurrences if item.id == occurrence_id)
         evidence, preview = await show_evidence(occurrence.evidence_id)
         return (
             {
@@ -629,7 +661,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             int(expected_version),
         )
         rows, choices = visual_review_rows(state.run_id)
-        return f"审核已保存：`{decision}` · 运行 `{state.run_id}`", rows, choices
+        return f"审核已保存：`{decision_label(decision)}` · 运行 `{state.run_id}`", rows, choices
 
     async def review_claim(
         run_id: str, claim_id: str, decision: str
@@ -734,7 +766,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
 
     async def rollback(revision_id: str, confirmed: bool) -> dict[str, Any]:
         if not confirmed:
-            raise gr.Error("请先确认补偿回滚操作")
+            raise ValueError("请先确认补偿回滚操作")
         result = await service.graph_store.rollback_revision(revision_id)
         service.audit.record(
             "rollback", revision_id, {"compensation_revision_id": result.id, "source": "ui"}
@@ -765,7 +797,12 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         choices = [
             (f"{item['case_type']} · {item['input_summary'][:48]}", item["id"]) for item in records
         ]
-        return rows, gr.update(choices=choices, value=choices[0][1] if choices else None)
+        return rows, dropdown_update(
+            gr,
+            choices,
+            empty_label="暂无记录",
+            value=choices[0][1] if choices else None,
+        )
 
     def case_detail(case_id: str | None) -> dict[str, Any]:
         return service.get_case(case_id) if case_id else {}
@@ -777,9 +814,9 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         confirmed: bool,
     ) -> dict[str, Any]:
         if not confirmed:
-            raise gr.Error("请先确认停用案例")
+            raise ValueError("请先确认停用案例")
         if not case_id:
-            raise gr.Error("请选择案例")
+            raise ValueError("请选择案例")
         from uuid import uuid4
 
         return service.disable_case(
@@ -821,14 +858,19 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
 
     def evidence_runs() -> Any:
         choices = [
-            (f"{Path(state.input_path).name} · {state.status}", state.run_id)
+            (f"{Path(state.input_path).name} · {status_label(state.status)}", state.run_id)
             for state in service.runs.list(limit=1000)
         ]
-        return gr.update(choices=choices, value=choices[0][1] if choices else None)
+        return dropdown_update(
+            gr,
+            choices,
+            empty_label="暂无运行",
+            value=choices[0][1] if choices else None,
+        )
 
     def run_claims(run_id: str | None) -> Any:
         if not run_id:
-            return gr.update(choices=[], value=None)
+            return dropdown_update(gr, [], empty_label="暂无 Claim")
         state = service.show_run(run_id)
         choices = [
             (
@@ -838,15 +880,25 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             )
             for claim in state.claims
         ]
-        return gr.update(choices=choices, value=choices[0][1] if choices else None)
+        return dropdown_update(
+            gr,
+            choices,
+            empty_label="暂无 Claim",
+            value=choices[0][1] if choices else None,
+        )
 
     def claim_evidence(run_id: str | None, claim_id: str | None) -> Any:
         if not run_id or not claim_id:
-            return gr.update(choices=[], value=None)
+            return dropdown_update(gr, [], empty_label="暂无证据")
         state = service.show_run(run_id)
         claim = next((item for item in state.claims if item.id == claim_id), None)
         choices = claim.evidence_ids if claim else []
-        return gr.update(choices=choices, value=choices[0] if choices else None)
+        return dropdown_update(
+            gr,
+            choices,
+            empty_label="暂无证据",
+            value=choices[0] if choices else None,
+        )
 
     async def graph_search(query: str, entity_type: str, limit: int) -> tuple[list[list[Any]], Any]:
         candidates = await service.search_entities(query, entity_type, limit)
@@ -859,7 +911,12 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             kind = entity.entity_type if entity else entity_type
             rows.append([candidate.entity_id, name, kind, round(candidate.final_score, 4)])
             choices.append((f"{name} · {kind} · {candidate.final_score:.3f}", candidate.entity_id))
-        return rows, gr.update(choices=choices, value=choices[0][1] if choices else None)
+        return rows, dropdown_update(
+            gr,
+            choices,
+            empty_label="暂无实体",
+            value=choices[0][1] if choices else None,
+        )
 
     def entity_reviews(status: str) -> list[dict[str, Any]]:
         return [
@@ -936,8 +993,8 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                         if state.document
                         else Path(state.input_path).name
                     ),
-                    state.status,
-                    execution["status"],
+                    status_label(state.status),
+                    status_label(execution["status"]),
                     execution["node"],
                     execution["updated_at"] or "",
                 ]
@@ -952,21 +1009,28 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
     def sidebar_run(run_id: str | None) -> tuple[Any, str]:
         states = service.runs.list(limit=1000)
         choices = [
-            (f"{Path(state.input_path).name} · {state.status}", state.run_id) for state in states
+            (f"{Path(state.input_path).name} · {status_label(state.status)}", state.run_id)
+            for state in states
         ]
         if run_id not in {state.run_id for state in states}:
             run_id = states[0].run_id if states else None
         if not run_id:
-            return gr.update(choices=choices, value=None), "尚无运行"
+            return dropdown_update(gr, [], empty_label="暂无运行"), "暂无运行"
         progress = service.review_progress(run_id)
         execution = progress["execution"]
         text = (
-            f"业务：{progress['status']}\n执行：{execution['status']}\n"
+            f"业务：{status_label(progress['status'])}\n"
+            f"执行：{status_label(execution['status'])}\n"
             f"节点：{execution['node']}\n实体待审：{progress['entity_pending']} · "
             f"事实待审：{progress['claim_pending']} · "
             f"视觉待审：{progress['visual_pending']} · 校验：{progress['validation_pending']}"
         )
-        return gr.update(choices=choices, value=run_id), text
+        return dropdown_update(
+            gr,
+            choices,
+            empty_label="暂无运行",
+            value=run_id,
+        ), text
 
     def save_settings(
         llm_base_url: str,
@@ -1052,8 +1116,8 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 visible=False,
                 elem_id="navigation-page",
             )
-            current_run = gr.Dropdown(label="当前运行", choices=[])
-            run_context = gr.Markdown("尚无运行", elem_classes="sidebar-status")
+            current_run = gr.Dropdown(label="当前运行", **empty_dropdown_kwargs("暂无运行"))
+            run_context = gr.Markdown("暂无运行", elem_classes="sidebar-status")
             refresh_context = gr.Button("刷新运行")
             with gr.Accordion("任务配置", open=True):
                 task_mode_input = gr.Dropdown(
@@ -1296,7 +1360,9 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     headers=claim_headers, interactive=False, label="抽取结果", wrap=True
                 )
                 with gr.Accordion("批次处理", open=False):
-                    batch_item_selector = gr.Dropdown(label="批次文件", choices=[])
+                    batch_item_selector = gr.Dropdown(
+                        label="批次文件", **empty_dropdown_kwargs("暂无批次文件")
+                    )
                     batch_operator = gr.Textbox(label="操作者", value="管理员")
                     batch_reason = gr.Textbox(label="排除原因")
                     with gr.Row():
@@ -1310,7 +1376,9 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                         )
                         batch_commit_button = gr.Button("提交批次到图谱", variant="primary")
                 with gr.Accordion("抽取结果审核", open=False):
-                    extraction_review_target = gr.Dropdown(label="审核对象", choices=[])
+                    extraction_review_target = gr.Dropdown(
+                        label="审核对象", **empty_dropdown_kwargs("暂无审核对象")
+                    )
                     extraction_review_decision = gr.Dropdown(
                         [("批准", "approve"), ("拒绝", "reject"), ("暂缓", "defer")],
                         value="approve",
@@ -1329,25 +1397,29 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             with gr.Tab("证据", id="evidence"):
                 page_header(gr, "evidence")
                 with gr.Row():
-                    evidence_run = gr.Dropdown(label="运行", choices=[])
-                    evidence_claim = gr.Dropdown(label="Claim", choices=[])
-                evidence_id = gr.Dropdown(label="证据", choices=[])
+                    evidence_run = gr.Dropdown(label="运行", **empty_dropdown_kwargs("暂无运行"))
+                    evidence_claim = gr.Dropdown(
+                        label="Claim", **empty_dropdown_kwargs("暂无 Claim")
+                    )
+                evidence_id = gr.Dropdown(label="证据", **empty_dropdown_kwargs("暂无证据"))
                 evidence_button = gr.Button("读取证据")
                 evidence_preview = gr.Image(label="证据定位", type="filepath")
                 with gr.Accordion("技术详情", open=False, elem_classes="technical-detail"):
                     evidence_metadata = gr.JSON(label="证据元数据")
-                evidence_run.change(run_claims, evidence_run, evidence_claim).then(
-                    claim_evidence,
+                evidence_run.change(guard_ui(gr, run_claims), evidence_run, evidence_claim).then(
+                    guard_ui(gr, claim_evidence),
                     [evidence_run, evidence_claim],
                     evidence_id,
                 )
                 evidence_claim.change(
-                    claim_evidence,
+                    guard_ui(gr, claim_evidence),
                     [evidence_run, evidence_claim],
                     evidence_id,
                 )
                 evidence_button.click(
-                    show_evidence, [evidence_id], [evidence_metadata, evidence_preview]
+                    guard_ui(gr, show_evidence, 2),
+                    [evidence_id],
+                    [evidence_metadata, evidence_preview],
                 )
                 with gr.Accordion("Claim 关联图片", open=False):
                     claim_media_button = gr.Button("查看 Claim 关联媒体")
@@ -1357,7 +1429,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                         wrap=True,
                     )
                 claim_media_button.click(
-                    claim_linked_media,
+                    guard_ui(gr, claim_linked_media),
                     evidence_claim,
                     claim_media_table,
                 )
@@ -1375,10 +1447,10 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     wrap=True,
                     label="搜索结果",
                 )
-                entity_id = gr.Dropdown(label="选择实体", choices=[])
+                entity_id = gr.Dropdown(label="选择实体", **empty_dropdown_kwargs("暂无实体"))
                 depth = gr.Slider(1, 3, value=1, step=1, label="邻域深度")
                 graph_search_button.click(
-                    graph_search,
+                    guard_ui(gr, graph_search, 2),
                     [graph_query, graph_entity_type, graph_limit],
                     [graph_candidates, entity_id],
                 )
@@ -1386,7 +1458,11 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 graph_plot = gr.Plot(label="实体邻域图")
                 with gr.Accordion("技术详情", open=False, elem_classes="technical-detail"):
                     graph_output = gr.JSON(label="实体邻域")
-                graph_button.click(neighborhood, [entity_id, depth], [graph_plot, graph_output])
+                graph_button.click(
+                    guard_ui(gr, neighborhood, 2),
+                    [entity_id, depth],
+                    [graph_plot, graph_output],
+                )
                 with gr.Accordion("实体关联图片", open=False):
                     entity_media_button = gr.Button("展开实体关联媒体")
                     entity_media_table = gr.Dataframe(
@@ -1395,7 +1471,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                         wrap=True,
                     )
                 entity_media_button.click(
-                    entity_linked_media,
+                    guard_ui(gr, entity_linked_media),
                     entity_id,
                     entity_media_table,
                 )
@@ -1405,7 +1481,14 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 with gr.Row():
                     media_document_filter = gr.Textbox(label="文档 ID", placeholder="留空显示全部")
                     media_type_filter = gr.Dropdown(
-                        ["全部", "image", "chart", "table", "formula", "page_render"],
+                        [
+                            ("全部", "全部"),
+                            ("图片", "image"),
+                            ("图表", "chart"),
+                            ("表格", "table"),
+                            ("公式", "formula"),
+                            ("页面渲染", "page_render"),
+                        ],
                         value="全部",
                         label="媒体类型",
                     )
@@ -1424,7 +1507,10 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     wrap=True,
                     label="可查询媒体对象",
                 )
-                media_selector = gr.Dropdown(label="选择媒体出现记录", choices=[])
+                media_selector = gr.Dropdown(
+                    label="选择媒体出现记录",
+                    **empty_dropdown_kwargs("暂无媒体出现记录"),
+                )
                 with gr.Row(equal_height=False):
                     media_preview = gr.Image(label="受控证据预览", type="filepath")
                     with gr.Accordion(
@@ -1434,12 +1520,12 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     ):
                         media_detail_output = gr.JSON(label="媒体详情")
                 media_refresh.click(
-                    media_rows,
+                    guard_ui(gr, media_rows, 2),
                     [media_document_filter, media_type_filter],
                     [media_table, media_selector],
                 )
                 media_selector.change(
-                    media_detail,
+                    guard_ui(gr, media_detail, 2),
                     media_selector,
                     [media_detail_output, media_preview],
                 )
@@ -1447,7 +1533,9 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             with gr.Tab("视觉审核", id="visual-review"):
                 page_header(gr, "visual-review")
                 with gr.Row():
-                    visual_review_run = gr.Dropdown(label="运行", choices=[])
+                    visual_review_run = gr.Dropdown(
+                        label="运行", **empty_dropdown_kwargs("暂无运行")
+                    )
                     visual_review_refresh = gr.Button("刷新视觉审核队列")
                 visual_review_table = gr.Dataframe(
                     headers=["Task ID", "对象类型", "候选 ID", "状态", "决定", "版本", "原因"],
@@ -1455,7 +1543,9 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     wrap=True,
                     label="视觉审核任务",
                 )
-                visual_review_selector = gr.Dropdown(label="选择任务", choices=[])
+                visual_review_selector = gr.Dropdown(
+                    label="选择任务", **empty_dropdown_kwargs("暂无审核任务")
+                )
                 with gr.Row(equal_height=False):
                     visual_review_preview = gr.Image(label="区域证据", type="filepath")
                     with gr.Accordion(
@@ -1476,12 +1566,12 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 visual_review_submit = gr.Button("提交视觉审核", variant="primary")
                 visual_review_outcome = gr.Markdown("尚未提交视觉审核")
                 visual_review_refresh.click(
-                    visual_review_rows,
+                    guard_ui(gr, visual_review_rows, 2),
                     visual_review_run,
                     [visual_review_table, visual_review_selector],
                 )
                 visual_review_selector.change(
-                    visual_review_detail,
+                    guard_ui(gr, visual_review_detail, 3),
                     [visual_review_run, visual_review_selector],
                     [
                         visual_review_detail_output,
@@ -1490,7 +1580,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     ],
                 )
                 visual_review_submit.click(
-                    submit_visual_review,
+                    guard_ui(gr, submit_visual_review, 3),
                     [
                         visual_review_run,
                         visual_review_selector,
@@ -1512,7 +1602,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 with gr.Accordion("候选评分详情", open=False):
                     entity_search_output = gr.JSON(label="候选及评分分解")
                 entity_search_button.click(
-                    search_entities,
+                    guard_ui(gr, search_entities),
                     [entity_query, entity_type, entity_limit],
                     [entity_search_output],
                 )
@@ -1529,12 +1619,12 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                             candidate_neighborhood_plot = gr.Plot(label="候选邻域")
                             candidate_neighborhood_output = gr.JSON(label="邻域事实与证据引用")
                     mention_evidence_button.click(
-                        show_evidence,
+                        guard_ui(gr, show_evidence, 2),
                         [mention_evidence_id],
                         [mention_evidence_metadata, mention_evidence_preview],
                     )
                     candidate_neighborhood_button.click(
-                        neighborhood,
+                        guard_ui(gr, neighborhood, 2),
                         [candidate_entity_id, gr.State(1)],
                         [candidate_neighborhood_plot, candidate_neighborhood_output],
                     )
@@ -1554,7 +1644,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     entity_review_button = gr.Button("提交实体审核", variant="primary")
                     entity_review_output = gr.JSON(label="审核结果")
                     entity_review_button.click(
-                        review_entity_task,
+                        guard_ui(gr, review_entity_task),
                         [
                             entity_task_id,
                             entity_run_id,
@@ -1571,7 +1661,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     merge_button = gr.Button("创建合并审核任务")
                     merge_output = gr.JSON(label="合并建议")
                     merge_button.click(
-                        propose_merge,
+                        guard_ui(gr, propose_merge),
                         [merge_sources, merge_target, merge_reasons],
                         [merge_output],
                     )
@@ -1585,7 +1675,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     split_button = gr.Button("创建拆分审核任务")
                     split_output = gr.JSON(label="拆分建议")
                     split_button.click(
-                        propose_split,
+                        guard_ui(gr, propose_split),
                         [split_source, split_targets, split_assignments, split_reasons],
                         [split_output],
                     )
@@ -1593,7 +1683,11 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     history_entity_id = gr.Textbox(label="实体 Entity ID")
                     history_button = gr.Button("查询治理与回滚历史")
                     history_output = gr.JSON(label="实体 Revision 历史")
-                    history_button.click(entity_history, [history_entity_id], [history_output])
+                    history_button.click(
+                        guard_ui(gr, entity_history),
+                        [history_entity_id],
+                        [history_output],
+                    )
 
             build_validation_tab(gr, service)
 
@@ -1604,21 +1698,25 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     headers=["Revision ID", "父版本", "Run ID", "时间", "变更数"],
                     interactive=False,
                 )
-                revision_button.click(revisions, outputs=[revision_table])
+                revision_button.click(guard_ui(gr, revisions), outputs=[revision_table])
                 with gr.Row():
                     from_revision = gr.Textbox(label="起始 Revision")
                     to_revision = gr.Textbox(label="目标 Revision")
                 diff_button = gr.Button("比较版本")
                 with gr.Accordion("版本差异", open=False, elem_classes="technical-detail"):
                     diff_output = gr.JSON(label="完整差异")
-                diff_button.click(revision_diff, [from_revision, to_revision], [diff_output])
+                diff_button.click(
+                    guard_ui(gr, revision_diff),
+                    [from_revision, to_revision],
+                    [diff_output],
+                )
                 with gr.Accordion("补偿回滚", open=False):
                     rollback_revision_id = gr.Textbox(label="要回滚的 Revision")
                     rollback_confirm = gr.Checkbox(label="我确认创建补偿 Revision")
                     rollback_button = gr.Button("执行回滚", variant="stop")
                     rollback_output = gr.JSON(label="补偿 Revision")
                     rollback_button.click(
-                        rollback,
+                        guard_ui(gr, rollback),
                         [rollback_revision_id, rollback_confirm],
                         [rollback_output],
                     )
@@ -1642,7 +1740,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     interactive=False,
                     wrap=True,
                 )
-                case_selector = gr.Dropdown(label="选择案例", choices=[])
+                case_selector = gr.Dropdown(label="选择案例", **empty_dropdown_kwargs("暂无记录"))
                 with gr.Accordion("案例详情", open=False, elem_classes="technical-detail"):
                     case_detail_output = gr.JSON(label="案例、证据与停用历史")
                 with gr.Accordion("停用案例", open=False):
@@ -1656,7 +1754,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     case_rebuild_button = gr.Button("检查或重建索引")
                     case_rebuild_output = gr.JSON(label="索引状态")
                 case_refresh.click(
-                    case_rows,
+                    guard_ui(gr, case_rows, 2),
                     [
                         case_type_filter,
                         case_task_filter,
@@ -1665,9 +1763,9 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     ],
                     [case_table, case_selector],
                 )
-                case_selector.change(case_detail, case_selector, case_detail_output)
+                case_selector.change(guard_ui(gr, case_detail), case_selector, case_detail_output)
                 case_disable_button.click(
-                    disable_case_ui,
+                    guard_ui(gr, disable_case_ui),
                     [case_selector, case_operator, case_reason, case_confirm],
                     case_disable_output,
                 ).then(
@@ -1680,19 +1778,23 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     ],
                     [case_table, case_selector],
                 )
-                case_rebuild_button.click(rebuild_cases, case_dry_run, case_rebuild_output)
+                case_rebuild_button.click(
+                    guard_ui(gr, rebuild_cases), case_dry_run, case_rebuild_output
+                )
 
             with gr.Tab("Reflection", id="reflection"):
                 page_header(gr, "reflection")
-                reflection_run = gr.Dropdown(label="运行", choices=[])
+                reflection_run = gr.Dropdown(label="运行", **empty_dropdown_kwargs("暂无运行"))
                 reflection_refresh = gr.Button("查看检索与修复记录")
                 with gr.Accordion("Reflection 详情", open=False, elem_classes="technical-detail"):
                     reflection_output = gr.JSON(label="Reflection 摘要")
-                reflection_refresh.click(reflection_report, reflection_run, reflection_output)
+                reflection_refresh.click(
+                    guard_ui(gr, reflection_report), reflection_run, reflection_output
+                )
 
             with gr.Tab("Agent 协作", id="agents"):
                 page_header(gr, "agents")
-                agent_run = gr.Dropdown(label="运行", choices=[])
+                agent_run = gr.Dropdown(label="运行", **empty_dropdown_kwargs("暂无运行"))
                 agent_refresh = gr.Button("查看轨迹")
                 agent_table = gr.Dataframe(
                     headers=["Agent", "步骤", "决定", "工具", "原因", "Token", "状态"],
@@ -1703,14 +1805,18 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 )
                 with gr.Accordion("交接与模态详情", open=False):
                     agent_details = gr.JSON(label="Agent 交接")
-                agent_refresh.click(agent_report, agent_run, [agent_table, agent_details])
+                agent_refresh.click(
+                    guard_ui(gr, agent_report, 2),
+                    agent_run,
+                    [agent_table, agent_details],
+                )
 
             with gr.Tab("健康状态", id="health"):
                 page_header(gr, "health")
                 health_button = gr.Button("检查连接")
                 with gr.Accordion("服务详情", open=False, elem_classes="technical-detail"):
                     health_output = gr.JSON(label="服务状态")
-                health_button.click(health, outputs=[health_output])
+                health_button.click(guard_ui(gr, health), outputs=[health_output])
 
         def switch_group(group_id: str) -> tuple[Any, Any]:
             choices = page_choices(group_id)
@@ -1765,7 +1871,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             provided_entities_input,
         )
         validate_schema.click(
-            preview_schema,
+            guard_ui(gr, preview_schema),
             [schema_source, schema_input, schema_text],
             schema_result,
         )
@@ -1775,6 +1881,27 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
               const sidebar = document.querySelector('#workspace-sidebar');
               const toggle = sidebar?.querySelector('button[aria-label="Toggle Sidebar"]');
               if (!sidebar) return;
+              const localizeErrorToasts = root => {
+                if (root.matches?.('.toast-title') && root.textContent.trim() === 'Error') {
+                  root.textContent = '错误';
+                }
+                root.querySelectorAll?.('.toast-title').forEach(title => {
+                  if (title.textContent.trim() === 'Error') title.textContent = '错误';
+                });
+              };
+              localizeErrorToasts(document);
+              if (!window.__prismkeToastLocaleBound) {
+                window.__prismkeToastLocaleBound = true;
+                window.__prismkeToastLocaleObserver = new MutationObserver(records => {
+                  records.forEach(record => record.addedNodes.forEach(node => {
+                    if (node instanceof Element) localizeErrorToasts(node);
+                  }));
+                });
+                window.__prismkeToastLocaleObserver.observe(document.body, {
+                  childList: true,
+                  subtree: true,
+                });
+              }
               const storageKey = 'prismke.workspace.sidebar.width';
               const clamp = value => Math.max(260, Math.min(520, value));
               const applyWidth = value => {
@@ -1863,26 +1990,32 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
               }
             }""",
         )
-        refresh_context.click(sidebar_run, [current_run], [current_run, run_context])
-        current_run.change(sidebar_run, [current_run], [current_run, run_context])
-        demo.load(sidebar_run, [current_run], [current_run, run_context])
-        demo.load(evidence_runs, outputs=evidence_run).then(
-            run_claims, evidence_run, evidence_claim
-        ).then(claim_evidence, [evidence_run, evidence_claim], evidence_id)
-        demo.load(evidence_runs, outputs=reflection_run)
-        demo.load(evidence_runs, outputs=agent_run)
-        demo.load(evidence_runs, outputs=visual_review_run).then(
-            visual_review_rows,
+        refresh_context.click(
+            guard_ui(gr, sidebar_run, 2), [current_run], [current_run, run_context]
+        )
+        current_run.change(guard_ui(gr, sidebar_run, 2), [current_run], [current_run, run_context])
+        demo.load(guard_ui(gr, sidebar_run, 2), [current_run], [current_run, run_context])
+        demo.load(guard_ui(gr, evidence_runs), outputs=evidence_run).then(
+            guard_ui(gr, run_claims), evidence_run, evidence_claim
+        ).then(
+            guard_ui(gr, claim_evidence),
+            [evidence_run, evidence_claim],
+            evidence_id,
+        )
+        demo.load(guard_ui(gr, evidence_runs), outputs=reflection_run)
+        demo.load(guard_ui(gr, evidence_runs), outputs=agent_run)
+        demo.load(guard_ui(gr, evidence_runs), outputs=visual_review_run).then(
+            guard_ui(gr, visual_review_rows, 2),
             visual_review_run,
             [visual_review_table, visual_review_selector],
         )
         demo.load(
-            media_rows,
+            guard_ui(gr, media_rows, 2),
             [media_document_filter, media_type_filter],
             [media_table, media_selector],
         )
         demo.load(
-            case_rows,
+            guard_ui(gr, case_rows, 2),
             [
                 case_type_filter,
                 case_task_filter,
@@ -1891,10 +2024,12 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             ],
             [case_table, case_selector],
         )
-        demo.load(dashboard, outputs=[overview, recent_runs, graph_health])
-        refresh_overview.click(dashboard, outputs=[overview, recent_runs, graph_health])
+        demo.load(guard_ui(gr, dashboard, 3), outputs=[overview, recent_runs, graph_health])
+        refresh_overview.click(
+            guard_ui(gr, dashboard, 3), outputs=[overview, recent_runs, graph_health]
+        )
         run_button.click(
-            run_document,
+            guard_ui(gr, run_document, 8),
             [
                 document_input,
                 schema_source,
@@ -1934,9 +2069,13 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 batch_item_selector,
                 extraction_review_target,
             ],
-        ).then(sidebar_run, [run_id_output], [current_run, run_context])
+        ).then(
+            guard_ui(gr, sidebar_run, 2),
+            [run_id_output],
+            [current_run, run_context],
+        )
         reload_button.click(
-            load_build,
+            guard_ui(gr, load_build, 6),
             [run_id_output, batch_id_output],
             [
                 run_status,
@@ -1948,12 +2087,12 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             ],
         )
         batch_item_selector.change(
-            select_batch_result,
+            guard_ui(gr, select_batch_result, 3),
             [batch_id_output, batch_item_selector],
             [run_id_output, claim_table, extraction_review_target],
         )
         extraction_review_button.click(
-            review_extraction_result,
+            guard_ui(gr, review_extraction_result, 2),
             [
                 run_id_output,
                 extraction_review_target,
@@ -1971,22 +2110,22 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             batch_action_outcome,
         ]
         retry_batch_button.click(
-            retry_batch_item,
+            guard_ui(gr, retry_batch_item, 5),
             [batch_id_output, batch_item_selector],
             batch_action_outputs,
         )
         exclude_batch_button.click(
-            exclude_batch_item,
+            guard_ui(gr, exclude_batch_item, 5),
             [batch_id_output, batch_item_selector, batch_operator, batch_reason],
             batch_action_outputs,
         )
         batch_commit_button.click(
-            confirm_batch_commit,
+            guard_ui(gr, confirm_batch_commit, 5),
             [batch_id_output, batch_reviewer, batch_commit_confirm],
             batch_action_outputs,
         )
         save_config.click(
-            save_settings,
+            guard_ui(gr, save_settings, 3),
             [
                 llm_base,
                 llm_model,

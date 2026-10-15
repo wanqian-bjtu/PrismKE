@@ -126,6 +126,18 @@ def test_workspace_uses_dropdown_navigation_and_no_radio_components(tmp_path: Pa
         "en",
         "zh",
     ]
+    assert [choice[0] for choice in by_label["媒体类型"]["props"]["choices"]] == [
+        "全部",
+        "图片",
+        "图表",
+        "表格",
+        "公式",
+        "页面渲染",
+    ]
+    assert by_label["当前运行"]["props"]["choices"] == [["暂无运行", ""]]
+    assert by_label["当前运行"]["props"]["interactive"] is False
+    assert by_label["选择媒体出现记录"]["props"]["choices"] == [["暂无媒体出现记录", ""]]
+    assert by_label["选择媒体出现记录"]["props"]["interactive"] is False
 
     advanced = next(
         component

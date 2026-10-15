@@ -4,6 +4,12 @@ from typing import Any
 from uuid import uuid4
 
 from frontend.layout import page_header
+from frontend.presentation import (
+    dropdown_update,
+    empty_dropdown_kwargs,
+    guard_ui,
+    status_label,
+)
 from src.domain import RequestReconciliation
 from src.workflow import PrismKEService
 
@@ -18,21 +24,24 @@ def build_execution_tab(
     def refresh(run_id: str | None) -> tuple[Any, ...]:
         states = service.runs.list(limit=1000)
         choices = [
-            (f"{s.run_id} · {service.executions.view(s.run_id)['status']}", s.run_id)
+            (
+                f"{s.run_id} · {status_label(service.executions.view(s.run_id)['status'])}",
+                s.run_id,
+            )
             for s in states
         ]
         if run_id not in {s.run_id for s in states}:
             run_id = states[0].run_id if states else None
         if not run_id:
             return (
-                gr.update(choices=choices, value=None),
+                dropdown_update(gr, [], empty_label="暂无运行"),
                 "### 尚无执行任务",
                 "尚无 PDF 解析决定。",
                 [],
                 [],
                 {},
                 [],
-                gr.update(choices=[], value=None),
+                dropdown_update(gr, [], empty_label="暂无待核对请求"),
                 0,
                 gr.update(interactive=False),
                 gr.update(interactive=False),
@@ -51,13 +60,19 @@ def build_execution_tab(
             or (item["status"] == "completed" and not item["usage_known"])
         ]
         event_rows = [
-            [e.version, e.status, e.node, e.reason or "", e.created_at.isoformat()]
+            [
+                e.version,
+                status_label(e.status),
+                e.node,
+                e.reason or "",
+                e.created_at.isoformat(),
+            ]
             for e in service.executions.repository.events(run_id)
         ]
         branch_rows = [
             [
                 item.branch,
-                item.status,
+                status_label(item.status),
                 f"{item.completed}/{item.total if item.total is not None else '?'}",
                 item.current_asset or "",
                 item.updated_at.isoformat(),
@@ -67,7 +82,7 @@ def build_execution_tab(
         request_rows = [
             [
                 item["request_id"],
-                item["status"],
+                status_label(item["status"]),
                 item["metadata"].get("node", ""),
                 item["metadata"].get("asset_id", ""),
                 "已知" if item["usage_known"] else "未知",
@@ -94,7 +109,8 @@ def build_execution_tab(
             )
             if decision.actual_parser == "mineru":
                 parser_summary += (
-                    f"\n\nMinerU 状态 `{decision.mineru_status or 'pending'}` · "
+                    f"\n\nMinerU 状态 "
+                    f"`{status_label(decision.mineru_status or 'pending')}` · "
                     f"任务 `{decision.mineru_job_id or '尚未创建'}` · "
                     f"产物清单 "
                     f"`{(decision.artifact_manifest_hash or '尚未生成')[:16]}`"
@@ -106,23 +122,31 @@ def build_execution_tab(
                 and not parse_view["fallback_approved"]
             )
         summary = (
-            f"### {execution['status']}\n"
-            f"业务状态：`{progress['status']}` · 当前节点：`{execution['node']}` · "
+            f"### {status_label(execution['status'])}\n"
+            f"业务状态：`{status_label(progress['status'])}` · "
+            f"当前节点：`{execution['node']}` · "
             f"尝试次数：{execution['attempt']} · 未知请求：{len(unknown)}\n\n"
             f"实体待审 {progress['entity_pending']} · 事实待审 "
             f"{progress['claim_pending']} · 校验问题 {progress['validation_pending']}"
         )
         request_choices = [item["request_id"] for item in unknown]
         return (
-            gr.update(choices=choices, value=run_id),
+            dropdown_update(
+                gr,
+                choices,
+                empty_label="暂无运行",
+                value=run_id,
+            ),
             summary,
             parser_summary,
             branch_rows,
             event_rows,
             execution,
             request_rows,
-            gr.update(
-                choices=request_choices,
+            dropdown_update(
+                gr,
+                request_choices,
+                empty_label="暂无待核对请求",
                 value=request_choices[0] if request_choices else None,
             ),
             execution["version"],
@@ -133,11 +157,8 @@ def build_execution_tab(
         )
 
     def cancel(run_id: str, operator: str, reason: str, version: int) -> str:
-        try:
-            task = service.executions.cancel(run_id, operator, reason, uuid4().hex, version)
-            return f"取消请求已保存：{task.status}"
-        except ValueError as exc:
-            return f"取消未执行：{exc}；请刷新后核对状态"
+        task = service.executions.cancel(run_id, operator, reason, uuid4().hex, version)
+        return f"取消请求已保存：{status_label(task.status)}"
 
     def resume(
         run_id: str,
@@ -145,16 +166,13 @@ def build_execution_tab(
         llm_api_key: str = "",
         vlm_api_key: str = "",
     ) -> str:
-        try:
-            service.attach_run_credentials(
-                run_id,
-                llm_api_key=llm_api_key,
-                vlm_api_key=vlm_api_key,
-            )
-            service.executions.enqueue(run_id, "resume", expected_version=version)
-            return "恢复已排队"
-        except ValueError as exc:
-            return f"恢复被阻断：{exc}"
+        service.attach_run_credentials(
+            run_id,
+            llm_api_key=llm_api_key,
+            vlm_api_key=vlm_api_key,
+        )
+        service.executions.enqueue(run_id, "resume", expected_version=version)
+        return "恢复已排队"
 
     def reconcile(
         run_id: str,
@@ -164,20 +182,17 @@ def build_execution_tab(
         reason: str,
         version: int,
     ) -> str:
-        try:
-            result = service.executions.reconcile_request(
-                run_id,
-                RequestReconciliation(
-                    request_id=request_id,
-                    outcome=outcome,
-                    operator=operator.strip(),
-                    reason=reason.strip(),
-                    expected_execution_version=version,
-                ),
-            )
-            return f"核对事件已保存：{result['event']['outcome']}"
-        except ValueError as exc:
-            return f"核对未执行：{exc}；请刷新后重试"
+        result = service.executions.reconcile_request(
+            run_id,
+            RequestReconciliation(
+                request_id=request_id,
+                outcome=outcome,
+                operator=operator.strip(),
+                reason=reason.strip(),
+                expected_execution_version=version,
+            ),
+        )
+        return f"核对事件已保存：{result['event']['outcome']}"
 
     def approve_pdf_fallback(
         run_id: str,
@@ -185,22 +200,19 @@ def build_execution_tab(
         reason: str,
         version: int,
     ) -> str:
-        try:
-            result = service.approve_pdf_parser_fallback(
-                run_id,
-                operator,
-                reason,
-                uuid4().hex,
-                version,
-            )
-            return f"降级已审计并排队：执行版本 {result['version']}"
-        except (KeyError, ValueError) as exc:
-            return f"降级未执行：{exc}；请刷新后核对解析状态"
+        result = service.approve_pdf_parser_fallback(
+            run_id,
+            operator,
+            reason,
+            uuid4().hex,
+            version,
+        )
+        return f"降级已审计并排队：执行版本 {result['version']}"
 
     with gr.Tab("执行任务", id="execution"):
         page_header(gr, "execution")
         with gr.Row():
-            run = gr.Dropdown(label="运行", choices=[], scale=4)
+            run = gr.Dropdown(label="运行", scale=4, **empty_dropdown_kwargs("暂无运行"))
             refresh_button = gr.Button("刷新", scale=1)
         summary = gr.Markdown("### 尚无执行任务")
         with gr.Accordion("PDF 解析决定", open=True):
@@ -243,7 +255,7 @@ def build_execution_tab(
                 interactive=False,
                 wrap=True,
             )
-            request_id = gr.Dropdown(label="待核对请求", choices=[])
+            request_id = gr.Dropdown(label="待核对请求", **empty_dropdown_kwargs("暂无待核对请求"))
             outcome = gr.Dropdown(
                 [
                     ("确认未发送", "confirmed_not_sent"),
@@ -279,18 +291,20 @@ def build_execution_tab(
             reconcile_button,
             fallback_button,
         ]
-        timer.tick(refresh, [run], outputs, show_progress="hidden")
-        refresh_button.click(refresh, [run], outputs)
-        run.input(refresh, [run], outputs)
-        cancel_button.click(cancel, [run, operator, reason, version], output).then(
-            refresh, [run], outputs
+        timer.tick(guard_ui(gr, refresh, 13), [run], outputs, show_progress="hidden")
+        refresh_button.click(guard_ui(gr, refresh, 13), [run], outputs)
+        run.input(guard_ui(gr, refresh, 13), [run], outputs)
+        cancel_button.click(guard_ui(gr, cancel), [run, operator, reason, version], output).then(
+            guard_ui(gr, refresh, 13), [run], outputs
         )
         resume_inputs = [run, version]
         if llm_api_key_input is not None and vlm_api_key_input is not None:
             resume_inputs.extend([llm_api_key_input, vlm_api_key_input])
-        resume_button.click(resume, resume_inputs, output).then(refresh, [run], outputs)
+        resume_button.click(guard_ui(gr, resume), resume_inputs, output).then(
+            guard_ui(gr, refresh, 13), [run], outputs
+        )
         reconcile_button.click(
-            reconcile,
+            guard_ui(gr, reconcile),
             [
                 run,
                 request_id,
@@ -300,9 +314,9 @@ def build_execution_tab(
                 version,
             ],
             reconcile_output,
-        ).then(refresh, [run], outputs)
+        ).then(guard_ui(gr, refresh, 13), [run], outputs)
         fallback_button.click(
-            approve_pdf_fallback,
+            guard_ui(gr, approve_pdf_fallback),
             [run, fallback_operator, fallback_reason, version],
             fallback_output,
-        ).then(refresh, [run], outputs)
+        ).then(guard_ui(gr, refresh, 13), [run], outputs)
