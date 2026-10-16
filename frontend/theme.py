@@ -14,7 +14,8 @@ APP_CSS = r"""
   --prism-amber: #e9a21a;
   --prism-danger: #c53b45;
   --prism-radius: 6px;
-  --prism-sidebar-width: 300px;
+  --prism-sidebar-width: max(260px, 20vw);
+  --prism-brand-height: clamp(150px, 15dvh, 220px);
 }
 
 .gradio-container {
@@ -37,6 +38,7 @@ APP_CSS = r"""
 
 .gradio-container .sidebar-parent {
   padding-left: var(--prism-sidebar-width) !important;
+  transition: padding-left 180ms ease;
 }
 
 .gradio-container .sidebar-parent:has(#workspace-sidebar:not(.open)) {
@@ -46,7 +48,7 @@ APP_CSS = r"""
 #workspace-sidebar {
   width: var(--prism-sidebar-width) !important;
   min-width: 260px !important;
-  max-width: 520px !important;
+  max-width: 30vw !important;
   height: 100dvh !important;
   overflow-x: hidden !important;
   overflow-y: auto !important;
@@ -59,6 +61,15 @@ APP_CSS = r"""
 #workspace-sidebar.open {
   left: 0 !important;
   transform: translateX(0) !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+}
+
+#workspace-sidebar:not(.open) {
+  left: 0 !important;
+  transform: translateX(-100%) !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
 }
 #workspace-sidebar::-webkit-scrollbar { width: 7px; }
 #workspace-sidebar::-webkit-scrollbar-track { background: transparent; }
@@ -80,6 +91,48 @@ APP_CSS = r"""
 }
 
 .sidebar-status p { text-align: center; }
+
+#workspace-sidebar-toggle {
+  position: fixed !important;
+  z-index: 2147483647 !important;
+  top: 12px !important;
+  left: 12px !important;
+  width: 36px !important;
+  min-width: 36px !important;
+  height: 36px !important;
+  min-height: 36px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 1px solid var(--prism-border) !important;
+  border-radius: 6px !important;
+  background: var(--prism-surface) !important;
+  color: var(--prism-text) !important;
+  box-shadow: 0 1px 3px rgba(23, 32, 51, 0.12) !important;
+  font-size: 0 !important;
+  line-height: 1 !important;
+  pointer-events: auto !important;
+  transition: left 180ms ease, border-color 120ms ease;
+}
+
+#workspace-sidebar-toggle::before {
+  content: "›";
+  font-size: 26px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+body:has(#workspace-sidebar.open) #workspace-sidebar-toggle {
+  left: calc(var(--prism-sidebar-width) + 8px) !important;
+}
+
+body:has(#workspace-sidebar.open) #workspace-sidebar-toggle::before {
+  content: "‹";
+}
+
+#workspace-sidebar-toggle:hover,
+#workspace-sidebar-toggle:focus-visible {
+  border-color: var(--prism-blue) !important;
+}
 
 #workspace-resizer {
   position: absolute;
@@ -111,10 +164,14 @@ APP_CSS = r"""
 #workspace-brand {
   position: relative;
   box-sizing: border-box;
+  container-type: inline-size;
+  flex: 0 0 var(--prism-brand-height) !important;
   width: 100%;
-  min-height: 178px;
+  height: var(--prism-brand-height) !important;
+  min-height: var(--prism-brand-height) !important;
+  max-height: var(--prism-brand-height) !important;
   margin: 0;
-  padding: 18px 28px 14px;
+  padding: clamp(12px, 1.5vh, 20px) 5%;
   align-items: center;
   justify-content: center;
   background: var(--prism-bg);
@@ -230,8 +287,10 @@ APP_CSS = r"""
 .toast-container { top: 66px !important; }
 
 #workspace-logo {
-  width: min(468px, 70vw) !important;
-  max-height: 140px !important;
+  flex: 0 0 auto !important;
+  width: min(36cqw, calc((var(--prism-brand-height) - 62px) * 3), 620px) !important;
+  max-width: 90cqw !important;
+  max-height: none !important;
   margin: 0 auto !important;
   background: transparent !important;
 }
@@ -239,7 +298,7 @@ APP_CSS = r"""
 #workspace-logo img {
   width: 100% !important;
   height: auto !important;
-  max-height: 140px !important;
+  max-height: none !important;
   object-fit: contain !important;
   background: transparent !important;
 }
@@ -262,10 +321,11 @@ APP_CSS = r"""
 
 #workspace-tabs {
   box-sizing: border-box;
-  width: min(1500px, calc(100% - 40px));
-  max-width: 1500px;
+  flex: 1 1 auto !important;
+  width: 90%;
+  max-width: none;
   margin: 0 auto;
-  padding: 18px 0 34px;
+  padding: clamp(14px, 2vh, 24px) 0 34px;
 }
 
 #workspace-tabs > .tab-wrapper > .tab-container[role="tablist"],
@@ -345,11 +405,18 @@ table { font-size: 13px; }
 
 @media (max-width: 900px) {
   .gradio-container .sidebar-parent { padding-left: 0 !important; }
-  #workspace-sidebar { width: min(320px, 88vw) !important; }
+  #workspace-sidebar {
+    width: min(320px, 88vw) !important;
+    min-width: min(320px, 88vw) !important;
+    max-width: min(320px, 88vw) !important;
+  }
+  body:has(#workspace-sidebar.open) #workspace-sidebar-toggle {
+    left: calc(min(320px, 88vw) + 8px) !important;
+  }
   #workspace-resizer { display: none; }
   #workspace-brand {
+    --prism-brand-height: clamp(148px, 18dvh, 190px);
     width: 100%;
-    min-height: 160px;
     margin-left: 0;
     padding: 14px 18px 12px;
   }
@@ -357,7 +424,7 @@ table { font-size: 13px; }
     top: 14px;
     right: 18px;
   }
-  #workspace-tabs { width: calc(100% - 24px); padding-top: 14px; }
+  #workspace-tabs { width: 90%; padding-top: 14px; }
   #workspace-tabs { max-width: none; margin: 0 auto; }
   .workspace-page-header { align-items: flex-start; flex-direction: column; gap: 5px; }
   .workspace-page-header p { text-align: left; }
@@ -386,15 +453,18 @@ table { font-size: 13px; }
     left: 0 !important;
     transform: translateX(0) !important;
   }
-  #workspace-sidebar:not(.open) {
-    left: calc(12px - min(320px, 88vw)) !important;
+  #workspace-brand {
+    --prism-brand-height: clamp(184px, 22dvh, 196px);
+    padding: 48px 5% 10px;
   }
-  #workspace-brand { min-height: 148px; padding: 12px 12px 10px; }
-  #workspace-logo { width: min(325px, 84vw) !important; max-height: 109px !important; }
-  #workspace-logo img { max-height: 109px !important; }
+  #workspace-logo {
+    width: min(62cqw, calc((var(--prism-brand-height) - 120px) * 3), 280px) !important;
+    max-width: 62cqw !important;
+    margin-top: 0 !important;
+  }
   .workspace-tagline { max-width: 330px; font-size: 12px; }
   .workspace-version { font-size: 11px; }
-  #workspace-tabs { width: calc(100% - 16px); padding-bottom: 24px; }
+  #workspace-tabs { width: 90%; padding-bottom: 24px; }
   .workspace-page-header h1 { font-size: 21px; }
   .table-wrap {
     max-width: 100% !important;
@@ -418,6 +488,8 @@ table { font-size: 13px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .gradio-container .sidebar-parent,
+  #workspace-sidebar-toggle,
   #language-switch::before { transition: none; }
 }
 """

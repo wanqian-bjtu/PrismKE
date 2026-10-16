@@ -194,6 +194,7 @@ def test_locale_storage_keyboard_tab_sync_and_session_isolation(workspace_url: s
 @pytest.mark.parametrize(
     ("name", "width", "height"),
     [
+        ("wide", 2560, 1392),
         ("desktop", 1440, 900),
         ("tablet", 820, 1180),
         ("mobile", 390, 844),
@@ -219,7 +220,42 @@ def test_workspace_navigation_branding_and_responsive_layout(
         assert logo.evaluate("element => element.naturalWidth") > 0
         logo_box = logo.bounding_box()
         assert logo_box is not None
-        assert logo_box["width"] >= (300 if name == "mobile" else 410)
+        brand_box = page.locator("#workspace-brand").bounding_box()
+        assert brand_box is not None
+        assert logo_box["width"] <= brand_box["width"] * 0.9 + 1
+        brand_content_width = page.locator("#workspace-brand").evaluate(
+            """element => {
+              const style = getComputedStyle(element);
+              return element.clientWidth
+                - parseFloat(style.paddingLeft)
+                - parseFloat(style.paddingRight);
+            }"""
+        )
+        if width > 520:
+            expected_logo_width = min(
+                brand_content_width * 0.36,
+                (brand_box["height"] - 62) * 3,
+                620,
+            )
+        else:
+            expected_logo_width = min(
+                brand_content_width * 0.62,
+                (brand_box["height"] - 120) * 3,
+                280,
+            )
+        assert abs(logo_box["width"] - expected_logo_width) <= 3
+        language_switch_box = page.locator("#language-switch").bounding_box()
+        assert language_switch_box is not None
+        logo_overlaps_switch = not (
+            logo_box["x"] + logo_box["width"] <= language_switch_box["x"]
+            or language_switch_box["x"] + language_switch_box["width"] <= logo_box["x"]
+            or logo_box["y"] + logo_box["height"] <= language_switch_box["y"]
+            or language_switch_box["y"] + language_switch_box["height"] <= logo_box["y"]
+        )
+        assert not logo_overlaps_switch
+        expected_brand_height = min(max(150, height * 0.15), 220) if width > 900 else None
+        if expected_brand_height is not None:
+            assert abs(brand_box["height"] - expected_brand_height) <= 2
         assert "An auditable and traceable" in page.locator("#workspace-brand").inner_text()
         assert page.locator("#workspace-brand").evaluate(
             "element => getComputedStyle(element).backgroundColor"
@@ -253,10 +289,11 @@ def test_workspace_navigation_branding_and_responsive_layout(
 
         sidebar = page.locator("#workspace-sidebar")
         toggle = page.get_by_role("button", name="Toggle Sidebar")
-        if name == "mobile":
+        if width <= 900:
             page.wait_for_function(
                 "!document.querySelector('#workspace-sidebar').classList.contains('open')"
             )
+            assert brand_box["width"] >= width * 0.98
             toggle.click()
             page.wait_for_function(
                 "document.querySelector('#workspace-sidebar').classList.contains('open')"
@@ -268,7 +305,7 @@ def test_workspace_navigation_branding_and_responsive_layout(
         heading.wait_for(state="visible")
         expect(heading).to_have_text(tr("新建抽取与构建"), timeout=60_000)
 
-        if name == "mobile":
+        if width <= 900:
             if "open" in (sidebar.get_attribute("class") or ""):
                 toggle.click()
                 page.wait_for_function(
@@ -277,7 +314,39 @@ def test_workspace_navigation_branding_and_responsive_layout(
             page.wait_for_timeout(400)
         else:
             assert "open" in (sidebar.get_attribute("class") or "")
-        if name == "desktop":
+        if width > 900:
+            sidebar_box = sidebar.bounding_box()
+            assert sidebar_box is not None
+            assert abs(sidebar_box["width"] / width - 0.2) <= 0.01
+            tabs_box = page.locator("#workspace-tabs").bounding_box()
+            parent_width = page.locator(".sidebar-parent").evaluate(
+                "element => element.clientWidth"
+            )
+            assert tabs_box is not None
+            assert abs(tabs_box["width"] / (parent_width - sidebar_box["width"]) - 0.9) <= 0.02
+
+            open_tabs_width = tabs_box["width"]
+            toggle.click()
+            page.wait_for_function(
+                "!document.querySelector('#workspace-sidebar').classList.contains('open')"
+            )
+            page.wait_for_function(
+                "Math.abs(document.querySelector('#workspace-tabs').getBoundingClientRect().x "
+                "/ window.innerWidth - 0.05) < 0.01"
+            )
+            expect(toggle).to_be_visible()
+            expect(toggle).to_have_attribute("aria-expanded", "false")
+            assert sidebar.evaluate("element => getComputedStyle(element).visibility") == "hidden"
+            collapsed_tabs_box = page.locator("#workspace-tabs").bounding_box()
+            assert collapsed_tabs_box is not None
+            assert collapsed_tabs_box["width"] > open_tabs_width
+            assert abs(collapsed_tabs_box["x"] / width - 0.05) <= 0.01
+            toggle.click()
+            page.wait_for_function(
+                "document.querySelector('#workspace-sidebar').classList.contains('open')"
+            )
+            expect(toggle).to_have_attribute("aria-expanded", "true")
+
             resizer = page.locator("#workspace-resizer")
             resizer.wait_for(state="visible")
             before = sidebar.bounding_box()
@@ -286,8 +355,13 @@ def test_workspace_navigation_branding_and_responsive_layout(
             after = sidebar.bounding_box()
             assert before and after and after["width"] > before["width"]
             assert (
-                page.evaluate("localStorage.getItem('prismke.workspace.sidebar.width')") is not None
+                page.evaluate("localStorage.getItem('prismke.workspace.sidebar.ratio')") is not None
             )
+            assert after["width"] / width <= 0.3
+            resizer.press("End")
+            maximum = sidebar.bounding_box()
+            assert maximum is not None
+            assert abs(maximum["width"] / width - 0.3) <= 0.01
 
         if name == "mobile":
             table_metrics = page.locator(".virtual-table-viewport:visible").evaluate_all(

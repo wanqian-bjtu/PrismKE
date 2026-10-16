@@ -1896,19 +1896,72 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 + browser_i18n_bootstrap_js()
                 + """
               const sidebar = document.querySelector('#workspace-sidebar');
-              const toggle = sidebar?.querySelector('button[aria-label="Toggle Sidebar"]');
+              const nativeToggle = sidebar?.querySelector('button[aria-label="Toggle Sidebar"]');
               if (!sidebar) return;
-              const storageKey = 'prismke.workspace.sidebar.width';
-              const clamp = value => Math.max(260, Math.min(520, value));
-              const applyWidth = value => {
-                const width = clamp(Number(value) || 300);
-                sidebar.style.setProperty('--prism-sidebar-width', `${width}px`);
+              const legacyStorageKey = 'prismke.workspace.sidebar.width';
+              const storageKey = 'prismke.workspace.sidebar.ratio';
+              const clampRatio = value => Math.max(0.2, Math.min(0.3, value));
+              const storedRatio = Number(localStorage.getItem(storageKey));
+              const legacyWidth = Number(localStorage.getItem(legacyStorageKey));
+              let sidebarRatio = Number.isFinite(storedRatio) && storedRatio >= 0.2
+                ? clampRatio(storedRatio)
+                : Number.isFinite(legacyWidth) && legacyWidth > 0
+                  ? clampRatio(legacyWidth / window.innerWidth)
+                  : 0.2;
+              const widthForRatio = ratio => Math.max(260, window.innerWidth * ratio);
+              const applyRatio = value => {
+                sidebarRatio = clampRatio(Number(value) || 0.2);
+                const width = widthForRatio(sidebarRatio);
                 document.documentElement.style.setProperty(
                   '--prism-sidebar-width', `${width}px`
                 );
                 return width;
               };
-              if (window.innerWidth > 900) applyWidth(localStorage.getItem(storageKey));
+              const applyWidth = value => {
+                const requested = Number(value) || widthForRatio(0.2);
+                return applyRatio(requested / window.innerWidth);
+              };
+              if (window.innerWidth > 900) applyRatio(sidebarRatio);
+              localStorage.removeItem(legacyStorageKey);
+
+              let toggle = document.querySelector('#workspace-sidebar-toggle');
+              if (!toggle) {
+                toggle = document.createElement('button');
+                toggle.id = 'workspace-sidebar-toggle';
+                toggle.type = 'button';
+                document.body.appendChild(toggle);
+                toggle.addEventListener('click', () => nativeToggle?.click());
+              }
+              if (nativeToggle) {
+                nativeToggle.style.setProperty('display', 'none', 'important');
+                nativeToggle.setAttribute('aria-hidden', 'true');
+                nativeToggle.tabIndex = -1;
+              }
+              const syncSidebarToggle = () => {
+                const isOpen = sidebar.classList.contains('open');
+                const isChinese = window.PrismKEI18n?.getLocale() === 'zh-CN';
+                toggle.setAttribute('aria-expanded', String(isOpen));
+                toggle.setAttribute('aria-controls', 'workspace-sidebar');
+                toggle.setAttribute('aria-label', isChinese ? '切换侧栏' : 'Toggle Sidebar');
+                toggle.title = isChinese
+                  ? (isOpen ? '收起侧栏' : '展开侧栏')
+                  : (isOpen ? 'Collapse sidebar' : 'Expand sidebar');
+              };
+              syncSidebarToggle();
+              if (!window.__prismkeSidebarObserver) {
+                window.__prismkeSidebarObserver = new MutationObserver(syncSidebarToggle);
+                window.__prismkeSidebarObserver.observe(sidebar, {
+                  attributes: true,
+                  attributeFilter: ['class'],
+                });
+                window.addEventListener('prismke:localechange', syncSidebarToggle);
+              }
+              if (!window.__prismkeSidebarResizeBound) {
+                window.__prismkeSidebarResizeBound = true;
+                window.addEventListener('resize', () => {
+                  if (window.innerWidth > 900) applyRatio(sidebarRatio);
+                });
+              }
               if (!window.__prismkeNavigationBound) {
                 window.__prismkeNavigationBound = true;
                 const navigateLabel = rawLabel => {
@@ -1975,23 +2028,21 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                   if (!dragging) return;
                   dragging = false;
                   delete resizer.dataset.dragging;
-                  const width = Math.round(sidebar.getBoundingClientRect().width);
-                  localStorage.setItem(storageKey, String(width));
+                  localStorage.setItem(storageKey, String(sidebarRatio));
                 };
                 resizer.addEventListener('pointerup', finish);
                 resizer.addEventListener('pointercancel', finish);
                 resizer.addEventListener('keydown', event => {
                   if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
                   event.preventDefault();
-                  const current = sidebar.getBoundingClientRect().width;
-                  const next = event.key === 'Home' ? 260 : event.key === 'End' ? 520 :
-                    current + (event.key === 'ArrowRight' ? 10 : -10);
-                  const width = applyWidth(next);
-                  localStorage.setItem(storageKey, String(width));
+                  const next = event.key === 'Home' ? 0.2 : event.key === 'End' ? 0.3 :
+                    sidebarRatio + (event.key === 'ArrowRight' ? 0.01 : -0.01);
+                  const width = applyRatio(next);
+                  localStorage.setItem(storageKey, String(sidebarRatio));
                   resizer.setAttribute('aria-valuenow', String(width));
                 });
               }
-              if (window.innerWidth <= 520 && sidebar?.classList.contains('open')) {
+              if (window.innerWidth <= 900 && sidebar?.classList.contains('open')) {
                 toggle?.click();
               }
             }"""
