@@ -226,6 +226,30 @@ def test_workspace_navigation_branding_and_responsive_layout(
         ) == page.locator(".gradio-container").evaluate(
             "element => getComputedStyle(element).backgroundColor"
         )
+        switch_overflow = page.locator("#language-switch").evaluate(
+            """element => [element, ...element.querySelectorAll('*')].map(node => ({
+              tag: node.tagName,
+              id: node.id,
+              classes: node.className,
+              overflowX: getComputedStyle(node).overflowX,
+              overflowY: getComputedStyle(node).overflowY,
+              clientWidth: node.clientWidth,
+              scrollWidth: node.scrollWidth,
+              clientHeight: node.clientHeight,
+              scrollHeight: node.scrollHeight,
+            }))"""
+        )
+        overflowing_switch_nodes = [
+            item
+            for item in switch_overflow
+            if not (
+                item["overflowX"] not in {"auto", "scroll"}
+                and item["overflowY"] not in {"auto", "scroll"}
+                and item["scrollWidth"] <= item["clientWidth"]
+                and item["scrollHeight"] <= item["clientHeight"]
+            )
+        ]
+        assert overflowing_switch_nodes == [], json.dumps(overflowing_switch_nodes)
 
         sidebar = page.locator("#workspace-sidebar")
         toggle = page.get_by_role("button", name="Toggle Sidebar")

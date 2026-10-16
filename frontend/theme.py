@@ -133,7 +133,10 @@ APP_CSS = r"""
   min-height: 36px !important;
   margin: 0 !important;
   padding: 0 !important;
-  overflow: hidden;
+  line-height: 0 !important;
+  overflow: hidden !important;
+  overscroll-behavior: none;
+  scrollbar-width: none;
   border: 1px solid #b9c8dc !important;
   border-radius: 20px !important;
   background: #e8eef8 !important;
@@ -171,7 +174,7 @@ APP_CSS = r"""
   color: var(--prism-blue);
   font-size: 13px;
   font-weight: 700;
-  line-height: 36px;
+  line-height: 1;
   letter-spacing: 0;
   pointer-events: none;
 }
@@ -184,8 +187,21 @@ APP_CSS = r"""
   height: 100% !important;
   margin: 0 !important;
   padding: 0 !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  box-sizing: border-box !important;
+  line-height: 0 !important;
+  overflow: hidden !important;
+  overscroll-behavior: none;
+  scrollbar-width: none;
   cursor: pointer !important;
 }
+
+#language-switch::-webkit-scrollbar,
+#language-switch .wrap::-webkit-scrollbar,
+#language-switch label::-webkit-scrollbar { display: none !important; }
 
 #language-switch input[type="checkbox"] {
   position: absolute !important;
@@ -194,11 +210,16 @@ APP_CSS = r"""
   width: 100% !important;
   height: 100% !important;
   margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  overflow: hidden !important;
   opacity: 0 !important;
   cursor: pointer !important;
 }
 
-#language-switch span { opacity: 0 !important; }
+#language-switch span { display: none !important; }
 
 #language-switch:focus-within {
   outline: 3px solid rgba(233, 162, 26, 0.42) !important;
@@ -359,7 +380,7 @@ table { font-size: 13px; }
   #language-switch::after {
     content: "EN\00a0\00a0\00a0\00a0\00a0 CH";
     font-size: 12px;
-    line-height: 32px;
+    line-height: 1;
   }
   #workspace-sidebar.open {
     left: 0 !important;
