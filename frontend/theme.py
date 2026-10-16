@@ -15,7 +15,15 @@ APP_CSS = r"""
   --prism-danger: #c53b45;
   --prism-radius: 6px;
   --prism-sidebar-width: max(260px, 20vw);
-  --prism-brand-height: clamp(150px, 15dvh, 220px);
+  --prism-brand-top-gap: clamp(18px, 3dvh, 45px);
+  --prism-brand-inner-gap: clamp(8px, 1dvh, 16px);
+  --prism-brand-content-height: clamp(120px, 15dvh, 230px);
+  --prism-brand-height: calc(
+    var(--prism-brand-top-gap) +
+    var(--prism-brand-inner-gap) +
+    var(--prism-brand-content-height) +
+    var(--prism-brand-inner-gap)
+  );
 }
 
 .gradio-container {
@@ -47,7 +55,7 @@ APP_CSS = r"""
 
 #workspace-sidebar {
   width: var(--prism-sidebar-width) !important;
-  min-width: 260px !important;
+  min-width: 10vw !important;
   max-width: 30vw !important;
   height: 100dvh !important;
   overflow-x: hidden !important;
@@ -171,7 +179,10 @@ body:has(#workspace-sidebar.open) #workspace-sidebar-toggle::before {
   min-height: var(--prism-brand-height) !important;
   max-height: var(--prism-brand-height) !important;
   margin: 0;
-  padding: clamp(12px, 1.5vh, 20px) 5%;
+  padding:
+    calc(var(--prism-brand-top-gap) + var(--prism-brand-inner-gap))
+    5%
+    var(--prism-brand-inner-gap);
   align-items: center;
   justify-content: center;
   background: var(--prism-bg);
@@ -288,7 +299,11 @@ body:has(#workspace-sidebar.open) #workspace-sidebar-toggle::before {
 
 #workspace-logo {
   flex: 0 0 auto !important;
-  width: min(36cqw, calc((var(--prism-brand-height) - 62px) * 3), 620px) !important;
+  width: min(
+    36cqw,
+    calc((var(--prism-brand-content-height) - 62px) * 3),
+    620px
+  ) !important;
   max-width: 90cqw !important;
   max-height: none !important;
   margin: 0 auto !important;

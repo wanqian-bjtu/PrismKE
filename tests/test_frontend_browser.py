@@ -234,7 +234,7 @@ def test_workspace_navigation_branding_and_responsive_layout(
         if width > 520:
             expected_logo_width = min(
                 brand_content_width * 0.36,
-                (brand_box["height"] - 62) * 3,
+                (min(max(120, height * 0.15), 230) - 62) * 3,
                 620,
             )
         else:
@@ -253,7 +253,13 @@ def test_workspace_navigation_branding_and_responsive_layout(
             or language_switch_box["y"] + language_switch_box["height"] <= logo_box["y"]
         )
         assert not logo_overlaps_switch
-        expected_brand_height = min(max(150, height * 0.15), 220) if width > 900 else None
+        expected_brand_height = (
+            min(max(18, height * 0.03), 45)
+            + (2 * min(max(8, height * 0.01), 16))
+            + min(max(120, height * 0.15), 230)
+            if width > 900
+            else None
+        )
         if expected_brand_height is not None:
             assert abs(brand_box["height"] - expected_brand_height) <= 2
         assert "An auditable and traceable" in page.locator("#workspace-brand").inner_text()
@@ -362,6 +368,10 @@ def test_workspace_navigation_branding_and_responsive_layout(
             maximum = sidebar.bounding_box()
             assert maximum is not None
             assert abs(maximum["width"] / width - 0.3) <= 0.01
+            resizer.press("Home")
+            minimum = sidebar.bounding_box()
+            assert minimum is not None
+            assert abs(minimum["width"] / width - 0.1) <= 0.01
 
         if name == "mobile":
             table_metrics = page.locator(".virtual-table-viewport:visible").evaluate_all(

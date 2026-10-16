@@ -1900,15 +1900,15 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
               if (!sidebar) return;
               const legacyStorageKey = 'prismke.workspace.sidebar.width';
               const storageKey = 'prismke.workspace.sidebar.ratio';
-              const clampRatio = value => Math.max(0.2, Math.min(0.3, value));
+              const clampRatio = value => Math.max(0.1, Math.min(0.3, value));
               const storedRatio = Number(localStorage.getItem(storageKey));
               const legacyWidth = Number(localStorage.getItem(legacyStorageKey));
-              let sidebarRatio = Number.isFinite(storedRatio) && storedRatio >= 0.2
+              let sidebarRatio = Number.isFinite(storedRatio) && storedRatio >= 0.1
                 ? clampRatio(storedRatio)
                 : Number.isFinite(legacyWidth) && legacyWidth > 0
                   ? clampRatio(legacyWidth / window.innerWidth)
                   : 0.2;
-              const widthForRatio = ratio => Math.max(260, window.innerWidth * ratio);
+              const widthForRatio = ratio => window.innerWidth * ratio;
               const applyRatio = value => {
                 sidebarRatio = clampRatio(Number(value) || 0.2);
                 const width = widthForRatio(sidebarRatio);
@@ -2035,7 +2035,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 resizer.addEventListener('keydown', event => {
                   if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
                   event.preventDefault();
-                  const next = event.key === 'Home' ? 0.2 : event.key === 'End' ? 0.3 :
+                  const next = event.key === 'Home' ? 0.1 : event.key === 'End' ? 0.3 :
                     sidebarRatio + (event.key === 'ArrowRight' ? 0.01 : -0.01);
                   const width = applyRatio(next);
                   localStorage.setItem(storageKey, String(sidebarRatio));
