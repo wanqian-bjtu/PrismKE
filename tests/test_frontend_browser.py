@@ -217,10 +217,18 @@ def test_workspace_navigation_branding_and_responsive_layout(
 
         logo = page.locator("#workspace-logo img")
         logo.wait_for(state="visible")
-        assert logo.evaluate("element => element.naturalWidth") > 0
+        natural_size = logo.evaluate(
+            "element => ({width: element.naturalWidth, height: element.naturalHeight})"
+        )
+        assert natural_size["width"] > 0
+        assert natural_size["height"] > 0
         logo_box = logo.bounding_box()
         assert logo_box is not None
+        header_box = page.locator("#workspace-header").bounding_box()
+        topbar_box = page.locator("#workspace-topbar").bounding_box()
         brand_box = page.locator("#workspace-brand").bounding_box()
+        assert header_box is not None
+        assert topbar_box is not None
         assert brand_box is not None
         assert logo_box["width"] <= brand_box["width"] * 0.9 + 1
         brand_content_width = page.locator("#workspace-brand").evaluate(
@@ -234,18 +242,32 @@ def test_workspace_navigation_branding_and_responsive_layout(
         if width > 520:
             expected_logo_width = min(
                 brand_content_width * 0.36,
-                (min(max(120, height * 0.15), 230) - 62) * 3,
+                (brand_box["height"] - 62) * 3,
                 620,
             )
         else:
             expected_logo_width = min(
                 brand_content_width * 0.62,
-                (brand_box["height"] - 120) * 3,
+                (brand_box["height"] - 64) * 3,
                 280,
             )
-        assert abs(logo_box["width"] - expected_logo_width) <= 3
+        rendered_ratio = logo_box["width"] / logo_box["height"]
+        natural_ratio = natural_size["width"] / natural_size["height"]
+        assert abs(rendered_ratio - natural_ratio) <= natural_ratio * 0.02
+        assert expected_logo_width * 0.82 <= logo_box["width"] <= (
+            expected_logo_width + 3
+        )
         language_switch_box = page.locator("#language-switch").bounding_box()
         assert language_switch_box is not None
+        assert language_switch_box["x"] >= topbar_box["x"]
+        assert language_switch_box["x"] + language_switch_box["width"] <= (
+            topbar_box["x"] + topbar_box["width"] + 1
+        )
+        assert language_switch_box["y"] >= topbar_box["y"]
+        assert language_switch_box["y"] + language_switch_box["height"] <= (
+            topbar_box["y"] + topbar_box["height"] + 1
+        )
+        assert abs(brand_box["y"] - (topbar_box["y"] + topbar_box["height"])) <= 2
         logo_overlaps_switch = not (
             logo_box["x"] + logo_box["width"] <= language_switch_box["x"]
             or language_switch_box["x"] + language_switch_box["width"] <= logo_box["x"]
@@ -253,15 +275,18 @@ def test_workspace_navigation_branding_and_responsive_layout(
             or language_switch_box["y"] + language_switch_box["height"] <= logo_box["y"]
         )
         assert not logo_overlaps_switch
-        expected_brand_height = (
-            min(max(18, height * 0.03), 45)
-            + (2 * min(max(8, height * 0.01), 16))
-            + min(max(120, height * 0.15), 230)
-            if width > 900
-            else None
-        )
-        if expected_brand_height is not None:
-            assert abs(brand_box["height"] - expected_brand_height) <= 2
+        if width > 900:
+            expected_topbar_height = min(max(48, height * 0.05), 72)
+            expected_brand_height = min(max(132, height * 0.15), 230)
+        elif width > 520:
+            expected_topbar_height = min(max(46, height * 0.05), 60)
+            expected_brand_height = min(max(132, height * 0.15), 190)
+        else:
+            expected_topbar_height = 48
+            expected_brand_height = 140
+        assert abs(topbar_box["height"] - expected_topbar_height) <= 2
+        assert abs(brand_box["height"] - expected_brand_height) <= 2
+        assert abs(header_box["height"] - (topbar_box["height"] + brand_box["height"])) <= 2
         assert "An auditable and traceable" in page.locator("#workspace-brand").inner_text()
         assert page.locator("#workspace-brand").evaluate(
             "element => getComputedStyle(element).backgroundColor"
@@ -310,6 +335,10 @@ def test_workspace_navigation_branding_and_responsive_layout(
         heading = page.locator(".workspace-page-header:visible h1")
         heading.wait_for(state="visible")
         expect(heading).to_have_text(tr("新建抽取与构建"), timeout=60_000)
+        tabs_box = page.locator("#workspace-tabs").bounding_box()
+        assert tabs_box is not None
+        expected_brand_gap = min(max(8, height * 0.01), 16) if width > 520 else 8
+        assert abs(tabs_box["y"] - (brand_box["y"] + brand_box["height"]) - expected_brand_gap) <= 2
 
         if width <= 900:
             if "open" in (sidebar.get_attribute("class") or ""):
@@ -324,11 +353,9 @@ def test_workspace_navigation_branding_and_responsive_layout(
             sidebar_box = sidebar.bounding_box()
             assert sidebar_box is not None
             assert abs(sidebar_box["width"] / width - 0.2) <= 0.01
-            tabs_box = page.locator("#workspace-tabs").bounding_box()
             parent_width = page.locator(".sidebar-parent").evaluate(
                 "element => element.clientWidth"
             )
-            assert tabs_box is not None
             assert abs(tabs_box["width"] / (parent_width - sidebar_box["width"]) - 0.9) <= 0.02
 
             open_tabs_width = tabs_box["width"]

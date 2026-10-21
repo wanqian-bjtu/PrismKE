@@ -15,14 +15,11 @@ APP_CSS = r"""
   --prism-danger: #c53b45;
   --prism-radius: 6px;
   --prism-sidebar-width: max(260px, 20vw);
-  --prism-brand-top-gap: clamp(18px, 3dvh, 45px);
-  --prism-brand-inner-gap: clamp(8px, 1dvh, 16px);
-  --prism-brand-content-height: clamp(120px, 15dvh, 230px);
-  --prism-brand-height: calc(
-    var(--prism-brand-top-gap) +
-    var(--prism-brand-inner-gap) +
-    var(--prism-brand-content-height) +
-    var(--prism-brand-inner-gap)
+  --prism-topbar-height: clamp(48px, 5dvh, 72px);
+  --prism-brand-content-height: clamp(132px, 15dvh, 230px);
+  --prism-brand-gap: clamp(8px, 1dvh, 16px);
+  --prism-header-height: calc(
+    var(--prism-topbar-height) + var(--prism-brand-content-height)
   );
 }
 
@@ -51,6 +48,10 @@ APP_CSS = r"""
 
 .gradio-container .sidebar-parent:has(#workspace-sidebar:not(.open)) {
   padding-left: 0 !important;
+}
+
+.gradio-container .sidebar-parent main > .column:has(> #workspace-header) {
+  gap: 0 !important;
 }
 
 #workspace-sidebar {
@@ -169,20 +170,48 @@ body:has(#workspace-sidebar.open) #workspace-sidebar-toggle::before {
 #workspace-resizer:focus-visible::after,
 #workspace-resizer[data-dragging="true"]::after { background: var(--prism-blue); }
 
+#workspace-header {
+  position: relative;
+  box-sizing: border-box;
+  flex: 0 0 var(--prism-header-height) !important;
+  width: 100%;
+  height: var(--prism-header-height) !important;
+  min-height: var(--prism-header-height) !important;
+  max-height: var(--prism-header-height) !important;
+  margin: 0;
+  padding: 0;
+  gap: 0 !important;
+  background: var(--prism-bg);
+  border: 0;
+}
+
+#workspace-topbar {
+  box-sizing: border-box;
+  flex: 0 0 var(--prism-topbar-height) !important;
+  width: 100%;
+  height: var(--prism-topbar-height) !important;
+  min-height: var(--prism-topbar-height) !important;
+  max-height: var(--prism-topbar-height) !important;
+  margin: 0;
+  padding: 0 5%;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  background: var(--prism-bg);
+  border: 0;
+}
+
 #workspace-brand {
   position: relative;
   box-sizing: border-box;
   container-type: inline-size;
-  flex: 0 0 var(--prism-brand-height) !important;
+  flex: 0 0 var(--prism-brand-content-height) !important;
   width: 100%;
-  height: var(--prism-brand-height) !important;
-  min-height: var(--prism-brand-height) !important;
-  max-height: var(--prism-brand-height) !important;
+  height: var(--prism-brand-content-height) !important;
+  min-height: var(--prism-brand-content-height) !important;
+  max-height: var(--prism-brand-content-height) !important;
   margin: 0;
-  padding:
-    calc(var(--prism-brand-top-gap) + var(--prism-brand-inner-gap))
-    5%
-    var(--prism-brand-inner-gap);
+  padding: clamp(6px, 0.6dvh, 10px) 5%;
   align-items: center;
   justify-content: center;
   background: var(--prism-bg);
@@ -191,10 +220,11 @@ body:has(#workspace-sidebar.open) #workspace-sidebar-toggle::before {
 }
 
 #language-switch {
-  position: absolute !important;
+  position: relative !important;
   z-index: 60;
-  top: 18px;
-  right: 28px;
+  top: auto;
+  right: auto;
+  flex: 0 0 112px !important;
   width: 112px !important;
   min-width: 112px !important;
   height: 36px !important;
@@ -295,7 +325,7 @@ body:has(#workspace-sidebar.open) #workspace-sidebar-toggle::before {
 }
 
 .toast-wrap,
-.toast-container { top: 66px !important; }
+.toast-container { top: calc(var(--prism-topbar-height) + 8px) !important; }
 
 #workspace-logo {
   flex: 0 0 auto !important;
@@ -307,8 +337,13 @@ body:has(#workspace-sidebar.open) #workspace-sidebar-toggle::before {
   max-width: 90cqw !important;
   max-height: none !important;
   margin: 0 auto !important;
+  padding: 0 !important;
+  border: 0 !important;
   background: transparent !important;
 }
+
+#workspace-logo > div,
+#workspace-logo .image-container { padding: 0 !important; }
 
 #workspace-logo img {
   width: 100% !important;
@@ -339,7 +374,7 @@ body:has(#workspace-sidebar.open) #workspace-sidebar-toggle::before {
   flex: 1 1 auto !important;
   width: 90%;
   max-width: none;
-  margin: 0 auto;
+  margin: var(--prism-brand-gap) auto 0;
   padding: clamp(14px, 2vh, 24px) 0 34px;
 }
 
@@ -419,6 +454,13 @@ table { font-size: 13px; }
 .table-wrap { overflow-x: auto !important; }
 
 @media (max-width: 900px) {
+  #workspace-header {
+    --prism-topbar-height: clamp(46px, 5dvh, 60px);
+    --prism-brand-content-height: clamp(132px, 15dvh, 190px);
+    --prism-header-height: calc(
+      var(--prism-topbar-height) + var(--prism-brand-content-height)
+    );
+  }
   .gradio-container .sidebar-parent { padding-left: 0 !important; }
   #workspace-sidebar {
     width: min(320px, 88vw) !important;
@@ -429,26 +471,42 @@ table { font-size: 13px; }
     left: calc(min(320px, 88vw) + 8px) !important;
   }
   #workspace-resizer { display: none; }
+  #workspace-header,
+  #workspace-topbar,
   #workspace-brand {
-    --prism-brand-height: clamp(148px, 18dvh, 190px);
     width: 100%;
     margin-left: 0;
-    padding: 14px 18px 12px;
   }
+  #workspace-topbar { padding: 0 18px; }
+  #workspace-brand { padding: 8px 5%; }
   #language-switch {
-    top: 14px;
-    right: 18px;
+    top: auto;
+    right: auto;
   }
   #workspace-tabs { width: 90%; padding-top: 14px; }
-  #workspace-tabs { max-width: none; margin: 0 auto; }
+  #workspace-tabs {
+    max-width: none;
+    margin: var(--prism-brand-gap) auto 0;
+  }
   .workspace-page-header { align-items: flex-start; flex-direction: column; gap: 5px; }
   .workspace-page-header p { text-align: left; }
 }
 
 @media (max-width: 520px) {
+  #workspace-header {
+    --prism-topbar-height: 48px;
+    --prism-brand-content-height: 140px;
+    --prism-brand-gap: 8px;
+    --prism-header-height: calc(
+      var(--prism-topbar-height) + var(--prism-brand-content-height)
+    );
+  }
+  #workspace-tabs { margin-top: 8px; }
+  #workspace-topbar { padding: 0 12px; }
   #language-switch {
-    top: 10px;
-    right: 12px;
+    top: auto;
+    right: auto;
+    flex-basis: 92px !important;
     width: 92px !important;
     min-width: 92px !important;
     height: 32px !important;
@@ -469,11 +527,10 @@ table { font-size: 13px; }
     transform: translateX(0) !important;
   }
   #workspace-brand {
-    --prism-brand-height: clamp(184px, 22dvh, 196px);
-    padding: 48px 5% 10px;
+    padding: 8px 5%;
   }
   #workspace-logo {
-    width: min(62cqw, calc((var(--prism-brand-height) - 120px) * 3), 280px) !important;
+    width: min(62cqw, calc((var(--prism-brand-content-height) - 64px) * 3), 280px) !important;
     max-width: 62cqw !important;
     margin-top: 0 !important;
   }

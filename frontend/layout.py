@@ -85,30 +85,32 @@ def all_page_ids() -> tuple[str, ...]:
 
 
 def build_brand_header(gr: Any, version: str) -> Any:
-    with gr.Column(elem_id="workspace-brand", elem_classes="workspace-brand-band"):
-        language_switch = gr.Checkbox(
-            value=False,
-            label="EN / CH",
-            show_label=False,
-            container=False,
-            elem_id="language-switch",
-            elem_classes="language-switch",
-        )
-        gr.Image(
-            value=str(logo_path()),
-            format="png",
-            image_mode="RGBA",
-            interactive=False,
-            show_label=False,
-            buttons=[],
-            container=False,
-            elem_id="workspace-logo",
-            alt_text="PrismKE",
-        )
-        gr.HTML(
-            f'<p class="workspace-tagline">{TAGLINE}</p>'
-            f'<p class="workspace-version">Development build · {version}</p>'
-        )
+    with gr.Column(elem_id="workspace-header", elem_classes="workspace-header"):
+        with gr.Row(elem_id="workspace-topbar", elem_classes="workspace-topbar"):
+            language_switch = gr.Checkbox(
+                value=False,
+                label="EN / CH",
+                show_label=False,
+                container=False,
+                elem_id="language-switch",
+                elem_classes="language-switch",
+            )
+        with gr.Column(elem_id="workspace-brand", elem_classes="workspace-brand-band"):
+            gr.Image(
+                value=str(logo_path()),
+                format="png",
+                image_mode="RGBA",
+                interactive=False,
+                show_label=False,
+                buttons=[],
+                container=False,
+                elem_id="workspace-logo",
+                alt_text="PrismKE",
+            )
+            gr.HTML(
+                f'<p class="workspace-tagline">{TAGLINE}</p>'
+                f'<p class="workspace-version">Development build · {version}</p>'
+            )
     return language_switch
 
 
