@@ -1241,7 +1241,8 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     "**密钥状态**  "
                     f"LLM：{'已配置' if public_settings['llm_api_key'] else '未配置'} · "
                     f"VLM：{'已配置' if public_settings['vlm_api_key'] else '未配置'}  \n"
-                    "页面输入的 API Key 仅保存在当前服务进程内，不写入运行文件或日志。"
+                    "页面输入的 API Key 仅保存在当前服务进程内，不写入运行文件或日志。",
+                    elem_id="key-configuration-status",
                 )
                 ocr_device = gr.Dropdown(
                     [
@@ -1251,6 +1252,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     ],
                     value=public_settings["ocr_device"],
                     label="OCR 设备",
+                    elem_id="ocr-device",
                 )
                 ocr_lang = gr.Dropdown(
                     [("中英混合", "mixed"), ("英文", "en"), ("中文", "zh")],
@@ -1288,15 +1290,21 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 gr.Markdown(
                     "**Neo4j 密码：** "
                     f"{'已配置' if public_settings['neo4j_password'] else '未配置'}  \n"
-                    "页面不回显旧密码；新值保存到权限为 600 的私密运行配置。"
+                    "页面不回显旧密码；新值保存到权限为 600 的私密运行配置。",
+                    elem_id="neo4j-password-status",
                 )
                 config_operator = gr.Textbox(
                     label="配置操作者",
                     value="管理员",
                     elem_id="config-operator",
+                    elem_classes="localizable-default",
                 )
                 save_config = gr.Button("保存设置", variant="primary")
-                config_outcome = gr.Textbox(label="设置结果", interactive=False)
+                config_outcome = gr.Textbox(
+                    label="设置结果",
+                    interactive=False,
+                    elem_id="settings-outcome",
+                )
 
         language_switch = build_brand_header(gr, __version__)
 
@@ -1368,14 +1376,22 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     batch_item_selector = gr.Dropdown(
                         label="批次文件", **empty_dropdown_kwargs("暂无批次文件")
                     )
-                    batch_operator = gr.Textbox(label="操作者", value="管理员")
+                    batch_operator = gr.Textbox(
+                        label="操作者",
+                        value="管理员",
+                        elem_classes="localizable-default",
+                    )
                     batch_reason = gr.Textbox(label="排除原因")
                     with gr.Row():
                         retry_batch_button = gr.Button("重试文件")
                         exclude_batch_button = gr.Button("排除文件", variant="stop")
                     batch_action_outcome = gr.Markdown("尚未执行批次操作")
                     with gr.Group(visible=True) as batch_commit_group:
-                        batch_reviewer = gr.Textbox(label="提交审核人", value="管理员")
+                        batch_reviewer = gr.Textbox(
+                            label="提交审核人",
+                            value="管理员",
+                            elem_classes="localizable-default",
+                        )
                         batch_commit_confirm = gr.Checkbox(
                             label="我确认将该批次的已批准事实写入图谱"
                         )
@@ -1389,7 +1405,11 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                         value="approve",
                         label="审核决定",
                     )
-                    extraction_reviewer = gr.Textbox(label="审核人", value="管理员")
+                    extraction_reviewer = gr.Textbox(
+                        label="审核人",
+                        value="管理员",
+                        elem_classes="localizable-default",
+                    )
                     extraction_review_reason = gr.Textbox(label="审核意见")
                     extraction_review_button = gr.Button("保存抽取审核")
                     extraction_review_outcome = gr.Markdown("尚未审核抽取结果")
@@ -1565,7 +1585,11 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                         value="approve",
                         label="审核决定",
                     )
-                    visual_review_reviewer = gr.Textbox(label="审核人", value="管理员")
+                    visual_review_reviewer = gr.Textbox(
+                        label="审核人",
+                        value="管理员",
+                        elem_classes="localizable-default",
+                    )
                 visual_review_reason = gr.Textbox(label="审核原因")
                 visual_review_version = gr.Number(label="任务版本", value=0, interactive=False)
                 visual_review_submit = gr.Button("提交视觉审核", variant="primary")

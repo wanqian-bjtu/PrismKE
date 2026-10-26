@@ -29,6 +29,7 @@ EN_BY_ZH: dict[str, str] = {
     'LLM 模型别名': 'LLM model alias',
     'MinerU 高精度解析': 'MinerU high-accuracy parser',
     'Neo4j 密码': 'Neo4j password',
+    'Neo4j 密码：': 'Neo4j password:',
     'Neo4j 数据库': 'Neo4j database',
     'Neo4j 用户': 'Neo4j user',
     'OCR 模型': 'OCR model',
@@ -271,9 +272,16 @@ EN_BY_ZH: dict[str, str] = {
     '暂无媒体出现记录': 'No media occurrences available',
     '暂无审核任务': 'No review tasks available',
     '暂无批次文件': 'No batch files available',
+    '暂无待核对请求': 'No verification requests available',
     '暂无未知请求': 'No unknown requests available',
     '暂无校验问题': 'No validation issues available',
     '暂无案例': 'No cases available',
+    '暂无 Claim': 'No claims available',
+    '暂无审核对象': 'No review targets available',
+    '暂无候选实体': 'No candidate entities available',
+    '暂无可用决定': 'No decisions available',
+    '暂无实体': 'No entities available',
+    '暂无对方证据': 'No counterpart evidence available',
     '暂无记录': 'No records available',
     '暂无证据': 'No evidence available',
     '暂无运行': 'No runs available',
@@ -347,6 +355,7 @@ EN_BY_ZH: dict[str, str] = {
     '确认未计费': 'Confirm no billing',
     '端到端实体关系抽取': 'Joint entity and relation extraction',
     '管理员': 'Administrator',
+    '密钥状态': 'Key status',
     '类型': 'type',
     '类型/关系': 'Type / relation',
     '系统状态': 'System status',
@@ -660,16 +669,25 @@ def browser_i18n_bootstrap_js() -> str:
           return text
             .replace(/^警告 (\d+) · 错误 (\d+)$/, 'Warnings $1 · Errors $2')
             .replace(/^自动（当前：(CPU|GPU 0)）$/, 'Automatic (current: $1)')
+            .replace(/^LLM：(已配置|未配置) · VLM：(已配置|未配置)$/, (_, llm, vlm) => `LLM: ${{llm === '已配置' ? 'Configured' : 'Not configured'}} · VLM: ${{vlm === '已配置' ? 'Configured' : 'Not configured'}}`)
+            .replace(/^设置已保存 · 图存储 (.+?) · LLM (.+?)( · 需要重启服务)?$/, (_, store, model, restart) => `Settings saved · Graph store ${{store}} · LLM ${{model}}${{restart ? ' · Service restart required' : ''}}`)
             .replace(/^操作失败，请刷新后重试；如问题持续，请联系管理员。错误编号：([a-f0-9]+)。$/i, 'The operation failed. Refresh and try again. If it persists, contact the administrator with error reference: $1.')
             .replace(/^运行 (\d+) · 执行中 (\d+) · 待审核 (\d+) · 阻断问题 (\d+) · 工作器 (.+)$/, 'Runs $1 · Running $2 · Pending review $3 · Blocking issues $4 · Worker $5')
             .replace(/· 健康 ·/g, '· Healthy ·');
         }}
         return text;
       }};
+      const replaceDynamicReverse = text => text
+        .replace(/^Warnings (\d+) · Errors (\d+)$/, '警告 $1 · 错误 $2')
+        .replace(/^Automatic \(current: (CPU|GPU 0)\)$/, '自动（当前：$1）')
+        .replace(/^LLM: (Configured|Not configured) · VLM: (Configured|Not configured)$/, (_, llm, vlm) => `LLM：${{llm === 'Configured' ? '已配置' : '未配置'}} · VLM：${{vlm === 'Configured' ? '已配置' : '未配置'}}`)
+        .replace(/^Settings saved · Graph store (.+?) · LLM (.+?)( · Service restart required)?$/, (_, store, model, restart) => `设置已保存 · 图存储 ${{store}} · LLM ${{model}}${{restart ? ' · 需要重启服务' : ''}}`);
       const translateRaw = (raw, locale) => {{
         if (locale === 'en') return replaceDynamic(prismkeEnglish[raw] || raw, locale);
-        return prismkeChinese[raw] || prismkeGradioChinese[raw] || raw;
+        return replaceDynamicReverse(prismkeChinese[raw] || prismkeGradioChinese[raw] || raw);
       }};
+      const sourceStillMatches = (source, current) =>
+        current === source || current === translateRaw(source, 'en') || current === translateRaw(source, 'zh-CN');
       const withWhitespace = (original, translated) => {{
         const leading = original.match(/^\s*/)?.[0] || '';
         const trailing = original.match(/\s*$/)?.[0] || '';
@@ -679,7 +697,12 @@ def browser_i18n_bootstrap_js() -> str:
         if (!node.parentElement || node.parentElement.closest('pre, code, textarea, [data-prismke-no-i18n]')) return;
         locale = effectiveLocale(node.parentElement, locale);
         if (!prismkeTextOrigins.has(node)) prismkeTextOrigins.set(node, node.textContent || '');
-        const original = prismkeTextOrigins.get(node) || '';
+        let original = prismkeTextOrigins.get(node) || '';
+        const current = node.textContent || '';
+        if (!sourceStillMatches(original.trim(), current.trim())) {{
+          original = current;
+          prismkeTextOrigins.set(node, original);
+        }}
         const raw = original.trim();
         if (!raw) return;
         const translated = locale === 'zh-CN' && prismkeEnglish[raw] ? raw : translateRaw(raw, locale);
@@ -694,35 +717,36 @@ def browser_i18n_bootstrap_js() -> str:
         ['placeholder', 'title', 'aria-label'].forEach(attribute => {{
           if (!element.hasAttribute(attribute)) return;
           if (!(attribute in origins)) origins[attribute] = element.getAttribute(attribute) || '';
+          const current = element.getAttribute(attribute) || '';
+          if (!sourceStillMatches(origins[attribute], current)) origins[attribute] = current;
           const original = origins[attribute];
           const translated = locale === 'zh-CN' && prismkeEnglish[original] ? original : translateRaw(original, locale);
           if (element.getAttribute(attribute) !== translated) element.setAttribute(attribute, translated);
         }});
-        if (element instanceof HTMLInputElement && element.readOnly && element.getAttribute('role') !== 'combobox') {{
-          if (!('value' in origins)) origins.value = element.value;
-          const original = origins.value;
-          const translated = locale === 'zh-CN' && prismkeEnglish[original] ? original : translateRaw(original, locale);
-          if (element.value !== translated) element.value = translated;
+      }};
+      const translateControlValue = (control, locale) => {{
+        const current = control.value || '';
+        let source = control.dataset.prismkeI18nSourceValue || '';
+        if (!source || !sourceStillMatches(source, current)) {{
+          source = translateRaw(current, 'zh-CN');
+          control.dataset.prismkeI18nSourceValue = source;
+        }}
+        const translated = translateRaw(source, locale);
+        if (locale === 'zh-CN') {{
+          if (control.value !== source) control.value = source;
+        }} else if (control.value !== translated) {{
+          control.value = translated;
         }}
       }};
       const translateComboboxValues = locale => {{
         document.querySelectorAll('input[role="combobox"]').forEach(input => {{
-          const current = input.value || '';
-          let source = input.dataset.prismkeI18nSourceValue || '';
-          if (prismkeEnglish[current]) {{
-            source = current;
-            input.dataset.prismkeI18nSourceValue = current;
-          }} else if (prismkeChinese[current]) {{
-            source = prismkeChinese[current];
-            input.dataset.prismkeI18nSourceValue = source;
-          }} else if (source && current !== source && current !== prismkeEnglish[source]) {{
-            source = '';
-            delete input.dataset.prismkeI18nSourceValue;
-          }}
-          if (!source) return;
-          const translated = locale === 'en' ? (prismkeEnglish[source] || source) : source;
-          if (input.value !== translated) input.value = translated;
+          translateControlValue(input, locale);
         }});
+      }};
+      const translateApplicationValues = locale => {{
+        document.querySelectorAll(
+          '.localizable-default input, .localizable-default textarea, #settings-outcome input, #settings-outcome textarea, input[readonly], textarea[readonly], input:disabled, textarea:disabled'
+        ).forEach(control => translateControlValue(control, locale));
       }};
       const translateTree = (root, locale) => {{
         if (root instanceof Text) {{ translateTextNode(root, locale); return; }}
@@ -766,6 +790,7 @@ def browser_i18n_bootstrap_js() -> str:
         if (persist) localStorage.setItem(localeKey, locale);
         translateTree(document, locale);
         translateComboboxValues(locale);
+        translateApplicationValues(locale);
         syncLanguageSwitch(locale);
         document.querySelector('#prismke-workspace')?.classList.add('i18n-ready');
         window.dispatchEvent(new CustomEvent('prismke:localechange', {{detail: {{locale}}}}));
@@ -799,7 +824,11 @@ def browser_i18n_bootstrap_js() -> str:
       }}
       if (!window.__prismkeI18nValueTimer) {{
         window.__prismkeI18nValueTimer = window.setInterval(
-          () => translateComboboxValues(window.__prismkeLocale || 'en'),
+          () => {{
+            const locale = window.__prismkeLocale || 'en';
+            translateComboboxValues(locale);
+            translateApplicationValues(locale);
+          }},
           100
         );
       }}

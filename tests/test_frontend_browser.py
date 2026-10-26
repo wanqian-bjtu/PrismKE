@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -114,6 +115,13 @@ def _visible_nontechnical_chinese(page: Page) -> list[str]:
             const text = (node.textContent || '').trim();
             if (/[\u4e00-\u9fff]/.test(text)) results.push(text);
           }
+          document.querySelectorAll('input, textarea').forEach(control => {
+            if (control.type === 'hidden' || control.closest('[data-prismke-no-i18n]')) return;
+            const style = getComputedStyle(control);
+            if (style.display === 'none' || style.visibility === 'hidden') return;
+            const value = control.value || '';
+            if (/[\u4e00-\u9fff]/.test(value)) results.push(value);
+          });
           return [...new Set(results)];
         }
         """
@@ -139,12 +147,31 @@ def test_default_english_schema_error_and_chinese_switch_preserve_output(
         expect(page.get_by_text("Schema has not been validated", exact=True)).to_be_visible()
 
         page.get_by_text("Models and graph storage", exact=True).click()
+        expect(page.locator("#ocr-device input[role='combobox']")).to_have_value(
+            "Automatic (current: CPU)"
+        )
+        expect(page.locator("#key-configuration-status")).not_to_contain_text("密钥状态")
+        expect(page.locator("#key-configuration-status")).to_contain_text("Key status")
+        expect(page.locator("#neo4j-password-status")).not_to_contain_text("密码")
         operator = page.locator("#config-operator textarea, #config-operator input")
+        expect(operator).to_have_value("Administrator")
+        page.get_by_role("button", name="Save settings", exact=True).click()
+        settings_outcome = page.locator("#settings-outcome textarea, #settings-outcome input")
+        expect(settings_outcome).to_have_value(
+            re.compile(r"^Settings saved · Graph store "),
+            timeout=15_000,
+        )
+        assert settings_outcome.input_value().startswith("Settings saved · Graph store ")
         operator.fill("paper-demo")
         page.locator("#language-switch input[type='checkbox']").click()
         expect(page.locator("html")).to_have_attribute("lang", "zh-CN", timeout=15_000)
         expect(page.get_by_text("工作区", exact=True)).to_be_visible()
         expect(operator).to_have_value("paper-demo")
+        expect(page.locator("#ocr-device input[role='combobox']")).to_have_value(
+            "自动（当前：CPU）"
+        )
+        expect(settings_outcome).to_have_value(re.compile(r"^设置已保存 · 图存储 "), timeout=15_000)
+        assert settings_outcome.input_value().startswith("设置已保存 · 图存储 ")
         page.get_by_role("button", name="校验 Schema", exact=True).click()
         chinese_toast = page.locator(".toast-wrap, [role='alert']").filter(has_text="错误").last
         chinese_toast.wait_for(state="visible", timeout=15_000)
