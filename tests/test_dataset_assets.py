@@ -28,9 +28,16 @@ def test_synthetic_dataset_is_deterministic_and_covers_required_formats(tmp_path
         "complex/multimodal-evaluation.pdf",
         "images/atlasvision-x1.png",
         "images/atlasvision-x1.jpg",
+        "images/harbor-laboratory-deployment.jpg",
+        "images/inspection-performance-chart.jpg",
         "json/nested-research-data.json",
         "expected/expected-results.json",
+        "README.md",
     } <= first_records.keys()
+    report = (first / "native" / "research-brief.txt").read_text(encoding="utf-8")
+    assert len(report.split()) > 700
+    assert "Executive summary" in report
+    assert "Governance limitations and conclusion" in report
 
 
 def test_synthetic_pdf_routing_signals(tmp_path: Path) -> None:
@@ -55,6 +62,6 @@ def test_nested_json_preserves_array_order_and_expected_paths(tmp_path: Path) ->
         "Lin Yue",
         "Maya Chen",
     ]
-    assert payload["products"][0]["metrics"]["notes"] is None
+    assert payload["products"][0]["evaluation"]["notes"] is None
     expected = json.loads((root / "expected" / "expected-results.json").read_text())
-    assert "$.products[0].metrics.accuracy" in expected["json_paths"]
+    assert "$.products[0].evaluation.modes[2].accuracy" in expected["json_paths"]

@@ -1,7 +1,7 @@
 {
   "dataset": {
     "fictional": true,
-    "name": "PrismKE synthetic multimodal fixture"
+    "name": "AtlasVision X1 pilot evaluation"
   },
   "events": [
     {
@@ -10,11 +10,11 @@
         "AtlasVision X1",
         "Harbor Laboratory"
       ],
+      "status": "completed",
       "type": "pilot_deployment"
     }
   ],
   "organization": {
-    "founded": 2021,
     "location": {
       "city": "Shanghai",
       "site": "Harbor Laboratory"
@@ -34,8 +34,24 @@
   },
   "products": [
     {
-      "metrics": {
-        "accuracy": 0.942,
+      "evaluation": {
+        "modes": [
+          {
+            "accuracy": "88.0%",
+            "correct": 440,
+            "name": "Native text"
+          },
+          {
+            "accuracy": "91.0%",
+            "correct": 455,
+            "name": "OCR assisted"
+          },
+          {
+            "accuracy": "94.2%",
+            "correct": 471,
+            "name": "Vision language"
+          }
+        ],
         "notes": null,
         "samples": 500
       },

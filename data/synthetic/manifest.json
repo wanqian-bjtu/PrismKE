@@ -1,62 +1,78 @@
 {
+  "document_title": "AtlasVision X1 Pilot Evaluation Report",
   "fictional": true,
   "files": [
     {
-      "bytes": 39408,
+      "bytes": 313746,
       "path": "complex/multimodal-evaluation.pdf",
-      "sha256": "4347cd38d50bb06d4bd99b718a77351f4dfdf2e3b8445adefb20025426b83922"
+      "sha256": "707ad4d4bcfb2d0712704c93eeef05592d60aac83f0ae5fd4970978580d21f16"
     },
     {
-      "bytes": 3534,
+      "bytes": 4881,
       "path": "expected/expected-results.json",
-      "sha256": "b5486501a48ab318b5f6a164df05e19553b1dea39ee727d14363879d128ec88d"
+      "sha256": "482f1624387fc5f17c7a7587aa64c76eb6fdf055ee6d934e89bdeb7850eb1c36"
     },
     {
-      "bytes": 102757,
+      "bytes": 100330,
       "path": "images/atlasvision-x1.jpg",
-      "sha256": "1ded97d82b3ff23f716d21eb3b9d1a350b2f934350462ec0e93f9a33f78443eb"
+      "sha256": "8d1b7dd38edcd8e6dc8841c66eeff17bcdfb5e28f017e631620dba447508983b"
     },
     {
       "bytes": 2881784,
       "path": "images/atlasvision-x1.png",
-      "sha256": "406e0d07c1981286185faaa6981765ff3b453ae8827030d4ba2e13e5a7fd2963"
+      "sha256": "0a97a16b5cf745e4d7667b79f15c3438623549fcdcfb5efb772d76fdc286427a"
     },
     {
-      "bytes": 1073,
+      "bytes": 116759,
+      "path": "images/harbor-laboratory-deployment.jpg",
+      "sha256": "673a522f50781e006665b57eaff0d2ebd2ec43bc6969ddb3033712da544bbce6"
+    },
+    {
+      "bytes": 89876,
+      "path": "images/inspection-performance-chart.jpg",
+      "sha256": "248ab99e8225b1b85f312ccf174a4c2d7cef95a216e7ba04d98cae83532c5e53"
+    },
+    {
+      "bytes": 1446,
       "path": "json/nested-research-data.json",
-      "sha256": "c21dff175058050a797dfbc6146428f0b1277e05860c920460c42c82b7cdb038"
+      "sha256": "d6ce2923ee38e0152c56f11b8f0be0b49d5d58ecad3a623a95d88518c15da9ad"
     },
     {
-      "bytes": 76944,
+      "bytes": 207272,
       "path": "native/research-brief.docx",
-      "sha256": "579aa8be273927e9f199a45450f1f7acf58584a2bb429cdac6902c2019659622"
+      "sha256": "4647faaeb2e72bb2393962d72a8214ddaba706213f134a7d696d5cd5837127b7"
     },
     {
-      "bytes": 633,
+      "bytes": 5743,
       "path": "native/research-brief.html",
-      "sha256": "331567a7f3e4aa0393070680803a7b5b9bff41bd4ae3b9aee6bcaaacaf9d1734"
+      "sha256": "45e9222a8a194398157949ae0609d43a3779dfa03457d89ba92fb4ef5c03bbf7"
     },
     {
-      "bytes": 417,
+      "bytes": 5202,
       "path": "native/research-brief.md",
-      "sha256": "c938012fdf46ec38409301676291b32a231626fe4576d4e337385d58750d0011"
+      "sha256": "61f2a4ec6cf706f9cb60c3cf74016d5c07cae6e48a8593130774eeb23878f0e8"
     },
     {
-      "bytes": 1605,
+      "bytes": 41137,
       "path": "native/research-brief.pdf",
-      "sha256": "b56d3faf7e4f6ec3e1ea0cd7a34dd17e9ed4306a18edfbd08e4a1d469183e203"
+      "sha256": "74efea8489bad841df19c890ecd670e73e78c9929454293e7789fd2ff7e565ad"
     },
     {
-      "bytes": 381,
+      "bytes": 5103,
       "path": "native/research-brief.txt",
-      "sha256": "0dda36909fb6f9726054693ee04f3e2ed076646f0f8e1d6dc3f47cb9dd211207"
+      "sha256": "cb0df9af4e3be9f5546217339620680d5d69bf3cc1ca9f1209ca4bf2e423a45c"
     },
     {
-      "bytes": 65575,
+      "bytes": 359,
+      "path": "README.md",
+      "sha256": "460265919c0e4fe4423c8942fc51be28dc4c4d13965b39c47d991d78fccbb9de"
+    },
+    {
+      "bytes": 284031,
       "path": "scanned/bilingual-scan.pdf",
-      "sha256": "a19c7386117188a760bdf7a6162ab8fdf30ccfa13a658f5a0c73dd31094a1201"
+      "sha256": "7c4ffc2296e755b0b9a7f955335a7875a5ad7927bafd7811398815809dd8df73"
     }
   ],
   "generator_seed": 140013,
-  "schema_version": 1
+  "schema_version": 2
 }

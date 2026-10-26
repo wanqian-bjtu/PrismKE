@@ -1,4 +1,17 @@
 {
+  "attributes": [
+    {
+      "predicate": "pilot_samples",
+      "subject": "AtlasVision X1",
+      "value": 500
+    },
+    {
+      "predicate": "vision_language_accuracy",
+      "subject": "AtlasVision X1",
+      "value": 0.942
+    }
+  ],
+  "document_title": "AtlasVision X1 Pilot Evaluation Report",
   "entities": [
     {
       "name": "Nebula Technology",
@@ -10,6 +23,10 @@
     },
     {
       "name": "Lin Yue",
+      "type": "Person"
+    },
+    {
+      "name": "Maya Chen",
       "type": "Person"
     },
     {
@@ -27,126 +44,192 @@
     "visual_only_assertions_require_review": true
   },
   "image_regions": {
-    "amber_light": [
-      845,
-      490,
-      905,
-      550
-    ],
-    "blue_sensor_1": [
-      360,
-      320,
-      452,
-      412
-    ],
-    "blue_sensor_2": [
-      560,
-      320,
-      652,
-      412
-    ],
-    "blue_sensor_3": [
-      760,
-      320,
-      852,
-      412
-    ],
-    "product": [
-      240,
-      230,
-      960,
-      570
-    ]
+    "deployment": {
+      "camera_region": [
+        560,
+        355,
+        750,
+        555
+      ],
+      "conveyor": [
+        150,
+        375,
+        1210,
+        530
+      ],
+      "human_review_desk": [
+        925,
+        210,
+        1245,
+        340
+      ],
+      "inspection_station": [
+        485,
+        210,
+        820,
+        340
+      ],
+      "sample_intake": [
+        120,
+        235,
+        350,
+        325
+      ]
+    },
+    "performance_chart": {
+      "native_text": [
+        255,
+        252,
+        425,
+        700
+      ],
+      "ocr_assisted": [
+        600,
+        236,
+        770,
+        700
+      ],
+      "vision_language": [
+        945,
+        220,
+        1115,
+        700
+      ]
+    },
+    "product": {
+      "amber_light": [
+        840,
+        492,
+        904,
+        556
+      ],
+      "blue_sensor_1": [
+        370,
+        390,
+        460,
+        480
+      ],
+      "blue_sensor_2": [
+        555,
+        390,
+        645,
+        480
+      ],
+      "blue_sensor_3": [
+        740,
+        390,
+        830,
+        480
+      ],
+      "product": [
+        255,
+        255,
+        945,
+        565
+      ]
+    }
   },
   "json_paths": [
     "$.organization.name",
     "$.organization.researchers[0].name",
-    "$.products[0].metrics.accuracy",
-    "$.products[0].metrics.notes",
+    "$.products[0].evaluation.modes[2].accuracy",
+    "$.products[0].evaluation.notes",
     "$.events[0].participants[1]"
   ],
   "locations": {
     "complex_pdf": {
       "expected_parser": "mineru",
       "formula_bbox": [
-        70,
-        360,
-        525,
-        430
+        75,
+        495,
+        520,
+        557
       ],
       "media": [
         "image",
         "chart",
         "table",
-        "formula"
+        "formula",
+        "page_render"
       ],
-      "pages": 2,
+      "pages": 3,
       "table_bbox": [
-        45,
-        120,
-        550,
-        300
+        510,
+        105,
+        800,
+        305
       ]
     },
     "native_pdf": {
       "blocks": [
         {
           "bbox": [
-            70.0,
-            260.0,
-            525.0,
-            322.0
+            58.0,
+            490.0,
+            537.0,
+            775.0
           ],
-          "fact": "Nebula Technology developed AtlasVision X1 in 2026.",
-          "page": 1
+          "page": 1,
+          "section": "Executive summary"
         },
         {
           "bbox": [
-            70.0,
-            338.0,
-            525.0,
-            400.0
+            58.0,
+            89.0,
+            537.0,
+            239.0
           ],
-          "fact": "Lead researcher Lin Yue works for Nebula Technology.",
-          "page": 1
+          "page": 2,
+          "section": "Operational context"
         },
         {
           "bbox": [
-            70.0,
-            416.0,
-            525.0,
-            478.0
+            58.0,
+            307.0,
+            537.0,
+            457.0
           ],
-          "fact": "AtlasVision X1 uses three blue optical sensors and one amber status light.",
-          "page": 1
+          "page": 2,
+          "section": "System design and evidence capture"
         },
         {
           "bbox": [
-            70.0,
-            494.0,
-            525.0,
-            556.0
+            58.0,
+            89.0,
+            537.0,
+            239.0
           ],
-          "fact": "The pilot deployment took place at Harbor Laboratory in Shanghai.",
-          "page": 1
+          "page": 3,
+          "section": "Evaluation method"
         },
         {
           "bbox": [
-            70.0,
-            572.0,
-            525.0,
-            634.0
+            58.0,
+            307.0,
+            537.0,
+            457.0
           ],
-          "fact": "Measured inspection accuracy was 94.2 percent across 500 synthetic samples.",
-          "page": 1
+          "page": 3,
+          "section": "Results and interpretation"
+        },
+        {
+          "bbox": [
+            58.0,
+            89.0,
+            537.0,
+            449.0
+          ],
+          "page": 4,
+          "section": "Governance limitations and conclusion"
         }
       ],
-      "expected_parser": "pymupdf"
+      "expected_parser": "pymupdf",
+      "pages": 4
     },
     "scanned_pdf": {
       "expected_parser": "mineru",
       "native_text_characters": 0,
-      "page": 1,
+      "pages": 2,
       "whole_page_bbox": [
         0,
         0,
@@ -163,6 +246,11 @@
     ],
     [
       "Lin Yue",
+      "works_for",
+      "Nebula Technology"
+    ],
+    [
+      "Maya Chen",
       "works_for",
       "Nebula Technology"
     ],
