@@ -11,6 +11,8 @@ import orjson
 from frontend.i18n import browser_i18n_bootstrap_js
 from frontend.layout import (
     build_brand_header,
+    compact_checkbox,
+    compact_dropdown,
     first_page,
     group_choices,
     page_choices,
@@ -1557,16 +1559,22 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
 
             with gr.Tab("视觉审核", id="visual-review"):
                 page_header(gr, "visual-review")
-                with gr.Row(equal_height=True, elem_classes="equal-height-action-row"):
-                    visual_review_run = gr.Dropdown(
-                        label="运行",
-                        min_width=0,
-                        **empty_dropdown_kwargs("暂无运行"),
-                    )
+                with gr.Row(equal_height=True, elem_classes="compact-action-row"):
+                    with gr.Row(
+                        scale=4,
+                        equal_height=True,
+                        elem_classes="compact-action-fields",
+                    ):
+                        visual_review_run = compact_dropdown(
+                            gr,
+                            label="运行",
+                            min_width=0,
+                            **empty_dropdown_kwargs("暂无运行"),
+                        )
                     visual_review_refresh = gr.Button(
                         "刷新视觉审核队列",
                         min_width=180,
-                        elem_classes="full-height-action",
+                        elem_classes="compact-action-button",
                     )
                 visual_review_table = gr.Dataframe(
                     headers=["Task ID", "对象类型", "候选 ID", "状态", "决定", "版本", "原因"],
@@ -1772,25 +1780,29 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     elem_id="case-filter-row",
                     elem_classes="case-filter-row",
                 ):
-                    case_type_filter = gr.Dropdown(
-                        ["全部", "good", "bad"],
+                    case_type_filter = compact_dropdown(
+                        gr,
+                        choices=["全部", "good", "bad"],
                         value="全部",
                         label="案例类型",
                         min_width=0,
                     )
-                    case_task_filter = gr.Dropdown(
-                        ["全部", "entity", "claim"],
+                    case_task_filter = compact_dropdown(
+                        gr,
+                        choices=["全部", "entity", "claim"],
                         value="全部",
                         label="任务类型",
                         min_width=0,
                     )
-                    case_language_filter = gr.Dropdown(
-                        ["全部", "zh", "en"],
+                    case_language_filter = compact_dropdown(
+                        gr,
+                        choices=["全部", "zh", "en"],
                         value="全部",
                         label="语言",
                         min_width=0,
                     )
-                    case_include_disabled = gr.Checkbox(
+                    case_include_disabled = compact_checkbox(
+                        gr,
                         label="包含已停用",
                         value=False,
                         scale=0,

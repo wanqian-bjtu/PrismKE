@@ -7,7 +7,7 @@ from typing import Any, Literal, cast
 
 from PIL import Image
 
-from frontend.layout import page_header
+from frontend.layout import compact_dropdown, page_header
 from frontend.presentation import (
     dropdown_kwargs,
     dropdown_update,
@@ -171,28 +171,32 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
     service = controller.service
     run_choices = controller.runs()
     page_header(gr, "entity-review" if kind == "entity" else "claim-review")
-    with gr.Row(equal_height=True, elem_classes="equal-height-action-row"):
-        run = gr.Dropdown(
-            label="运行",
-            min_width=0,
-            **dropdown_kwargs(run_choices, empty_label="暂无运行"),
-        )
-        status = gr.Dropdown(
-            [("待审核", "pending"), ("已处理", "resolved"), ("全部", "all")],
-            value="pending",
-            label="任务状态",
-            min_width=0,
-        )
-        risk = gr.Dropdown(
-            [("全部", "all"), ("风险提示", "flagged")],
-            value="all",
-            label="风险",
-            min_width=0,
-        )
+    with gr.Row(equal_height=True, elem_classes="compact-action-row"):
+        with gr.Row(scale=4, equal_height=True, elem_classes="compact-action-fields"):
+            run = compact_dropdown(
+                gr,
+                label="运行",
+                min_width=0,
+                **dropdown_kwargs(run_choices, empty_label="暂无运行"),
+            )
+            status = compact_dropdown(
+                gr,
+                choices=[("待审核", "pending"), ("已处理", "resolved"), ("全部", "all")],
+                value="pending",
+                label="任务状态",
+                min_width=0,
+            )
+            risk = compact_dropdown(
+                gr,
+                choices=[("全部", "all"), ("风险提示", "flagged")],
+                value="all",
+                label="风险",
+                min_width=0,
+            )
         refresh = gr.Button(
             "刷新",
             min_width=140,
-            elem_classes="full-height-action",
+            elem_classes="compact-action-button",
         )
     progress = gr.Textbox(label="审核进度", interactive=False)
     table = gr.Dataframe(

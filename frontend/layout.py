@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from html import escape
 from pathlib import Path
 from typing import Any
 
@@ -119,3 +120,55 @@ def build_brand_header(gr: Any, version: str) -> Any:
 def page_header(gr: Any, page_id: str) -> None:
     title, description = PAGE_META[page_id]
     gr.HTML(f'<header class="workspace-page-header"><h1>{title}</h1><p>{description}</p></header>')
+
+
+def compact_dropdown(
+    gr: Any,
+    *,
+    label: str,
+    scale: int = 1,
+    min_width: int = 0,
+    elem_classes: str | list[str] | None = None,
+    **kwargs: Any,
+) -> Any:
+    """Build a horizontally labelled dropdown without changing its submitted value."""
+    classes = ["compact-inline-field"]
+    if isinstance(elem_classes, str):
+        classes.append(elem_classes)
+    elif elem_classes:
+        classes.extend(elem_classes)
+    with gr.Column(scale=scale, min_width=min_width, elem_classes=classes):
+        gr.HTML(
+            f'<span class="compact-inline-label">{escape(label)}</span>',
+            elem_classes="compact-inline-label-host",
+        )
+        return gr.Dropdown(
+            label=label,
+            show_label=False,
+            container=False,
+            min_width=0,
+            **kwargs,
+        )
+
+
+def compact_checkbox(
+    gr: Any,
+    *,
+    label: str,
+    scale: int = 0,
+    min_width: int = 150,
+    **kwargs: Any,
+) -> Any:
+    """Build a compact checkbox aligned with horizontally labelled fields."""
+    with gr.Column(
+        scale=scale,
+        min_width=min_width,
+        elem_classes=["compact-inline-field", "compact-inline-checkbox"],
+    ):
+        return gr.Checkbox(
+            label=label,
+            show_label=False,
+            container=False,
+            min_width=0,
+            **kwargs,
+        )

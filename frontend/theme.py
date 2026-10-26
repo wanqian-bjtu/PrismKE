@@ -421,29 +421,75 @@ body:has(#workspace-sidebar.open) #workspace-sidebar-toggle::before {
   padding: 0 !important;
 }
 
-.equal-height-action-row {
+.compact-action-row {
   align-items: stretch !important;
   flex-wrap: nowrap !important;
+  gap: 12px !important;
 }
 
-.block.full-height-action {
-  align-self: stretch !important;
+.compact-action-fields {
   display: flex !important;
-  height: auto !important;
-  min-height: 0 !important;
+  flex: 4 1 0 !important;
+  align-items: center !important;
+  gap: 18px !important;
+  min-width: 0 !important;
+  min-height: 64px !important;
+  padding: 10px 14px !important;
+  border: 1px solid var(--prism-border) !important;
+  border-radius: var(--prism-radius) !important;
+  background: var(--prism-surface) !important;
 }
 
-.equal-height-action-row > button.full-height-action {
+.compact-action-row > button.compact-action-button {
+  flex: 1 1 0 !important;
   align-self: stretch !important;
   height: auto !important;
-  min-height: 100% !important;
+  min-height: 64px !important;
+  margin: 0 !important;
 }
 
-.block.full-height-action button {
-  flex: 1 1 auto !important;
+.compact-inline-field,
+.compact-inline-field > .form {
+  display: grid !important;
+  grid-template-columns: max-content minmax(0, 1fr) !important;
+  align-items: center !important;
+  gap: 10px !important;
   width: 100% !important;
-  height: 100% !important;
-  min-height: 100% !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.compact-inline-label-host {
+  width: auto !important;
+  min-width: max-content !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.compact-inline-label {
+  display: block;
+  color: var(--body-text-color-subdued);
+  font-size: var(--text-sm);
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.compact-inline-field > .block,
+.compact-inline-field > .form > .block {
+  min-width: 0 !important;
+  margin: 0 !important;
+}
+
+.compact-inline-checkbox,
+.compact-inline-checkbox > .form {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  white-space: nowrap;
 }
 
 #visual-review-evidence-row {
@@ -483,23 +529,21 @@ body:has(#workspace-sidebar.open) #workspace-sidebar-toggle::before {
 }
 
 #case-filter-row {
-  align-items: flex-end !important;
-  flex-wrap: nowrap !important;
-}
-
-#case-filter-row > .form {
   display: grid !important;
-  grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(150px, auto);
+  grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(150px, auto) !important;
   align-items: stretch !important;
+  flex-wrap: nowrap !important;
+  gap: 18px !important;
   width: 100% !important;
   min-width: 0 !important;
+  min-height: 64px !important;
+  padding: 10px 14px !important;
+  border: 1px solid var(--prism-border) !important;
+  border-radius: var(--prism-radius) !important;
+  background: var(--prism-surface) !important;
 }
 
-#case-filter-row > .form > * { min-width: 0 !important; }
-
-#case-filter-row > .form > .block:last-child .checkbox-container {
-  align-self: center !important;
-}
+#case-filter-row > * { min-width: 0 !important; }
 
 #settings-outcome.block {
   height: auto !important;
@@ -637,18 +681,27 @@ table { font-size: 13px; }
   .workspace-version { font-size: 11px; }
   #workspace-tabs { width: 90%; padding-bottom: 24px; }
   .workspace-page-header h1 { font-size: 21px; }
-  .equal-height-action-row,
+  .compact-action-row,
   #visual-review-evidence-row,
   #case-filter-row {
     flex-direction: column !important;
     flex-wrap: wrap !important;
   }
-  .block.full-height-action,
-  .block.full-height-action button,
-  button.full-height-action {
+  .compact-action-fields {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 10px !important;
+    min-height: 0 !important;
+  }
+  button.compact-action-button {
     width: 100% !important;
     height: 44px !important;
     min-height: 44px !important;
+    flex: 0 0 44px !important;
+  }
+  .compact-inline-field,
+  .compact-inline-field > .form {
+    grid-template-columns: minmax(88px, max-content) minmax(0, 1fr) !important;
   }
   #visual-review-preview,
   #visual-review-detail {
@@ -662,9 +715,10 @@ table { font-size: 13px; }
     flex: 1 1 auto !important;
     width: 100% !important;
   }
-  #case-filter-row > .form {
+  #case-filter-row {
     display: grid !important;
     grid-template-columns: 1fr !important;
+    gap: 10px !important;
     width: 100% !important;
   }
   .table-wrap {

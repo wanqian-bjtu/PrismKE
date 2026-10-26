@@ -277,10 +277,25 @@ def test_status_cards_actions_and_visual_review_are_geometrically_aligned(
             ("media-knowledge", "visual-review"),
         ):
             _open_workspace_page(page, group_id, page_id)
-            row_box = page.locator(".equal-height-action-row:visible").first.bounding_box()
-            button_box = page.locator("button.full-height-action:visible").first.bounding_box()
-            assert row_box is not None and button_box is not None
-            assert abs(row_box["height"] - button_box["height"]) <= 2
+            action_row = page.locator(".compact-action-row:visible").first
+            field_panel = action_row.locator(":scope > .compact-action-fields")
+            button = action_row.locator("button.compact-action-button")
+            panel_box = field_panel.bounding_box()
+            button_box = button.bounding_box()
+            assert panel_box is not None and button_box is not None
+            assert 60 <= panel_box["height"] <= 72
+            assert abs(panel_box["height"] - button_box["height"]) <= 2
+            alignments = action_row.locator(".compact-inline-field").evaluate_all(
+                """fields => fields.map(field => {
+                  const label = field.querySelector('.compact-inline-label');
+                  const input = field.querySelector('input');
+                  if (!label || !input) return null;
+                  const a = label.getBoundingClientRect();
+                  const b = input.getBoundingClientRect();
+                  return Math.abs((a.y + a.height / 2) - (b.y + b.height / 2));
+                })"""
+            )
+            assert alignments and all(item is not None and item <= 3 for item in alignments)
 
         preview_box = page.locator("#visual-review-preview").bounding_box()
         detail_box = page.locator("#visual-review-detail").bounding_box()
@@ -308,7 +323,7 @@ def test_case_filters_use_responsive_single_row_layout(
         page.locator("#workspace-logo img").wait_for(state="visible")
         _open_workspace_page(page, "cases-reflection", "cases")
         row_positions = page.locator("#case-filter-row").evaluate(
-            """element => [...element.querySelectorAll(':scope > .form > .block')]
+            """element => [...element.querySelectorAll(':scope > .compact-inline-field')]
               .map(child => child.getBoundingClientRect())
               .filter(rect => rect.width > 0 && rect.height > 0)
               .map(rect => Math.round(rect.y))"""
@@ -316,6 +331,19 @@ def test_case_filters_use_responsive_single_row_layout(
         assert len(row_positions) == 4
         if single_row:
             assert max(row_positions) - min(row_positions) <= 2
+            alignments = page.locator(
+                "#case-filter-row .compact-inline-field:not(.compact-inline-checkbox)"
+            ).evaluate_all(
+                """fields => fields.map(field => {
+                  const label = field.querySelector('.compact-inline-label');
+                  const input = field.querySelector('input');
+                  const a = label.getBoundingClientRect();
+                  const b = input.getBoundingClientRect();
+                  return Math.abs((a.y + a.height / 2) - (b.y + b.height / 2));
+                })"""
+            )
+            assert len(alignments) == 3
+            assert all(item <= 3 for item in alignments)
         else:
             assert len(set(row_positions)) > 1
         assert page.evaluate("document.documentElement.scrollWidth - window.innerWidth") <= 1

@@ -3,7 +3,7 @@
 from typing import Any
 from uuid import uuid4
 
-from frontend.layout import page_header
+from frontend.layout import compact_dropdown, page_header
 from frontend.presentation import (
     dropdown_update,
     empty_dropdown_kwargs,
@@ -211,18 +211,19 @@ def build_execution_tab(
 
     with gr.Tab("执行任务", id="execution"):
         page_header(gr, "execution")
-        with gr.Row(equal_height=True, elem_classes="equal-height-action-row"):
-            run = gr.Dropdown(
-                label="运行",
-                scale=4,
-                min_width=0,
-                **empty_dropdown_kwargs("暂无运行"),
-            )
+        with gr.Row(equal_height=True, elem_classes="compact-action-row"):
+            with gr.Row(scale=4, equal_height=True, elem_classes="compact-action-fields"):
+                run = compact_dropdown(
+                    gr,
+                    label="运行",
+                    min_width=0,
+                    **empty_dropdown_kwargs("暂无运行"),
+                )
             refresh_button = gr.Button(
                 "刷新",
                 scale=1,
                 min_width=140,
-                elem_classes="full-height-action",
+                elem_classes="compact-action-button",
             )
         summary = gr.Markdown("### 尚无执行任务")
         with gr.Accordion("PDF 解析决定", open=True):
