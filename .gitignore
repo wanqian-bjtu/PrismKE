@@ -14,7 +14,15 @@ htmlcov/
 dist/
 build/
 runtime/
-data/
+# Dataset tooling and synthetic fixtures are versioned. Public source binaries and
+# derived copies are reproducible from the locked manifests and stay out of Git.
+data/public/originals/
+data/public/sanitized/
+data/public/smoke/
+data/public/provenance/local/
+data/public/*.part
+data/**/dataset-report.json
+/tmp/
 models/
 evidence/
 checkpoints/

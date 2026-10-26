@@ -1,0 +1,193 @@
+{
+  "entities": [
+    {
+      "name": "Nebula Technology",
+      "type": "Organization"
+    },
+    {
+      "name": "AtlasVision X1",
+      "type": "Product"
+    },
+    {
+      "name": "Lin Yue",
+      "type": "Person"
+    },
+    {
+      "name": "Harbor Laboratory",
+      "type": "Facility"
+    },
+    {
+      "name": "Shanghai",
+      "type": "Location"
+    }
+  ],
+  "fictional": true,
+  "graph_policy": {
+    "text_supported_relations_may_enter_commit": true,
+    "visual_only_assertions_require_review": true
+  },
+  "image_regions": {
+    "amber_light": [
+      845,
+      490,
+      905,
+      550
+    ],
+    "blue_sensor_1": [
+      360,
+      320,
+      452,
+      412
+    ],
+    "blue_sensor_2": [
+      560,
+      320,
+      652,
+      412
+    ],
+    "blue_sensor_3": [
+      760,
+      320,
+      852,
+      412
+    ],
+    "product": [
+      240,
+      230,
+      960,
+      570
+    ]
+  },
+  "json_paths": [
+    "$.organization.name",
+    "$.organization.researchers[0].name",
+    "$.products[0].metrics.accuracy",
+    "$.products[0].metrics.notes",
+    "$.events[0].participants[1]"
+  ],
+  "locations": {
+    "complex_pdf": {
+      "expected_parser": "mineru",
+      "formula_bbox": [
+        70,
+        360,
+        525,
+        430
+      ],
+      "media": [
+        "image",
+        "chart",
+        "table",
+        "formula"
+      ],
+      "pages": 2,
+      "table_bbox": [
+        45,
+        120,
+        550,
+        300
+      ]
+    },
+    "native_pdf": {
+      "blocks": [
+        {
+          "bbox": [
+            70.0,
+            260.0,
+            525.0,
+            322.0
+          ],
+          "fact": "Nebula Technology developed AtlasVision X1 in 2026.",
+          "page": 1
+        },
+        {
+          "bbox": [
+            70.0,
+            338.0,
+            525.0,
+            400.0
+          ],
+          "fact": "Lead researcher Lin Yue works for Nebula Technology.",
+          "page": 1
+        },
+        {
+          "bbox": [
+            70.0,
+            416.0,
+            525.0,
+            478.0
+          ],
+          "fact": "AtlasVision X1 uses three blue optical sensors and one amber status light.",
+          "page": 1
+        },
+        {
+          "bbox": [
+            70.0,
+            494.0,
+            525.0,
+            556.0
+          ],
+          "fact": "The pilot deployment took place at Harbor Laboratory in Shanghai.",
+          "page": 1
+        },
+        {
+          "bbox": [
+            70.0,
+            572.0,
+            525.0,
+            634.0
+          ],
+          "fact": "Measured inspection accuracy was 94.2 percent across 500 synthetic samples.",
+          "page": 1
+        }
+      ],
+      "expected_parser": "pymupdf"
+    },
+    "scanned_pdf": {
+      "expected_parser": "mineru",
+      "native_text_characters": 0,
+      "page": 1,
+      "whole_page_bbox": [
+        0,
+        0,
+        595,
+        842
+      ]
+    }
+  },
+  "relations": [
+    [
+      "AtlasVision X1",
+      "developed_by",
+      "Nebula Technology"
+    ],
+    [
+      "Lin Yue",
+      "works_for",
+      "Nebula Technology"
+    ],
+    [
+      "AtlasVision X1",
+      "deployed_at",
+      "Harbor Laboratory"
+    ],
+    [
+      "Harbor Laboratory",
+      "located_in",
+      "Shanghai"
+    ]
+  ],
+  "seed": 140013,
+  "visual_assertions_requiring_review": [
+    {
+      "predicate": "blue_sensor_count",
+      "subject": "AtlasVision X1",
+      "value": 3
+    },
+    {
+      "predicate": "status_light_color",
+      "subject": "AtlasVision X1",
+      "value": "amber"
+    }
+  ]
+}

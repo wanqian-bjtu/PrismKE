@@ -1,0 +1,58 @@
+{
+  "dataset": {
+    "fictional": true,
+    "name": "PrismKE synthetic multimodal fixture"
+  },
+  "events": [
+    {
+      "date": "2026-05-14",
+      "participants": [
+        "AtlasVision X1",
+        "Harbor Laboratory"
+      ],
+      "type": "pilot_deployment"
+    }
+  ],
+  "organization": {
+    "founded": 2021,
+    "location": {
+      "city": "Shanghai",
+      "site": "Harbor Laboratory"
+    },
+    "name": "Nebula Technology",
+    "name_zh": "星河科技",
+    "researchers": [
+      {
+        "name": "Lin Yue",
+        "role": "lead researcher"
+      },
+      {
+        "name": "Maya Chen",
+        "role": "validation engineer"
+      }
+    ]
+  },
+  "products": [
+    {
+      "metrics": {
+        "accuracy": 0.942,
+        "notes": null,
+        "samples": 500
+      },
+      "name": "AtlasVision X1",
+      "sensors": [
+        {
+          "color": "blue",
+          "count": 3,
+          "type": "optical"
+        },
+        {
+          "color": "amber",
+          "count": 1,
+          "type": "status light"
+        }
+      ],
+      "year": 2026
+    }
+  ]
+}

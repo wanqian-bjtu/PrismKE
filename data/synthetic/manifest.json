@@ -1,0 +1,62 @@
+{
+  "fictional": true,
+  "files": [
+    {
+      "bytes": 41457,
+      "path": "complex/multimodal-evaluation.pdf",
+      "sha256": "ea2cadf990bb8ce04e34af02e4c14d4a8c69af0d51738dcbaea034504b6bd478"
+    },
+    {
+      "bytes": 3534,
+      "path": "expected/expected-results.json",
+      "sha256": "b5486501a48ab318b5f6a164df05e19553b1dea39ee727d14363879d128ec88d"
+    },
+    {
+      "bytes": 102718,
+      "path": "images/atlasvision-x1.jpg",
+      "sha256": "2af154237b72256ea466471601d428ef614d00f567139642a95b505ca95b1683"
+    },
+    {
+      "bytes": 40827,
+      "path": "images/atlasvision-x1.png",
+      "sha256": "42bd01301dff5761b11ad10a3b9cf763f1cf123be9e5d55721be8357aef7a099"
+    },
+    {
+      "bytes": 1073,
+      "path": "json/nested-research-data.json",
+      "sha256": "c21dff175058050a797dfbc6146428f0b1277e05860c920460c42c82b7cdb038"
+    },
+    {
+      "bytes": 75056,
+      "path": "native/research-brief.docx",
+      "sha256": "18d73e4902662932909890edc27308caa1fc51556497572f5557ca4729471839"
+    },
+    {
+      "bytes": 633,
+      "path": "native/research-brief.html",
+      "sha256": "331567a7f3e4aa0393070680803a7b5b9bff41bd4ae3b9aee6bcaaacaf9d1734"
+    },
+    {
+      "bytes": 417,
+      "path": "native/research-brief.md",
+      "sha256": "c938012fdf46ec38409301676291b32a231626fe4576d4e337385d58750d0011"
+    },
+    {
+      "bytes": 1605,
+      "path": "native/research-brief.pdf",
+      "sha256": "b56d3faf7e4f6ec3e1ea0cd7a34dd17e9ed4306a18edfbd08e4a1d469183e203"
+    },
+    {
+      "bytes": 381,
+      "path": "native/research-brief.txt",
+      "sha256": "0dda36909fb6f9726054693ee04f3e2ed076646f0f8e1d6dc3f47cb9dd211207"
+    },
+    {
+      "bytes": 65575,
+      "path": "scanned/bilingual-scan.pdf",
+      "sha256": "a19c7386117188a760bdf7a6162ab8fdf30ccfa13a658f5a0c73dd31094a1201"
+    }
+  ],
+  "generator_seed": 140013,
+  "schema_version": 1
+}
