@@ -1,0 +1,98 @@
+schema_version: 1
+sources:
+  - id: bduk-annual-report-2023-2024
+    category: annual_report
+    title: Building Digital UK Annual Report and Accounts 2023 to 2024
+    landing_page: https://www.gov.uk/government/publications/building-digital-uk-annual-report-and-accounts-2023-to-2024/building-digital-uk-annual-report-and-accounts-2023-to-2024
+    download_url: https://assets.publishing.service.gov.uk/media/6759c4004cbda57cacd34719/BDUK_Annual_Reports-Accounts_2024_-_Certified_copy.pdf
+    filename: bduk-annual-report-2023-2024.pdf
+    media_type: application/pdf
+    max_bytes: 40000000
+    license_id: OGL-UK-3.0
+    license_url: https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/
+    attribution: Crown copyright 2024, Building Digital UK
+    third_party_caveat: true
+  - id: dvla-annual-report-2024-2025
+    category: annual_report
+    title: DVLA Annual Report and Accounts 2024 to 2025
+    landing_page: https://www.gov.uk/government/publications/dvla-annual-report-and-accounts-2024-to-2025
+    download_url: https://assets.publishing.service.gov.uk/media/687e00805f0f5104b9806beb/DVLA_annual_report_and_accounts_2024_to_2025.pdf
+    filename: dvla-annual-report-2024-2025.pdf
+    media_type: application/pdf
+    max_bytes: 25000000
+    license_id: OGL-UK-3.0
+    license_url: https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/
+    attribution: Crown copyright 2025, Driver and Vehicle Licensing Agency
+    third_party_caveat: true
+  - id: nist-ai-rmf-1.0
+    category: policy_report
+    title: Artificial Intelligence Risk Management Framework AI RMF 1.0
+    landing_page: https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-ai-rmf-10
+    download_url: https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.100-1.pdf
+    filename: nist-ai-rmf-1.0.pdf
+    media_type: application/pdf
+    max_bytes: 10000000
+    license_id: LicenseRef-NIST-USG-PD
+    license_url: https://www.nist.gov/open/copyright-fair-use-and-licensing-statements-srd-data-software-and-technical-series-publications
+    attribution: NIST AI 100-1, Elham Tabassi, 2023
+    third_party_caveat: false
+  - id: nist-ai-600-1
+    category: policy_report
+    title: Artificial Intelligence Risk Management Framework Generative AI Profile
+    landing_page: https://www.nist.gov/itl/ai-risk-management-framework
+    download_url: https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf
+    filename: nist-ai-600-1-generative-ai-profile.pdf
+    media_type: application/pdf
+    max_bytes: 15000000
+    license_id: LicenseRef-NIST-USG-PD
+    license_url: https://www.nist.gov/open/copyright-fair-use-and-licensing-statements-srd-data-software-and-technical-series-publications
+    attribution: NIST AI 600-1, 2024
+    third_party_caveat: false
+  - id: esg-kg-eacl-2026
+    category: open_paper
+    title: ESG-KG A Multi-modal Knowledge Graph System for Automated Compliance Assessment
+    landing_page: https://aclanthology.org/2026.eacl-demo.43/
+    download_url: https://aclanthology.org/2026.eacl-demo.43.pdf
+    filename: esg-kg-eacl-2026.pdf
+    media_type: application/pdf
+    max_bytes: 10000000
+    license_id: CC-BY-4.0
+    license_url: https://creativecommons.org/licenses/by/4.0/
+    attribution: Chang et al., EACL 2026, DOI 10.18653/v1/2026.eacl-demo.43
+    third_party_caveat: false
+  - id: itake-acl-2024
+    category: open_paper
+    title: ITAKE Interactive Unstructured Text Annotation and Knowledge Extraction System
+    landing_page: https://aclanthology.org/2024.acl-demos.31/
+    download_url: https://aclanthology.org/2024.acl-demos.31.pdf
+    filename: itake-acl-2024.pdf
+    media_type: application/pdf
+    max_bytes: 10000000
+    license_id: CC-BY-4.0
+    license_url: https://creativecommons.org/licenses/by/4.0/
+    attribution: Song et al., ACL 2024, DOI 10.18653/v1/2024.acl-demos.31
+    third_party_caveat: false
+  - id: nist-ai-rmf-playbook-json
+    category: open_json
+    title: NIST AI RMF Playbook JSON
+    landing_page: https://airc.nist.gov/airmf-resources/playbook/
+    download_url: https://airc.nist.gov/docs/playbook.json
+    filename: nist-ai-rmf-playbook.json
+    media_type: application/json
+    max_bytes: 10000000
+    license_id: LicenseRef-NIST-USG-PD
+    license_url: https://www.nist.gov/open/copyright-fair-use-and-licensing-statements-srd-data-software-and-technical-series-publications
+    attribution: NIST AI RMF Playbook
+    third_party_caveat: false
+  - id: wikidata-knowledge-graph-q33002955
+    category: open_json
+    title: Wikidata knowledge graph entity Q33002955
+    landing_page: https://www.wikidata.org/wiki/Q33002955
+    download_url: https://www.wikidata.org/wiki/Special:EntityData/Q33002955.json?flavor=simple
+    filename: wikidata-knowledge-graph-q33002955.json
+    media_type: application/json
+    max_bytes: 5000000
+    license_id: CC0-1.0
+    license_url: https://www.wikidata.org/wiki/Wikidata:Licensing
+    attribution: Wikidata contributors, entity Q33002955
+    third_party_caveat: false

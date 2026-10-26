@@ -4,6 +4,7 @@ import argparse
 import json
 import shutil
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,9 @@ from data.tools.common import (
 )
 
 SEED = 140013
+ASSET_ROOT = Path(__file__).resolve().parent / "assets"
+FONT_PATH = ASSET_ROOT / "DejaVuSans.ttf"
+FIXED_DOCUMENT_TIME = datetime(2026, 1, 1, tzinfo=UTC)
 FIXED_TITLE = "Nebula Technology AtlasVision X1 Research Brief"
 FACTS = [
     "Nebula Technology developed AtlasVision X1 in 2026.",
@@ -36,14 +40,9 @@ FACTS = [
 
 
 def _base_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    candidates = [
-        Path("C:/Windows/Fonts/arial.ttf"),
-        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return ImageFont.truetype(str(candidate), size=size)
-    return ImageFont.load_default()
+    if not FONT_PATH.is_file():
+        raise FileNotFoundError(f"Bundled synthetic fixture font is missing: {FONT_PATH}")
+    return ImageFont.truetype(str(FONT_PATH), size=size)
 
 
 def _product_image(path: Path, *, jpeg: bool) -> dict[str, list[int]]:
@@ -93,7 +92,9 @@ def _product_image(path: Path, *, jpeg: bool) -> dict[str, list[int]]:
     if jpeg:
         image.save(path, format="JPEG", quality=92, optimize=False, progressive=False, exif=b"")
     else:
-        image.save(path, format="PNG", optimize=False)
+        # Disable DEFLATE compression so libz/Pillow implementation differences do not
+        # change the fixture bytes between Windows and Linux.
+        image.save(path, format="PNG", optimize=False, compress_level=0)
     return {**sensor_boxes, "amber_light": list(light_box), "product": [240, 230, 960, 570]}
 
 
@@ -296,6 +297,9 @@ def _docx(path: Path, product_image: Path) -> None:
     document.core_properties.title = FIXED_TITLE
     document.core_properties.author = "PrismKE synthetic fixture generator"
     document.core_properties.subject = "Fictional multimodal knowledge extraction fixture"
+    document.core_properties.created = FIXED_DOCUMENT_TIME
+    document.core_properties.modified = FIXED_DOCUMENT_TIME
+    document.core_properties.last_printed = FIXED_DOCUMENT_TIME
     for style_name in ("Title", "Heading 1", "Heading 2"):
         style = document.styles[style_name]
         style.font.color.rgb = RGBColor(0, 0, 0)

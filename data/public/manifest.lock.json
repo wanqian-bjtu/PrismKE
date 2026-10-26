@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "bytes": 5443311,
+      "content_type": "application/pdf",
+      "download_url": "https://assets.publishing.service.gov.uk/media/6759c4004cbda57cacd34719/BDUK_Annual_Reports-Accounts_2024_-_Certified_copy.pdf",
+      "filename": "bduk-annual-report-2023-2024.pdf",
+      "id": "bduk-annual-report-2023-2024",
+      "license_id": "OGL-UK-3.0",
+      "media_type": "application/pdf",
+      "sha256": "4bf38a82e5c3f3d9c9adbda90e7f796a2d8df6b0c037b0a558d31d95edbeaee1"
+    },
+    {
+      "bytes": 16656721,
+      "content_type": "application/pdf",
+      "download_url": "https://assets.publishing.service.gov.uk/media/687e00805f0f5104b9806beb/DVLA_annual_report_and_accounts_2024_to_2025.pdf",
+      "filename": "dvla-annual-report-2024-2025.pdf",
+      "id": "dvla-annual-report-2024-2025",
+      "license_id": "OGL-UK-3.0",
+      "media_type": "application/pdf",
+      "sha256": "6efd6f88729a0d09aff887a9d442bf9cd301363e9ab511c03a64b2c903068975"
+    },
+    {
+      "bytes": 6500120,
+      "content_type": "application/pdf",
+      "download_url": "https://aclanthology.org/2026.eacl-demo.43.pdf",
+      "filename": "esg-kg-eacl-2026.pdf",
+      "id": "esg-kg-eacl-2026",
+      "license_id": "CC-BY-4.0",
+      "media_type": "application/pdf",
+      "sha256": "31dc39df4042ecbb5a22e24d48ce4b29adb74c7d509a0e2821da01e8a39c938d"
+    },
+    {
+      "bytes": 1392794,
+      "content_type": "application/pdf",
+      "download_url": "https://aclanthology.org/2024.acl-demos.31.pdf",
+      "filename": "itake-acl-2024.pdf",
+      "id": "itake-acl-2024",
+      "license_id": "CC-BY-4.0",
+      "media_type": "application/pdf",
+      "sha256": "5a3036b6473a7c77e66d70a0a3f2ff74159351ce40b4c65bb81fb8e652c80540"
+    },
+    {
+      "bytes": 1174643,
+      "content_type": "application/pdf",
+      "download_url": "https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf",
+      "filename": "nist-ai-600-1-generative-ai-profile.pdf",
+      "id": "nist-ai-600-1",
+      "license_id": "LicenseRef-NIST-USG-PD",
+      "media_type": "application/pdf",
+      "sha256": "6e73620ab6b64e90ef2c04bf0e0d6246185a2f4b1b13cab0df494496cff89b6a"
+    },
+    {
+      "bytes": 1946127,
+      "content_type": "application/pdf",
+      "download_url": "https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.100-1.pdf",
+      "filename": "nist-ai-rmf-1.0.pdf",
+      "id": "nist-ai-rmf-1.0",
+      "license_id": "LicenseRef-NIST-USG-PD",
+      "media_type": "application/pdf",
+      "sha256": "7576edb531d9848825814ee88e28b1795d3a84b435b4b797d3670eafdc4a89f1"
+    },
+    {
+      "bytes": 413720,
+      "content_type": "application/json",
+      "download_url": "https://airc.nist.gov/docs/playbook.json",
+      "filename": "nist-ai-rmf-playbook.json",
+      "id": "nist-ai-rmf-playbook-json",
+      "license_id": "LicenseRef-NIST-USG-PD",
+      "media_type": "application/json",
+      "sha256": "aecbee3d3c8820816d295b11d10fb61324b17c25c2ff39ee95e2aa5654555bba"
+    },
+    {
+      "bytes": 30930,
+      "content_type": "application/json",
+      "download_url": "https://www.wikidata.org/wiki/Special:EntityData/Q33002955.json?flavor=simple",
+      "filename": "wikidata-knowledge-graph-q33002955.json",
+      "id": "wikidata-knowledge-graph-q33002955",
+      "license_id": "CC0-1.0",
+      "media_type": "application/json",
+      "sha256": "72dce5904d5f0395c791846d8499e2af2caa37cb89f3c1396062bd0d566e5f2f"
+    }
+  ]
+}

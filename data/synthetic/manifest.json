@@ -2,9 +2,9 @@
   "fictional": true,
   "files": [
     {
-      "bytes": 41457,
+      "bytes": 39408,
       "path": "complex/multimodal-evaluation.pdf",
-      "sha256": "ea2cadf990bb8ce04e34af02e4c14d4a8c69af0d51738dcbaea034504b6bd478"
+      "sha256": "4347cd38d50bb06d4bd99b718a77351f4dfdf2e3b8445adefb20025426b83922"
     },
     {
       "bytes": 3534,
@@ -12,14 +12,14 @@
       "sha256": "b5486501a48ab318b5f6a164df05e19553b1dea39ee727d14363879d128ec88d"
     },
     {
-      "bytes": 102718,
+      "bytes": 102757,
       "path": "images/atlasvision-x1.jpg",
-      "sha256": "2af154237b72256ea466471601d428ef614d00f567139642a95b505ca95b1683"
+      "sha256": "1ded97d82b3ff23f716d21eb3b9d1a350b2f934350462ec0e93f9a33f78443eb"
     },
     {
-      "bytes": 40827,
+      "bytes": 2881784,
       "path": "images/atlasvision-x1.png",
-      "sha256": "42bd01301dff5761b11ad10a3b9cf763f1cf123be9e5d55721be8357aef7a099"
+      "sha256": "406e0d07c1981286185faaa6981765ff3b453ae8827030d4ba2e13e5a7fd2963"
     },
     {
       "bytes": 1073,
@@ -27,9 +27,9 @@
       "sha256": "c21dff175058050a797dfbc6146428f0b1277e05860c920460c42c82b7cdb038"
     },
     {
-      "bytes": 75056,
+      "bytes": 76944,
       "path": "native/research-brief.docx",
-      "sha256": "18d73e4902662932909890edc27308caa1fc51556497572f5557ca4729471839"
+      "sha256": "579aa8be273927e9f199a45450f1f7acf58584a2bb429cdac6902c2019659622"
     },
     {
       "bytes": 633,
