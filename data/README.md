@@ -41,3 +41,17 @@ SHA-256。上游文件变化时下载器会停止，必须人工复核后才能�
 - 压力测试才使用 `public/sanitized/` 中的完整报告。
 - 使用真实模型前单独确认调用预算；默认测试只使用 Mock Provider。
 - 引用公开材料时遵守 `public/licenses/` 中记录的许可和署名要求。
+
+## 用户自备、不可再分发的 HTML
+
+带明确版权但没有开放许可的新闻网页，可以用于用户自己的内部研究测试，但不能加入 GitHub
+公开数据清单。使用下面的命令会把原件放入被 Git 忽略的 `originals/local-user-provided/`，
+并生成移除脚本、广告、追踪器、表单、远程图片和页面状态的文本型安全副本：
+
+```powershell
+uv run python data/tools/import_local_html.py "C:\path\article.html" `
+  --id example-news --private-research-use
+```
+
+测试时优先上传 `data/public/smoke/local-user-provided/*-sanitized.html`。原件、安全副本及
+本地来源记录都不得提交或对外分发；只有导入工具和操作说明进入 Git。
