@@ -1,29 +1,31 @@
-schema_id: prismke-example
-version: "0.1"
-strict: true
-entity_types:
-  - id: Software
-    aliases: [software, system, project]
-  - id: Organization
-    aliases: [organization, organisation, company]
-  - id: Person
-    aliases: [person, researcher]
-relations:
-  - id: developed_by
-    aliases: [created_by, developed by]
-    domain: [Software]
-    range: [Organization, Person]
-    functional: false
-    min_cardinality: 0
-    max_cardinality: null
-    symmetric: false
-    inverse_relation: null
-entity_catalog:
-  - id: entity:prismke
-    name: PrismKE
-    type: Software
-    aliases: [Prism KE]
-  - id: entity:openai
-    name: OpenAI
-    type: Organization
-    aliases: []
+schema_id: prismke-example # Stable machine-readable identifier for this schema.
+version: "0.1" # Schema revision included in fingerprints and run identity.
+strict: true # Reject entity types and relations that are not declared below.
+entity_types: # Entity type vocabulary allowed by this schema.
+  - id: Software # Canonical machine-readable entity type identifier.
+    aliases: [software, system, project] # Alternative labels normalized to this type.
+  - id: Organization # Canonical machine-readable entity type identifier.
+    aliases: [organization, organisation, company] # Alternative labels normalized to this type.
+  - id: Person # Canonical machine-readable entity type identifier.
+    aliases: [person, researcher] # Alternative labels normalized to this type.
+relations: # Relation vocabulary and endpoint constraints.
+  - id: developed_by # Canonical machine-readable relation identifier.
+    aliases: [created_by, developed by] # Alternative labels normalized to this relation.
+    domain: [Software] # Allowed subject entity types.
+    range: [Organization, Person] # Allowed object entity types.
+    functional: false # If true, each subject can have at most one object for this relation.
+    min_cardinality: 0 # Minimum number of relation values allowed for each subject.
+    max_cardinality: null # Maximum values per subject; null means no explicit upper bound.
+    symmetric: false # If true, reversing subject and object preserves the same relation.
+    inverse_relation: null # Canonical ID of the inverse relation; null means none is declared.
+entity_catalog: # Optional predefined canonical entities used for exact lookup and linking.
+  - id: entity:prismke # Stable canonical entity identifier.
+    name: PrismKE # Preferred display name of the canonical entity.
+    type: Software # Entity type ID; it must exist in entity_types.
+    aliases: [Prism KE] # Alternative names that resolve to this canonical entity.
+  - id: entity:openai # Stable canonical entity identifier.
+    name: OpenAI # Preferred display name of the canonical entity.
+    type: Organization # Entity type ID; it must exist in entity_types.
+    aliases: [] # Alternative names; an empty list means no aliases are declared.
+attributes: [] # Optional schema-backed entity attribute definitions.
+events: [] # Optional event definitions with typed participant roles.
