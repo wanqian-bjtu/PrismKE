@@ -443,6 +443,8 @@ EN_BY_ZH: dict[str, str] = {
     '高级治理操作': 'Advanced governance operations',
     '高级策略': 'Advanced policies',
     '默认启用受预算限制的 Reflection 与语义建议，会产生额外模型调用；缺少 LLM Key 时将在调用前阻断。': 'Budget-limited Reflection and semantic advice are enabled by default and make additional model calls. A missing LLM key blocks the run before dispatch.',
+    '一个可审计、可追溯的多模态知识图谱构建系统。': 'An auditable and traceable multimodal knowledge graph construction system.',
+    '开发版本': 'Development build',
 }
 
 EN_BY_ZH.update(

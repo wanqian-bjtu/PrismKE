@@ -1300,10 +1300,10 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     elem_classes="localizable-default",
                 )
                 save_config = gr.Button("保存设置", variant="primary")
-                config_outcome = gr.Textbox(
-                    label="设置结果",
-                    interactive=False,
+                config_outcome = gr.Markdown(
+                    "",
                     elem_id="settings-outcome",
+                    elem_classes="settings-result-panel",
                 )
 
         language_switch = build_brand_header(gr, __version__)
@@ -1557,11 +1557,17 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
 
             with gr.Tab("视觉审核", id="visual-review"):
                 page_header(gr, "visual-review")
-                with gr.Row():
+                with gr.Row(equal_height=True, elem_classes="equal-height-action-row"):
                     visual_review_run = gr.Dropdown(
-                        label="运行", **empty_dropdown_kwargs("暂无运行")
+                        label="运行",
+                        min_width=0,
+                        **empty_dropdown_kwargs("暂无运行"),
                     )
-                    visual_review_refresh = gr.Button("刷新视觉审核队列")
+                    visual_review_refresh = gr.Button(
+                        "刷新视觉审核队列",
+                        min_width=180,
+                        elem_classes="full-height-action",
+                    )
                 visual_review_table = gr.Dataframe(
                     headers=["Task ID", "对象类型", "候选 ID", "状态", "决定", "版本", "原因"],
                     interactive=False,
@@ -1571,12 +1577,21 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 visual_review_selector = gr.Dropdown(
                     label="选择任务", **empty_dropdown_kwargs("暂无审核任务")
                 )
-                with gr.Row(equal_height=False):
-                    visual_review_preview = gr.Image(label="区域证据", type="filepath")
+                with gr.Row(
+                    equal_height=True,
+                    elem_id="visual-review-evidence-row",
+                    elem_classes="visual-review-evidence-row",
+                ):
+                    visual_review_preview = gr.Image(
+                        label="区域证据",
+                        type="filepath",
+                        elem_id="visual-review-preview",
+                    )
                     with gr.Accordion(
                         "候选、实体与 Schema 约束",
                         open=True,
                         elem_classes="technical-detail",
+                        elem_id="visual-review-detail",
                     ):
                         visual_review_detail_output = gr.JSON(label="审核详情")
                 with gr.Row():
@@ -1752,17 +1767,35 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
 
             with gr.Tab("案例库", id="cases"):
                 page_header(gr, "cases")
-                with gr.Row():
+                with gr.Row(
+                    equal_height=True,
+                    elem_id="case-filter-row",
+                    elem_classes="case-filter-row",
+                ):
                     case_type_filter = gr.Dropdown(
-                        ["全部", "good", "bad"], value="全部", label="案例类型"
+                        ["全部", "good", "bad"],
+                        value="全部",
+                        label="案例类型",
+                        min_width=0,
                     )
                     case_task_filter = gr.Dropdown(
-                        ["全部", "entity", "claim"], value="全部", label="任务类型"
+                        ["全部", "entity", "claim"],
+                        value="全部",
+                        label="任务类型",
+                        min_width=0,
                     )
                     case_language_filter = gr.Dropdown(
-                        ["全部", "zh", "en"], value="全部", label="语言"
+                        ["全部", "zh", "en"],
+                        value="全部",
+                        label="语言",
+                        min_width=0,
                     )
-                    case_include_disabled = gr.Checkbox(label="包含已停用", value=False)
+                    case_include_disabled = gr.Checkbox(
+                        label="包含已停用",
+                        value=False,
+                        scale=0,
+                        min_width=150,
+                    )
                 case_refresh = gr.Button("刷新案例")
                 case_table = gr.Dataframe(
                     headers=["ID", "类型", "任务", "语言", "决定", "启用", "输入摘要"],

@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any
 
 TAGLINE = "An auditable and traceable multimodal knowledge graph construction system."
+TAGLINE_ZH = "一个可审计、可追溯的多模态知识图谱构建系统。"
+VERSION_LABEL_ZH = "开发版本"
 
 NAVIGATION_GROUPS: dict[str, tuple[str, tuple[tuple[str, str], ...]]] = {
     "overview": ("总览", (("总览", "overview"),)),
@@ -108,8 +110,8 @@ def build_brand_header(gr: Any, version: str) -> Any:
                 alt_text="PrismKE",
             )
             gr.HTML(
-                f'<p class="workspace-tagline">{TAGLINE}</p>'
-                f'<p class="workspace-version">Development build · {version}</p>'
+                f'<p class="workspace-tagline">{TAGLINE_ZH}</p>'
+                f'<p class="workspace-version"><span>{VERSION_LABEL_ZH}</span> · {version}</p>'
             )
     return language_switch
 

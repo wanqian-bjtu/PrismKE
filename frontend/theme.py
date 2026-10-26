@@ -406,12 +406,111 @@ body:has(#workspace-sidebar.open) #workspace-sidebar-toggle::before {
   text-align: right;
 }
 
-.workspace-metrics {
+.block.workspace-metrics {
   border: 1px solid var(--prism-border) !important;
   border-left: 4px solid var(--prism-blue) !important;
   border-radius: var(--prism-radius) !important;
   background: var(--prism-surface) !important;
   padding: 10px 14px !important;
+}
+
+.block.workspace-metrics .prose.workspace-metrics {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  padding: 0 !important;
+}
+
+.equal-height-action-row {
+  align-items: stretch !important;
+  flex-wrap: nowrap !important;
+}
+
+.block.full-height-action {
+  align-self: stretch !important;
+  display: flex !important;
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+.equal-height-action-row > button.full-height-action {
+  align-self: stretch !important;
+  height: auto !important;
+  min-height: 100% !important;
+}
+
+.block.full-height-action button {
+  flex: 1 1 auto !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 100% !important;
+}
+
+#visual-review-evidence-row {
+  align-items: stretch !important;
+  flex-wrap: nowrap !important;
+}
+
+#visual-review-evidence-row > * {
+  min-width: 0 !important;
+}
+
+#visual-review-preview,
+#visual-review-detail {
+  align-self: stretch !important;
+  height: clamp(280px, 34dvh, 420px) !important;
+  min-height: clamp(280px, 34dvh, 420px) !important;
+  max-height: clamp(280px, 34dvh, 420px) !important;
+}
+
+#visual-review-preview .image-container,
+#visual-review-preview .wrap {
+  height: 100% !important;
+  min-height: 0 !important;
+}
+
+#visual-review-detail {
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+}
+
+#visual-review-detail > .wrap,
+#visual-review-detail > div:last-child {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow: auto !important;
+}
+
+#case-filter-row {
+  align-items: flex-end !important;
+  flex-wrap: nowrap !important;
+}
+
+#case-filter-row > .form {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(150px, auto);
+  align-items: stretch !important;
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+#case-filter-row > .form > * { min-width: 0 !important; }
+
+#case-filter-row > .form > .block:last-child .checkbox-container {
+  align-self: center !important;
+}
+
+#settings-outcome.block {
+  height: auto !important;
+  min-height: 0 !important;
+  overflow: visible !important;
+}
+
+#settings-outcome .prose {
+  overflow: visible !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
 }
 
 .workspace-panel {
@@ -538,6 +637,36 @@ table { font-size: 13px; }
   .workspace-version { font-size: 11px; }
   #workspace-tabs { width: 90%; padding-bottom: 24px; }
   .workspace-page-header h1 { font-size: 21px; }
+  .equal-height-action-row,
+  #visual-review-evidence-row,
+  #case-filter-row {
+    flex-direction: column !important;
+    flex-wrap: wrap !important;
+  }
+  .block.full-height-action,
+  .block.full-height-action button,
+  button.full-height-action {
+    width: 100% !important;
+    height: 44px !important;
+    min-height: 44px !important;
+  }
+  #visual-review-preview,
+  #visual-review-detail {
+    width: 100% !important;
+    height: auto !important;
+    min-height: 240px !important;
+    max-height: none !important;
+  }
+  #case-filter-row .checkbox-container {
+    align-self: stretch !important;
+    flex: 1 1 auto !important;
+    width: 100% !important;
+  }
+  #case-filter-row > .form {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    width: 100% !important;
+  }
   .table-wrap {
     max-width: 100% !important;
     overflow-x: auto !important;

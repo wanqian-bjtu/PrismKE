@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import socket
 import subprocess
 import sys
@@ -16,7 +15,7 @@ import pytest
 from playwright.sync_api import Page, expect, sync_playwright
 
 from frontend.i18n import LOCALE_STORAGE_KEY, tr
-from frontend.layout import NAVIGATION_GROUPS, PAGE_META
+from frontend.layout import NAVIGATION_GROUPS, PAGE_META, TAGLINE, TAGLINE_ZH
 
 
 def _free_port() -> int:
@@ -82,6 +81,31 @@ def _select_option(page: Page, elem_id: str, label: str) -> None:
     expect(control).to_have_value(label, timeout=15_000)
 
 
+def _open_workspace_page(page: Page, group_id: str, page_id: str) -> None:
+    sidebar = page.locator("#workspace-sidebar")
+    if "open" not in (sidebar.get_attribute("class") or ""):
+        page.get_by_role("button", name="Toggle Sidebar").click()
+        page.wait_for_function(
+            "document.querySelector('#workspace-sidebar').classList.contains('open')"
+        )
+    group_label, pages = NAVIGATION_GROUPS[group_id]
+    _select_option(page, "navigation-group", tr(group_label))
+    if len(pages) > 1:
+        page_label = next(label for label, candidate in pages if candidate == page_id)
+        page.locator("#navigation-page").wait_for(state="visible", timeout=15_000)
+        _select_option(page, "navigation-page", tr(page_label))
+    expected_title = tr(PAGE_META[page_id][0])
+    expect(page.locator(".workspace-page-header:visible h1")).to_have_text(
+        expected_title,
+        timeout=15_000,
+    )
+    if page.viewport_size and page.viewport_size["width"] <= 900:
+        page.get_by_role("button", name="Toggle Sidebar").click()
+        page.wait_for_function(
+            "!document.querySelector('#workspace-sidebar').classList.contains('open')"
+        )
+
+
 def _write_screenshot(page: Page, path: Path, *, full_page: bool) -> None:
     payload = page.screenshot(full_page=full_page)
     last_error: OSError | None = None
@@ -139,6 +163,8 @@ def test_default_english_schema_error_and_chinese_switch_preserve_output(
         page.goto(workspace_url, wait_until="domcontentloaded", timeout=60_000)
         expect(page.locator("html")).to_have_attribute("lang", "en", timeout=15_000)
         expect(page.get_by_text("Workspace", exact=True)).to_be_visible()
+        expect(page.locator("#workspace-brand")).to_contain_text(TAGLINE)
+        expect(page.locator("#workspace-brand")).to_contain_text("Development build")
         page.get_by_role("button", name="Validate Schema", exact=True).click()
 
         toast = page.locator(".toast-wrap, [role='alert']").filter(has_text="Error").last
@@ -156,22 +182,25 @@ def test_default_english_schema_error_and_chinese_switch_preserve_output(
         operator = page.locator("#config-operator textarea, #config-operator input")
         expect(operator).to_have_value("Administrator")
         page.get_by_role("button", name="Save settings", exact=True).click()
-        settings_outcome = page.locator("#settings-outcome textarea, #settings-outcome input")
-        expect(settings_outcome).to_have_value(
-            re.compile(r"^Settings saved · Graph store "),
-            timeout=15_000,
+        settings_outcome = page.locator("#settings-outcome")
+        expect(settings_outcome).to_contain_text("Settings saved · Graph store ", timeout=15_000)
+        assert settings_outcome.evaluate(
+            "element => element.scrollHeight <= element.clientHeight + 1"
         )
-        assert settings_outcome.input_value().startswith("Settings saved · Graph store ")
         operator.fill("paper-demo")
         page.locator("#language-switch input[type='checkbox']").click()
         expect(page.locator("html")).to_have_attribute("lang", "zh-CN", timeout=15_000)
         expect(page.get_by_text("工作区", exact=True)).to_be_visible()
+        expect(page.locator("#workspace-brand")).to_contain_text(TAGLINE_ZH)
+        expect(page.locator("#workspace-brand")).to_contain_text("开发版本")
         expect(operator).to_have_value("paper-demo")
         expect(page.locator("#ocr-device input[role='combobox']")).to_have_value(
             "自动（当前：CPU）"
         )
-        expect(settings_outcome).to_have_value(re.compile(r"^设置已保存 · 图存储 "), timeout=15_000)
-        assert settings_outcome.input_value().startswith("设置已保存 · 图存储 ")
+        expect(settings_outcome).to_contain_text("设置已保存 · 图存储 ", timeout=15_000)
+        assert settings_outcome.evaluate(
+            "element => element.scrollHeight <= element.clientHeight + 1"
+        )
         page.get_by_role("button", name="校验 Schema", exact=True).click()
         chinese_toast = page.locator(".toast-wrap, [role='alert']").filter(has_text="错误").last
         chinese_toast.wait_for(state="visible", timeout=15_000)
@@ -214,6 +243,82 @@ def test_locale_storage_keyboard_tab_sync_and_session_isolation(workspace_url: s
         isolated = browser.new_context().new_page()
         isolated.goto(workspace_url, wait_until="domcontentloaded", timeout=60_000)
         expect(isolated.locator("html")).to_have_attribute("lang", "en", timeout=15_000)
+        browser.close()
+
+
+@pytest.mark.browser
+def test_status_cards_actions_and_visual_review_are_geometrically_aligned(
+    workspace_url: str,
+) -> None:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 900})
+        page.add_init_script(f"localStorage.removeItem('{LOCALE_STORAGE_KEY}')")
+        page.goto(workspace_url, wait_until="domcontentloaded", timeout=60_000)
+        page.locator("#workspace-logo img").wait_for(state="visible")
+
+        def blue_border_count() -> int:
+            return page.locator(".block.workspace-metrics:visible").first.evaluate(
+                """element => [element, ...element.querySelectorAll('*')].filter(node => {
+                  const style = getComputedStyle(node);
+                  return parseFloat(style.borderLeftWidth) > 0
+                    && style.borderLeftStyle !== 'none';
+                }).length"""
+            )
+
+        assert blue_border_count() == 1
+        _open_workspace_page(page, "build-execution", "build")
+        assert blue_border_count() == 1
+
+        for group_id, page_id in (
+            ("build-execution", "execution"),
+            ("review-validation", "entity-review"),
+            ("review-validation", "claim-review"),
+            ("media-knowledge", "visual-review"),
+        ):
+            _open_workspace_page(page, group_id, page_id)
+            row_box = page.locator(".equal-height-action-row:visible").first.bounding_box()
+            button_box = page.locator("button.full-height-action:visible").first.bounding_box()
+            assert row_box is not None and button_box is not None
+            assert abs(row_box["height"] - button_box["height"]) <= 2
+
+        preview_box = page.locator("#visual-review-preview").bounding_box()
+        detail_box = page.locator("#visual-review-detail").bounding_box()
+        assert preview_box is not None and detail_box is not None
+        assert abs(preview_box["height"] - detail_box["height"]) <= 2
+        browser.close()
+
+
+@pytest.mark.browser
+@pytest.mark.parametrize(
+    ("width", "height", "single_row"),
+    [(2560, 1392, True), (1440, 900, True), (820, 1180, True), (390, 844, False)],
+)
+def test_case_filters_use_responsive_single_row_layout(
+    workspace_url: str,
+    width: int,
+    height: int,
+    single_row: bool,
+) -> None:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page(viewport={"width": width, "height": height})
+        page.add_init_script(f"localStorage.removeItem('{LOCALE_STORAGE_KEY}')")
+        page.goto(workspace_url, wait_until="domcontentloaded", timeout=60_000)
+        page.locator("#workspace-logo img").wait_for(state="visible")
+        _open_workspace_page(page, "cases-reflection", "cases")
+        row_positions = page.locator("#case-filter-row").evaluate(
+            """element => [...element.querySelectorAll(':scope > .form > .block')]
+              .map(child => child.getBoundingClientRect())
+              .filter(rect => rect.width > 0 && rect.height > 0)
+              .map(rect => Math.round(rect.y))"""
+        )
+        assert len(row_positions) == 4
+        if single_row:
+            assert max(row_positions) - min(row_positions) <= 2
+        else:
+            assert len(set(row_positions)) > 1
+        assert page.evaluate("document.documentElement.scrollWidth - window.innerWidth") <= 1
         browser.close()
 
 

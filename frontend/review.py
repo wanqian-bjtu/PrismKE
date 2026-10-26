@@ -171,18 +171,29 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
     service = controller.service
     run_choices = controller.runs()
     page_header(gr, "entity-review" if kind == "entity" else "claim-review")
-    with gr.Row():
+    with gr.Row(equal_height=True, elem_classes="equal-height-action-row"):
         run = gr.Dropdown(
             label="运行",
+            min_width=0,
             **dropdown_kwargs(run_choices, empty_label="暂无运行"),
         )
         status = gr.Dropdown(
             [("待审核", "pending"), ("已处理", "resolved"), ("全部", "all")],
             value="pending",
             label="任务状态",
+            min_width=0,
         )
-        risk = gr.Dropdown([("全部", "all"), ("风险提示", "flagged")], value="all", label="风险")
-        refresh = gr.Button("刷新")
+        risk = gr.Dropdown(
+            [("全部", "all"), ("风险提示", "flagged")],
+            value="all",
+            label="风险",
+            min_width=0,
+        )
+        refresh = gr.Button(
+            "刷新",
+            min_width=140,
+            elem_classes="full-height-action",
+        )
     progress = gr.Textbox(label="审核进度", interactive=False)
     table = gr.Dataframe(
         headers=["对象", "状态", "风险提示", "审核原因"],

@@ -8,6 +8,7 @@ from frontend.layout import (
     NAVIGATION_GROUPS,
     PAGE_META,
     TAGLINE,
+    TAGLINE_ZH,
     all_page_ids,
     first_page,
     logo_path,
@@ -80,8 +81,10 @@ def test_workspace_uses_dropdown_navigation_and_no_radio_components(tmp_path: Pa
     assert by_id["navigation-group"]["type"] == "dropdown"
     assert by_id["navigation-page"]["type"] == "dropdown"
     assert by_id["workspace-logo"]["type"] == "image"
+    assert by_id["settings-outcome"]["type"] == "markdown"
 
     assert TAGLINE in response.text
+    assert TAGLINE_ZH in response.text
 
     by_label = {
         component["props"].get("label"): component

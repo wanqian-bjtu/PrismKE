@@ -211,9 +211,19 @@ def build_execution_tab(
 
     with gr.Tab("执行任务", id="execution"):
         page_header(gr, "execution")
-        with gr.Row():
-            run = gr.Dropdown(label="运行", scale=4, **empty_dropdown_kwargs("暂无运行"))
-            refresh_button = gr.Button("刷新", scale=1)
+        with gr.Row(equal_height=True, elem_classes="equal-height-action-row"):
+            run = gr.Dropdown(
+                label="运行",
+                scale=4,
+                min_width=0,
+                **empty_dropdown_kwargs("暂无运行"),
+            )
+            refresh_button = gr.Button(
+                "刷新",
+                scale=1,
+                min_width=140,
+                elem_classes="full-height-action",
+            )
         summary = gr.Markdown("### 尚无执行任务")
         with gr.Accordion("PDF 解析决定", open=True):
             parser_summary = gr.Markdown("尚无 PDF 解析决定。")
