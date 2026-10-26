@@ -74,7 +74,11 @@ def file_record(path: Path, root: Path) -> dict[str, Any]:
 
 
 def records(paths: Iterable[Path], root: Path) -> list[dict[str, Any]]:
-    return [file_record(path, root) for path in sorted(paths)]
+    ordered = sorted(
+        paths,
+        key=lambda path: path.relative_to(root).as_posix().casefold(),
+    )
+    return [file_record(path, root) for path in ordered]
 
 
 def canonicalize_zip(path: Path) -> None:

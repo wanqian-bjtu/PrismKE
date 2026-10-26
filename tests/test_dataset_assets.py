@@ -15,6 +15,8 @@ def test_synthetic_dataset_is_deterministic_and_covers_required_formats(tmp_path
     second = tmp_path / "second"
     first_manifest = generate(first)
     second_manifest = generate(second)
+    paths = [item["path"] for item in first_manifest["files"]]
+    assert paths == sorted(paths, key=str.casefold)
     first_records = {item["path"]: item["sha256"] for item in first_manifest["files"]}
     second_records = {item["path"]: item["sha256"] for item in second_manifest["files"]}
     assert first_records == second_records
