@@ -50,8 +50,10 @@ SHA-256。上游文件变化时下载器会停止，必须人工复核后才能�
 
 ```powershell
 uv run python data/tools/import_local_html.py "C:\path\article.html" `
-  --id example-news --private-research-use
+  --id example-news --private-research-use --include-images
 ```
 
 测试时优先上传 `data/public/smoke/local-user-provided/*-sanitized.html`。原件、安全副本及
-本地来源记录都不得提交或对外分发；只有导入工具和操作说明进入 Git。
+本地来源记录都不得提交或对外分发；只有导入工具和操作说明进入 Git。如果页面图片来自
+允许列表中的官方媒体域名，`--include-images` 会保存本地图片、保留说明和署名，并额外生成
+一个可单文件上传的 `*-multimodal.pdf`。图片版权状态不会因下载或格式转换而改变。
