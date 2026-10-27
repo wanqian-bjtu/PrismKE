@@ -1912,8 +1912,9 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     headers=["Agent", "步骤", "决定", "工具", "原因", "Token", "状态"],
                     interactive=False,
                     wrap=False,
-                    column_widths=[100, 170, 180, 210, 210, 80, 90],
+                    column_widths=["10%", "14%", "18%", "17%", "20%", "9%", "12%"],
                     label="执行与交接",
+                    elem_id="agent-trace-table",
                 )
                 with gr.Accordion("交接与模态详情", open=False):
                     agent_details = gr.JSON(label="Agent 交接")

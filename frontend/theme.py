@@ -525,6 +525,22 @@ body:has(#workspace-sidebar.open) #workspace-sidebar-toggle::before {
 #build-status-panel {
   display: flex !important;
   flex-direction: column !important;
+  justify-content: flex-start !important;
+}
+
+#build-status-panel > .workspace-metrics {
+  flex: 0 0 auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+#build-technical-detail {
+  position: relative !important;
+  align-self: stretch !important;
+  flex: 0 0 auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: 48px !important;
 }
 
 #build-technical-detail:has(button[aria-expanded="true"]),
@@ -535,6 +551,7 @@ body:has(#workspace-sidebar.open) #workspace-sidebar-toggle::before {
   flex: 1 1 auto !important;
   flex-direction: column !important;
   min-height: 0 !important;
+  max-height: none !important;
 }
 
 #build-technical-detail:has(button[aria-expanded="true"]) > :last-child,
@@ -547,9 +564,7 @@ body:has(#workspace-sidebar.open) #workspace-sidebar-toggle::before {
 }
 
 #media-preview,
-#media-detail,
-#visual-review-preview,
-#visual-review-detail {
+#visual-review-preview {
   align-self: stretch !important;
   height: clamp(280px, 34dvh, 420px) !important;
   min-height: clamp(280px, 34dvh, 420px) !important;
@@ -566,22 +581,27 @@ body:has(#workspace-sidebar.open) #workspace-sidebar-toggle::before {
 
 #media-detail,
 #visual-review-detail {
+  position: relative !important;
+  align-self: flex-start !important;
   display: flex !important;
+  flex: 1 1 0 !important;
   flex-direction: column !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: 48px !important;
   overflow: hidden !important;
 }
 
-#media-detail > .wrap,
-#media-detail > div:last-child,
-#visual-review-detail > .wrap,
-#visual-review-detail > div:last-child {
-  flex: 1 1 auto !important;
-  min-height: 0 !important;
-  overflow: auto !important;
+#media-detail:has(> button.open),
+#visual-review-detail:has(> button.open) {
+  align-self: stretch !important;
+  height: clamp(280px, 34dvh, 420px) !important;
+  min-height: clamp(280px, 34dvh, 420px) !important;
+  max-height: clamp(280px, 34dvh, 420px) !important;
 }
 
-.evidence-detail-panel > :last-child,
-.evidence-detail-panel > :last-child > .fill-detail-content,
 .evidence-detail-panel .fill-detail-content,
 .evidence-detail-panel .fill-detail-content > .wrap,
 .evidence-detail-panel .fill-detail-content .json-container {
@@ -594,29 +614,56 @@ body:has(#workspace-sidebar.open) #workspace-sidebar-toggle::before {
   overflow: auto !important;
 }
 
-#build-technical-detail > [data-testid="accordion-content"],
-.evidence-detail-panel > [data-testid="accordion-content"] {
+#build-technical-detail:has(> button.open) > [data-testid="accordion-content"],
+.evidence-detail-panel:has(> button.open) > [data-testid="accordion-content"] {
   display: flex !important;
+  position: absolute !important;
+  inset: 40px 12px 11px !important;
   flex: 1 1 auto !important;
   flex-direction: column !important;
+  width: auto !important;
+  height: auto !important;
   min-height: 0 !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  overflow: auto !important;
 }
 
-#build-technical-detail > [data-testid="accordion-content"] > .column,
-.evidence-detail-panel > [data-testid="accordion-content"] > .column {
+#build-technical-detail:has(> button.open)
+  > [data-testid="accordion-content"]
+  > .column,
+.evidence-detail-panel:has(> button.open)
+  > [data-testid="accordion-content"]
+  > .column {
   display: flex !important;
   flex: 1 1 auto !important;
   flex-direction: column !important;
+  align-items: stretch !important;
+  width: 100% !important;
   min-height: 0 !important;
+  min-width: 0 !important;
+  margin: 0 !important;
 }
 
 #build-run-summary,
 #media-detail-json,
 #visual-review-detail-json {
   flex: 1 1 auto !important;
+  width: 100% !important;
   height: auto !important;
   max-height: none !important;
   min-height: 0 !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+}
+
+#agent-trace-table,
+#agent-trace-table.table-wrap,
+#agent-trace-table .table-wrap,
+#agent-trace-table .virtual-table-viewport,
+#agent-trace-table table {
+  width: 100% !important;
+  min-width: 100% !important;
 }
 
 #case-filter-row {
@@ -797,12 +844,20 @@ table { font-size: 13px; }
     grid-template-columns: minmax(88px, max-content) minmax(0, 1fr) !important;
   }
   #media-preview,
-  #media-detail,
-  #visual-review-preview,
-  #visual-review-detail {
+  #visual-review-preview {
     width: 100% !important;
     height: auto !important;
     min-height: 240px !important;
+    max-height: none !important;
+  }
+  #media-detail,
+  #visual-review-detail,
+  #media-detail:has(> button.open),
+  #visual-review-detail:has(> button.open) {
+    align-self: stretch !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
     max-height: none !important;
   }
   #case-filter-row .checkbox-container {
@@ -833,6 +888,16 @@ table { font-size: 13px; }
   .table-wrap .header.text.wrap {
     white-space: nowrap !important;
     word-break: normal !important;
+  }
+  #agent-trace-table,
+  #agent-trace-table.table-wrap,
+  #agent-trace-table .table-wrap {
+    max-width: 100% !important;
+    overflow-x: auto !important;
+  }
+  #agent-trace-table table {
+    width: 720px !important;
+    min-width: 720px !important;
   }
   #prismke-workspace { overflow-x: hidden !important; }
 }

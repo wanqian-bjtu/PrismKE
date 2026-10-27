@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -333,7 +334,7 @@ def test_sidebar_urls_and_detail_panels_show_their_complete_content(
 
         _open_workspace_page(page, "build-execution", "build")
         build_detail = page.locator("#build-technical-detail")
-        build_toggle = build_detail.locator("button").first
+        build_toggle = build_detail.locator(":scope > button.label-wrap")
         if not page.locator("#build-run-summary").is_visible():
             build_toggle.click()
         expect(page.locator("#build-run-summary")).to_be_visible()
@@ -363,7 +364,7 @@ def test_sidebar_urls_and_detail_panels_show_their_complete_content(
         ):
             _open_workspace_page(page, group_id, page_id)
             detail = page.locator(f"#{detail_id}")
-            toggle = detail.locator("button").first
+            toggle = detail.locator(":scope > button.label-wrap")
             if not page.locator(f"#{json_id}").is_visible():
                 toggle.click()
             expect(page.locator(f"#{json_id}")).to_be_visible()
@@ -372,11 +373,134 @@ def test_sidebar_urls_and_detail_panels_show_their_complete_content(
             json_box = page.locator(f"#{json_id}").bounding_box()
             assert preview_box is not None and detail_box is not None and json_box is not None
             assert abs(preview_box["height"] - detail_box["height"]) <= 2
+            assert json_box["x"] >= detail_box["x"] - 1
+            assert (
+                json_box["x"] + json_box["width"]
+                <= detail_box["x"] + detail_box["width"] + 2
+            )
             assert (
                 detail_box["y"] + detail_box["height"]
                 - (json_box["y"] + json_box["height"])
             ) <= 12
 
+        browser.close()
+
+
+@pytest.mark.browser
+@pytest.mark.parametrize(
+    ("width", "height"),
+    [(2560, 1392), (1440, 900), (820, 1180), (390, 844)],
+)
+def test_detail_accordions_collapse_to_headers_and_expand_without_clipping(
+    workspace_url: str,
+    width: int,
+    height: int,
+) -> None:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page(viewport={"width": width, "height": height})
+        page.add_init_script(f"localStorage.removeItem('{LOCALE_STORAGE_KEY}')")
+        page.goto(workspace_url, wait_until="domcontentloaded", timeout=60_000)
+        page.locator("#workspace-logo img").wait_for(state="visible")
+
+        _open_workspace_page(page, "build-execution", "build")
+        build_detail = page.locator("#build-technical-detail")
+        build_json = page.locator("#build-run-summary")
+        build_metric = page.locator("#build-status-panel > .workspace-metrics")
+        assert build_detail.bounding_box()["height"] <= 48  # type: ignore[index]
+        assert build_metric.bounding_box()["height"] <= 80  # type: ignore[index]
+        expect(build_json).to_be_hidden()
+        build_toggle = build_detail.locator(":scope > button.label-wrap")
+        build_toggle.click()
+        expect(build_toggle).to_have_class(re.compile(r"\bopen\b"))
+        expect(build_json).to_be_visible()
+        if width > 900:
+            input_box = page.locator("#build-input-panel").bounding_box()
+            status_box = page.locator("#build-status-panel").bounding_box()
+            assert input_box is not None and status_box is not None
+            assert abs(
+                input_box["y"] + input_box["height"]
+                - status_box["y"]
+                - status_box["height"]
+            ) <= 2
+        build_toggle.click()
+        expect(build_toggle).not_to_have_class(re.compile(r"\bopen\b"))
+        expect(build_json).to_be_hidden()
+        assert build_detail.bounding_box()["height"] <= 48  # type: ignore[index]
+
+        for page_id, detail_id, json_id, preview_id in (
+            ("media", "media-detail", "media-detail-json", "media-preview"),
+            (
+                "visual-review",
+                "visual-review-detail",
+                "visual-review-detail-json",
+                "visual-review-preview",
+            ),
+        ):
+            _open_workspace_page(page, "media-knowledge", page_id)
+            detail = page.locator(f"#{detail_id}")
+            json_output = page.locator(f"#{json_id}")
+            if json_output.is_visible():
+                toggle = detail.locator(":scope > button.label-wrap")
+                toggle.click()
+                expect(toggle).not_to_have_class(re.compile(r"\bopen\b"))
+            expect(json_output).to_be_hidden()
+            collapsed_box = detail.bounding_box()
+            assert collapsed_box is not None and collapsed_box["height"] <= 48
+
+            toggle = detail.locator(":scope > button.label-wrap")
+            toggle.click()
+            expect(toggle).to_have_class(re.compile(r"\bopen\b"))
+            expect(json_output).to_be_visible()
+            detail_box = detail.bounding_box()
+            json_box = json_output.bounding_box()
+            preview_box = page.locator(f"#{preview_id}").bounding_box()
+            assert detail_box is not None and json_box is not None and preview_box is not None
+            if width > 900:
+                assert abs(detail_box["height"] - preview_box["height"]) <= 2
+            assert json_box["x"] >= detail_box["x"] - 1
+            assert (
+                json_box["x"] + json_box["width"]
+                <= detail_box["x"] + detail_box["width"] + 2
+            )
+
+        assert page.evaluate("document.documentElement.scrollWidth - window.innerWidth") <= 1
+        browser.close()
+
+
+@pytest.mark.browser
+@pytest.mark.parametrize(("width", "height"), [(2560, 1392), (1440, 900)])
+def test_agent_trace_table_fills_wide_container(
+    workspace_url: str,
+    width: int,
+    height: int,
+) -> None:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page(viewport={"width": width, "height": height})
+        page.add_init_script(f"localStorage.removeItem('{LOCALE_STORAGE_KEY}')")
+        page.goto(workspace_url, wait_until="domcontentloaded", timeout=60_000)
+        page.locator("#workspace-logo img").wait_for(state="visible")
+        _open_workspace_page(page, "agents", "agents")
+
+        grid = page.locator("#agent-trace-table[role='grid']")
+        if grid.count() == 0:
+            grid = page.locator("#agent-trace-table [role='grid']")
+        table = grid.locator("table.header-table")
+        grid_box = grid.bounding_box()
+        table_box = table.bounding_box()
+        assert grid_box is not None and table_box is not None
+        assert table_box["width"] >= grid_box["width"] * 0.99
+
+        header_cells = table.locator("th").evaluate_all(
+            "cells => cells.map(cell => cell.getBoundingClientRect())"
+        )
+        assert len(header_cells) == 7
+        covered_width = max(cell["right"] for cell in header_cells) - min(
+            cell["left"] for cell in header_cells
+        )
+        assert covered_width >= grid_box["width"] * 0.99
+        assert page.evaluate("document.documentElement.scrollWidth - window.innerWidth") <= 1
         browser.close()
 
 
