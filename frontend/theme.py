@@ -433,6 +433,52 @@ body:has(#workspace-sidebar.open) #workspace-sidebar-toggle::before {
   padding: 0 !important;
 }
 
+.schema-validation-valid {
+  display: block;
+  overflow-wrap: anywhere;
+  color: #166534;
+  font-weight: 650;
+  line-height: 1.55;
+}
+
+.result-insight {
+  border: 1px solid var(--prism-border) !important;
+  border-left: 4px solid var(--prism-blue) !important;
+  border-radius: var(--prism-radius) !important;
+  background: var(--prism-surface) !important;
+  padding: 12px 14px !important;
+}
+
+.candidate-preview-row {
+  align-items: stretch !important;
+}
+
+.candidate-preview-row > * {
+  min-width: 0 !important;
+}
+
+.browser-bridge {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.result-export-panel {
+  display: grid !important;
+  grid-template-columns: minmax(260px, 1fr) minmax(220px, 0.45fr) minmax(280px, 0.8fr);
+  align-items: end !important;
+  gap: 12px !important;
+  padding: 12px !important;
+  border: 1px solid var(--prism-border) !important;
+  border-radius: var(--prism-radius) !important;
+  background: var(--prism-surface) !important;
+}
+
 .compact-action-row {
   align-items: stretch !important;
   flex-wrap: nowrap !important;
@@ -826,6 +872,14 @@ table { font-size: 13px; }
   #case-filter-row {
     flex-direction: column !important;
     flex-wrap: wrap !important;
+  }
+  .candidate-preview-row {
+    flex-direction: column !important;
+  }
+  .result-export-panel {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
   }
   .compact-action-fields {
     flex-direction: column !important;

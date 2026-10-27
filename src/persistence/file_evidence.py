@@ -159,10 +159,15 @@ class FileEvidenceStore:
         self._atomic_write(path, payload)
 
     async def get_blob(self, blob_hash: str) -> bytes:
+        return self.verified_blob_path(blob_hash).read_bytes()
+
+    def verified_blob_path(self, blob_hash: str) -> Path:
+        """Return an internal blob path only after its content hash has been verified."""
+
         path = self._blob_path(blob_hash)
         if not path.is_file() or file_sha256(path) != blob_hash:
             raise EvidenceIntegrityError(f"evidence blob not found or corrupt: {blob_hash}")
-        return path.read_bytes()
+        return path
 
     async def crop(self, evidence_id: str) -> bytes:
         evidence = self._load_ref(evidence_id)

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import io
+import json
 import time
+import zipfile
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -69,6 +72,62 @@ def test_upload_run_uses_shared_service(tmp_path: Path, schema_path: Path) -> No
     assert state.status_code == 200
     assert state.json()["status"] == "completed"
     assert len(claims.json()) == 1
+
+
+def test_run_export_is_sanitized_and_source_is_opt_in(
+    tmp_path: Path, schema_path: Path
+) -> None:
+    settings = Settings(_env_file=None, runtime_dir=tmp_path / "runtime")
+    service = PrismKEService(settings)
+    app = create_app(settings, service, mount_ui=False)
+    document = b"PrismKE | developed_by | OpenAI | Software | Organization | 0.92\n"
+    required = {
+        "manifest.json",
+        "results.json",
+        "schema_snapshot.json",
+        "entities.csv",
+        "mentions.csv",
+        "relations.csv",
+        "attributes.csv",
+        "events.csv",
+        "media.csv",
+        "evidence.csv",
+        "validation_issues.csv",
+        "candidate_graph.json",
+        "evidence_manifest.json",
+    }
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/runs",
+            files={
+                "document": ("sample.md", document, "text/markdown"),
+                "schema": ("schema.yaml", schema_path.read_bytes(), "application/yaml"),
+            },
+            data={"provider": "mock", "task_mode": "entity_extraction"},
+        )
+        assert response.status_code == 202
+        run_id = response.json()["run_id"]
+        wait_execution(client, run_id)
+
+        archive_response = client.get(f"/api/v1/runs/{run_id}/export")
+        assert archive_response.status_code == 200
+        with zipfile.ZipFile(io.BytesIO(archive_response.content)) as archive:
+            names = set(archive.namelist())
+            assert required <= names
+            assert not any(name.startswith("source/") for name in names)
+            evidence_manifest = json.loads(archive.read("evidence_manifest.json"))
+            assert evidence_manifest
+            assert all(item["verified"] is True for item in evidence_manifest)
+            payload = b"".join(archive.read(name) for name in names)
+            assert b"api_key" not in payload.lower()
+            assert str(tmp_path).encode() not in payload
+
+        source_response = client.get(
+            f"/api/v1/runs/{run_id}/export", params={"include_source": "true"}
+        )
+        assert source_response.status_code == 200
+        with zipfile.ZipFile(io.BytesIO(source_response.content)) as archive:
+            assert any(name.startswith("source/") for name in archive.namelist())
 
 
 def test_unknown_run_returns_not_found(tmp_path: Path) -> None:

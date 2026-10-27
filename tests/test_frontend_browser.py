@@ -75,10 +75,60 @@ def workspace_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
             process.wait(timeout=5)
 
 
+@pytest.fixture
+def candidate_workspace_url(tmp_path: Path) -> Iterator[str]:
+    """Run the candidate-graph interaction test in an isolated service state."""
+
+    root = Path(__file__).resolve().parents[1]
+    runtime = tmp_path / "runtime"
+    port = _free_port()
+    environment = os.environ.copy()
+    existing_pythonpath = environment.get("PYTHONPATH")
+    environment["PYTHONPATH"] = os.pathsep.join(
+        item for item in (str(root), existing_pythonpath) if item
+    )
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            str(root / "tests" / "serve_frontend_demo.py"),
+            "--port",
+            str(port),
+            "--runtime",
+            str(runtime),
+        ],
+        cwd=root,
+        env=environment,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.STDOUT,
+    )
+    base_url = f"http://127.0.0.1:{port}"
+    try:
+        deadline = time.monotonic() + 90
+        while time.monotonic() < deadline:
+            try:
+                if httpx.get(f"{base_url}/api/v1/health", timeout=0.5).status_code == 200:
+                    break
+            except httpx.HTTPError:
+                pass
+            if process.poll() is not None:
+                raise RuntimeError("candidate frontend fixture exited before becoming healthy")
+            time.sleep(0.1)
+        else:
+            raise RuntimeError("candidate frontend fixture did not become healthy")
+        yield f"{base_url}/ui/"
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+
+
 def _select_option(page: Page, elem_id: str, label: str) -> None:
     control = page.locator(f"#{elem_id} input")
     control.click()
-    page.get_by_role("option", name=label, exact=True).click()
+    page.get_by_role("option", name=label, exact=True).last.click()
     expect(control).to_have_value(label, timeout=15_000)
 
 
@@ -210,6 +260,141 @@ def test_default_english_schema_error_and_chinese_switch_preserve_output(
         page.reload(wait_until="domcontentloaded")
         expect(page.locator("html")).to_have_attribute("lang", "zh-CN", timeout=15_000)
         _write_screenshot(page, tmp_path / "bilingual-error-toast.png", full_page=False)
+        browser.close()
+
+
+@pytest.mark.browser
+def test_schema_valid_marker_is_bilingual_and_invalidated_on_change(
+    workspace_url: str, tmp_path: Path
+) -> None:
+    schema_path = tmp_path / "schema.yaml"
+    schema_path.write_text(
+        """schema_id: browser-schema
+version: "1"
+strict: false
+entity_types:
+  - id: Organization
+relations:
+  - id: collaborates_with
+    domain: [Organization]
+    range: [Organization]
+""",
+        encoding="utf-8",
+    )
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 900})
+        page.add_init_script(f"localStorage.removeItem('{LOCALE_STORAGE_KEY}')")
+        page.goto(workspace_url, wait_until="domcontentloaded", timeout=60_000)
+
+        schema_file = page.locator("#schema-file-input input[type='file']")
+        schema_file.set_input_files(schema_path)
+        expect(page.get_by_text("schema.yaml", exact=True)).to_be_visible(timeout=15_000)
+        page.wait_for_timeout(750)
+        page.get_by_role("button", name="Validate Schema", exact=True).click()
+        valid = page.locator(".schema-validation-valid")
+        expect(valid).to_contain_text("✓ Valid", timeout=15_000)
+        expect(valid).to_contain_text("Schema browser-schema")
+        expect(valid).to_contain_text("Entity types 1")
+        expect(valid).to_contain_text("Relations 1")
+        expect(valid).to_contain_text("Hash ")
+        assert not re.search(r"[\u4e00-\u9fff]", valid.inner_text())
+
+        page.locator("#language-switch input[type='checkbox']").click()
+        expect(valid).to_contain_text("✓ 有效", timeout=15_000)
+        expect(valid).to_contain_text("版本 1")
+        expect(valid).to_contain_text("实体类型 1")
+        expect(valid).to_contain_text("关系 1")
+
+        _select_option(page, "schema-source", "文本输入")
+        expect(page.get_by_text("尚未校验 Schema", exact=True)).to_be_visible(timeout=15_000)
+        expect(page.locator(".schema-validation-valid")).to_have_count(0)
+        browser.close()
+
+
+@pytest.mark.browser
+def test_candidate_graph_click_opens_traceable_evidence(
+    candidate_workspace_url: str, tmp_path: Path
+) -> None:
+    schema_path = tmp_path / "graph-schema.yaml"
+    schema_path.write_text(
+        """schema_id: candidate-graph
+version: "1"
+strict: false
+entity_types:
+  - id: Software
+  - id: Organization
+relations:
+  - id: developed_by
+    domain: [Software]
+    range: [Organization]
+""",
+        encoding="utf-8",
+    )
+    document_path = tmp_path / "candidate.md"
+    document_path.write_text(
+        "PrismKE | developed_by | OpenAI | Software | Organization | 0.95\n",
+        encoding="utf-8",
+    )
+    base_url = candidate_workspace_url.removesuffix("/ui/")
+    response = httpx.post(
+        f"{base_url}/api/v1/runs",
+        files={
+            "document": (document_path.name, document_path.read_bytes(), "text/markdown"),
+            "schema": (schema_path.name, schema_path.read_bytes(), "application/yaml"),
+        },
+        data={"provider": "mock", "task_mode": "entity_extraction"},
+        timeout=30,
+    )
+    assert response.status_code == 202
+    run_id = response.json()["run_id"]
+    for _ in range(200):
+        execution = httpx.get(
+            f"{base_url}/api/v1/runs/{run_id}/execution",
+            timeout=5,
+        ).json()
+        if not execution["active"]:
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError("candidate graph fixture execution timed out")
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 900})
+        page.add_init_script(f"localStorage.removeItem('{LOCALE_STORAGE_KEY}')")
+        page.goto(candidate_workspace_url, wait_until="domcontentloaded", timeout=60_000)
+        _open_workspace_page(page, "build-execution", "build")
+
+        current_run = page.locator("#current-run input")
+        current_run.click()
+        page.get_by_role("option").filter(has_text="candidate.md").click()
+        expect(page.locator("#result-insight")).to_contain_text("Task mode", timeout=15_000)
+
+        plot = page.locator("#candidate-result-plot .js-plotly-plot")
+        plot.wait_for(state="visible", timeout=30_000)
+        page.wait_for_function(
+            """() => {
+              const plot = document.querySelector('#candidate-result-plot .js-plotly-plot');
+              return plot?.dataset.prismkeClickBound === 'true' &&
+                (plot?.data || []).some(item =>
+                Array.isArray(item.customdata) && item.customdata.length
+              );
+            }""",
+            timeout=30_000,
+        )
+        points = plot.locator(".scatterlayer .point")
+        assert points.count() > 0
+        points.first.click(force=True)
+        bridge = page.locator(
+            "#candidate-plot-selection input, #candidate-plot-selection textarea"
+        )
+        expect(bridge).not_to_have_value("", timeout=5_000)
+        item_id = bridge.input_value()
+        expect(page.locator("#candidate-result-evidence")).to_contain_text(
+            item_id,
+            timeout=15_000,
+        )
         browser.close()
 
 

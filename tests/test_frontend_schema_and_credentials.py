@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from frontend.schema_input import resolve_schema, schema_summary
+from src.core.ids import canonical_hash
 from src.core.settings import Settings
 from src.workflow import PrismKEService
 from src.workflow.service import TransientProviderCredentials
@@ -28,7 +29,10 @@ def test_schema_text_and_upload_materialize_the_same_schema(tmp_path: Path) -> N
     assert upload_path == uploaded.resolve()
     assert uploaded_schema == text_schema
     assert text_path.suffix == ".json" and text_path.is_file()
-    assert schema_summary(text_schema) == "Schema `web-schema` · 版本 `1` · 实体类型 1 · 关系 0"
+    summary = schema_summary(text_schema)
+    assert 'class="schema-validation-valid"' in summary
+    assert "✓ Valid · Schema web-schema · Version 1 · Entity types 1 · Relations 0" in summary
+    assert canonical_hash(text_schema.model_dump(mode="json")) in summary
 
 
 @pytest.mark.parametrize(

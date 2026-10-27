@@ -24,8 +24,9 @@ from fastapi import (
     UploadFile,
     status,
 )
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from filelock import Timeout
+from starlette.background import BackgroundTask
 
 from src import __version__
 from src.api.models import (
@@ -50,6 +51,7 @@ from src.api.models import (
     VisualReviewRequest,
 )
 from src.core.errors import (
+    EvidenceIntegrityError,
     GraphIntegrityError,
     LegacyCheckpointError,
     ProviderConfigurationError,
@@ -59,6 +61,7 @@ from src.core.settings import Settings
 from src.domain import EntitySourceMode, PDFParseMode, ProvidedEntity, TaskMode
 from src.persistence.execution import ExecutionConflict
 from src.workflow import PrismKEService
+from src.workflow.result_export import build_run_export
 
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 UPLOAD_CHUNK_BYTES = 1024 * 1024
@@ -377,6 +380,28 @@ def create_app(
             raise HTTPException(status_code=404, detail="run not found") from exc
         except ValueError as exc:
             raise HTTPException(status_code=409, detail={"code": str(exc)}) from exc
+
+    @api.get("/runs/{run_id}/export")
+    async def export_run_results(
+        run_id: str,
+        include_source: Annotated[bool, Query()] = False,
+    ) -> FileResponse:
+        try:
+            archive_path = await build_run_export(
+                service,
+                run_id,
+                include_source=include_source,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="run not found") from exc
+        except (ValueError, EvidenceIntegrityError, GraphIntegrityError) as exc:
+            raise HTTPException(status_code=409, detail={"code": str(exc)}) from exc
+        return FileResponse(
+            archive_path,
+            media_type="application/zip",
+            filename=f"prismke-{_safe_filename(run_id)}-results.zip",
+            background=BackgroundTask(archive_path.unlink, missing_ok=True),
+        )
 
     @api.get("/runs/{run_id}/pdf-parse")
     async def pdf_parse_status(run_id: str) -> object:

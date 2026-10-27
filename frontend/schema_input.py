@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from html import escape
 from pathlib import Path
 from uuid import uuid4
 
@@ -52,7 +53,10 @@ def resolve_schema(
 
 
 def schema_summary(schema: OutputSchema) -> str:
-    return (
-        f"Schema `{schema.schema_id}` · 版本 `{schema.version}` · "
-        f"实体类型 {len(schema.entity_types)} · 关系 {len(schema.relations)}"
+    fingerprint = canonical_hash(schema.model_dump(mode="json"))
+    summary = (
+        f"✓ Valid · Schema {schema.schema_id} · Version {schema.version} · "
+        f"Entity types {len(schema.entity_types)} · Relations {len(schema.relations)} · "
+        f"Hash {fingerprint}"
     )
+    return f'<span class="schema-validation-valid">{escape(summary)}</span>'

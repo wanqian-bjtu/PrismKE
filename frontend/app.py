@@ -41,6 +41,13 @@ from src.domain import (
     TaskMode,
 )
 from src.workflow import PrismKEService
+from src.workflow.result_export import build_run_export
+from src.workflow.result_projection import (
+    aggregate_entity_mentions,
+    candidate_graph,
+    mention_occurrences,
+    run_insight,
+)
 from src.workflow.service import TransientProviderCredentials
 
 
@@ -153,6 +160,202 @@ def _review_target_choices(state: Any) -> list[tuple[str, str]]:
         (f"事件 · {item.event_type} / {item.trigger}", f"event|{item.id}") for item in result.events
     )
     return choices
+
+
+def _aggregated_entity_rows(state: Any) -> list[list[Any]]:
+    return [
+        [
+            item["name"],
+            item["entity_type"],
+            item["occurrence_count"],
+            item["confidence_average"],
+            item["confidence_max"],
+            ", ".join(item["modalities"]),
+            decision_label(item["review_status"]),
+            "规范实体" if item["grouping"] == "canonical_entity" else "同名提及组",
+        ]
+        for item in aggregate_entity_mentions(state)
+    ]
+
+
+def _mention_occurrence_rows(state: Any) -> list[list[Any]]:
+    return [
+        [
+            item["mention_id"],
+            item["name"],
+            item["entity_type"],
+            item["page_number"],
+            item["context"],
+            item["bbox"],
+            item["evidence_id"],
+            item["confidence"],
+            item["modality"],
+        ]
+        for item in mention_occurrences(state)
+    ]
+
+
+def _run_insight_markdown(insight: dict[str, Any]) -> str:
+    counts = insight.get("media_type_counts", {})
+    lines = [
+        (
+            f"**任务模式** `{insight['task_mode']}` · "
+            f"**输出范围** `{insight['task_mode_scope']}`"
+        ),
+        (
+            f"**页数** {insight['page_count']} · **DocumentIR 文本块** "
+            f"{insight['text_block_count']} · **实体提及** "
+            f"{insight['entity_mention_count']} · **聚合实体** "
+            f"{insight['aggregated_entity_count']}"
+        ),
+        (
+            f"**关系** {insight['relation_count']} · **属性** "
+            f"{insight['attribute_count']} · **事件** {insight['event_count']} · "
+            f"**媒体对象** {insight['media_occurrence_count']} · "
+            f"**视觉断言** {insight['visual_assertion_count']}"
+        ),
+        (
+            f"**校验问题** {insight['validation_issue_count']} · "
+            f"**待审核** {insight['review_required_count']}"
+        ),
+        (
+            f"**媒体构成** 图片 {counts.get('image', 0)} · 图表 "
+            f"{counts.get('chart', 0)} · 表格 {counts.get('table', 0)} · "
+            f"公式 {counts.get('formula', 0)} · 页面渲染 "
+            f"{counts.get('page_render', 0)}"
+        ),
+    ]
+    if insight["task_mode"] == "entity_extraction":
+        lines.extend(
+            [
+                "实体抽取只返回实体提及，不返回关系、属性、事件或正式图谱。",
+                (
+                    "需要属性、数值和事件时请选择 Schema 信息抽取；需要实体关系及同名"
+                    "消歧时请选择联合实体关系消歧；需要写入正式图谱时请选择完整知识构建。"
+                ),
+            ]
+        )
+    return "  \n".join(lines)
+
+
+def _multimodal_markdown(insight: dict[str, Any]) -> str:
+    parser = insight.get("pdf_actual_parser") or "not_applicable"
+    requested = insight.get("pdf_requested_mode") or "not_applicable"
+    reasons = ", ".join(insight.get("pdf_route_reasons", [])) or "none"
+    ocr_status = "已调用" if insight.get("ocr_used") else "未调用"
+    vlm_status = "已调用" if insight.get("vlm_called") else "未调用"
+    device = insight.get("ocr_device_actual") or "not_recorded"
+    return "  \n".join(
+        [
+            f"**请求解析模式** `{requested}` · **实际 PDF 解析器** `{parser}`",
+            f"**自动路由原因** `{reasons}`",
+            f"**OCR** {ocr_status} · **实际设备** `{device}`",
+            f"**VLM** {vlm_status} · **调用次数** {insight.get('vlm_call_count', 0)}",
+            (
+                "本次运行未调用视觉模型。PDF 中含有图片不代表已经完成视觉抽取。"
+                if not insight.get("vlm_called")
+                else "视觉模型已处理媒体资产，具体对象和证据见下表。"
+            ),
+        ]
+    )
+
+
+def _candidate_graph_figure(payload: dict[str, Any]) -> Any:
+    import networkx as nx
+    import plotly.graph_objects as go
+
+    graph = nx.DiGraph()
+    nodes = payload.get("nodes", [])
+    edges = payload.get("edges", [])
+    for node in nodes:
+        graph.add_node(node["id"])
+    for edge in edges:
+        if edge["source"] in graph and edge["target"] in graph:
+            graph.add_edge(edge["source"], edge["target"])
+    positions = nx.spring_layout(graph, seed=42) if graph.nodes else {}
+    figure = go.Figure()
+    edge_colors = {
+        "relation": "#64748b",
+        "media_relation": "#d97706",
+        "visual_assertion": "#7c3aed",
+    }
+    for edge in edges:
+        source = edge["source"]
+        target = edge["target"]
+        if source not in positions or target not in positions:
+            continue
+        x0, y0 = positions[source]
+        x1, y1 = positions[target]
+        color = edge_colors.get(edge.get("kind", "relation"), "#64748b")
+        figure.add_trace(
+            go.Scatter(
+                x=[x0, x1],
+                y=[y0, y1],
+                mode="lines",
+                line={"color": color, "width": 2},
+                hoverinfo="skip",
+                showlegend=False,
+            )
+        )
+        figure.add_trace(
+            go.Scatter(
+                x=[(x0 + x1) / 2],
+                y=[(y0 + y1) / 2],
+                mode="markers",
+                marker={"size": 18, "color": color, "opacity": 0.22},
+                customdata=[edge["id"]],
+                text=[edge.get("label", "")],
+                hovertemplate="%{text}<extra></extra>",
+                showlegend=False,
+            )
+        )
+    node_colors = {
+        "entity": "#155eef",
+        "media": "#d97706",
+        "literal": "#0f766e",
+        "claim": "#475569",
+        "visual_assertion": "#7c3aed",
+    }
+    figure.add_trace(
+        go.Scatter(
+            x=[positions[node["id"]][0] for node in nodes if node["id"] in positions],
+            y=[positions[node["id"]][1] for node in nodes if node["id"] in positions],
+            mode="markers+text",
+            text=[node.get("label", node["id"]) for node in nodes if node["id"] in positions],
+            textposition="top center",
+            marker={
+                "size": 22,
+                "color": [
+                    node_colors.get(node.get("kind", "entity"), "#155eef")
+                    for node in nodes
+                    if node["id"] in positions
+                ],
+            },
+            customdata=[node["id"] for node in nodes if node["id"] in positions],
+            hovertemplate="%{text}<br>%{customdata}<extra></extra>",
+            showlegend=False,
+        )
+    )
+    if not nodes:
+        figure.add_annotation(
+            text="暂无候选结果",
+            x=0.5,
+            y=0.5,
+            xref="paper",
+            yref="paper",
+            showarrow=False,
+        )
+    figure.update_layout(
+        height=480,
+        margin={"l": 20, "r": 20, "t": 28, "b": 20},
+        xaxis={"visible": False},
+        yaxis={"visible": False},
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        title={"text": "候选预览（不会写入图谱）", "x": 0.02},
+        clickmode="event+select",
+    )
+    return figure
 
 
 def mount_gradio(app: Any, service: PrismKEService) -> Any:
@@ -434,16 +637,139 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         )
         return schema_summary(schema)
 
-    def switch_schema_source(source: str) -> tuple[Any, Any]:
+    def switch_schema_source(source: str) -> tuple[Any, Any, Any]:
         return (
             gr.update(visible=source == "upload"),
             gr.update(visible=source == "text"),
+            gr.update(value="尚未校验 Schema"),
         )
 
     def load_run(run_id: str) -> tuple[str, dict[str, Any], list[list[Any]]]:
         state = service.show_run(run_id)
         execution = service.executions.view(run_id)
         return _state_status(state, execution), _state_summary(state), _claim_rows(state)
+
+    def select_workspace_run(run_id: str | None) -> tuple[str, str]:
+        if not run_id:
+            return "", ""
+        state = service.show_run(run_id)
+        return run_id, state.batch_id or ""
+
+    def load_result_views(
+        run_id: str,
+    ) -> tuple[
+        str,
+        list[list[Any]],
+        list[list[Any]],
+        Any,
+        Any,
+        dict[str, Any],
+        str,
+        list[list[Any]],
+    ]:
+        if not run_id:
+            empty_graph = {"semantics": "candidate_only", "nodes": [], "edges": [], "details": {}}
+            return (
+                "尚无可解释的抽取结果。",
+                [],
+                [],
+                _candidate_graph_figure(empty_graph),
+                dropdown_update(gr, [], empty_label="暂无候选节点或关系"),
+                {},
+                "尚无多模态处理摘要。",
+                [],
+            )
+        state = service.show_run(run_id)
+        insight = run_insight(state)
+        try:
+            ocr_provider = service.ocr_provider_for_state(state)
+            insight["ocr_device_actual"] = getattr(ocr_provider, "device", None)
+        except Exception:
+            insight["ocr_device_actual"] = None
+        graph = candidate_graph(state)
+        choices = [
+            (
+                f"{item.get('kind', 'item')} · {item.get('label', item['id'])}",
+                item["id"],
+            )
+            for item in [*graph["nodes"], *graph["edges"]]
+        ]
+        visual_assets = {
+            observation.media_asset_id
+            for observation in (state.document.visual_observations if state.document else [])
+        }
+        media_rows = [
+            [
+                asset.id,
+                asset.origin,
+                asset.page_number,
+                f"{asset.width or '-'} × {asset.height or '-'}",
+                asset.evidence_id,
+                "是" if asset.id in visual_assets else "否",
+            ]
+            for asset in (state.document.media_assets if state.document else [])
+        ]
+        return (
+            _run_insight_markdown(insight),
+            _aggregated_entity_rows(state),
+            _mention_occurrence_rows(state),
+            _candidate_graph_figure(graph),
+            dropdown_update(gr, choices, empty_label="暂无候选节点或关系"),
+            {},
+            _multimodal_markdown(insight),
+            media_rows,
+        )
+
+    async def candidate_detail(run_id: str, item_id: str) -> dict[str, Any]:
+        if not run_id or not item_id:
+            return {}
+        state = service.show_run(run_id)
+        detail = candidate_graph(state)["details"].get(item_id, {})
+        if not isinstance(detail, dict):
+            return {"value": detail}
+        evidence_ids: list[str] = []
+        for key in ("evidence_id", "evidence_ids"):
+            value = detail.get(key)
+            if isinstance(value, str) and value:
+                evidence_ids.append(value)
+            elif isinstance(value, list):
+                evidence_ids.extend(str(item) for item in value if item)
+        evidence = []
+        for evidence_id in dict.fromkeys(evidence_ids):
+            try:
+                reference = await service.evidence_store.get(evidence_id)
+                verified = await service.evidence_store.verify(evidence_id)
+                evidence.append(
+                    {
+                        **reference.model_dump(mode="json"),
+                        "hash_verified": verified,
+                    }
+                )
+            except Exception:
+                evidence.append({"id": evidence_id, "hash_verified": False})
+        return {"candidate": detail, "evidence": evidence}
+
+    async def candidate_detail_from_plot(
+        run_id: str, item_id: str
+    ) -> tuple[Any, dict[str, Any]]:
+        if not item_id:
+            return gr.update(), {}
+        return gr.update(value=item_id), await candidate_detail(run_id, item_id)
+
+    async def prepare_result_export(run_id: str, include_source: bool) -> str:
+        if not run_id:
+            raise ValueError("请先选择有抽取结果的运行")
+        export_dir = service.settings.runtime_dir / "ui" / "exports"
+        export_dir.mkdir(parents=True, exist_ok=True)
+        for stale in export_dir.glob("*.zip"):
+            stale.unlink(missing_ok=True)
+        path = await build_run_export(
+            service,
+            run_id,
+            include_source=bool(include_source),
+            output_dir=export_dir,
+        )
+        return str(path)
 
     def agent_report(run_id: str | None) -> tuple[list[list[Any]], dict[str, Any]]:
         if not run_id:
@@ -1119,7 +1445,11 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 visible=False,
                 elem_id="navigation-page",
             )
-            current_run = gr.Dropdown(label="当前运行", **empty_dropdown_kwargs("暂无运行"))
+            current_run = gr.Dropdown(
+                label="当前运行",
+                elem_id="current-run",
+                **empty_dropdown_kwargs("暂无运行"),
+            )
             run_context = gr.Markdown("暂无运行", elem_classes="sidebar-status")
             refresh_context = gr.Button("刷新运行")
             with gr.Accordion("任务配置", open=True):
@@ -1137,6 +1467,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     ],
                     value="knowledge_graph_construction",
                     label="任务模式",
+                    elem_id="task-mode-input",
                 )
                 pdf_parse_mode_input = gr.Dropdown(
                     [
@@ -1163,12 +1494,18 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     [("上传文件", "upload"), ("文本输入", "text")],
                     value="upload",
                     label="Schema 来源",
+                    elem_id="schema-source",
                 )
-                schema_input = gr.File(label="Schema 文件", type="filepath")
+                schema_input = gr.File(
+                    label="Schema 文件",
+                    type="filepath",
+                    elem_id="schema-file-input",
+                )
                 schema_text = gr.Textbox(
                     label="Schema 文本（JSON/YAML）",
                     lines=10,
                     visible=False,
+                    elem_id="schema-text-input",
                 )
                 validate_schema = gr.Button("校验 Schema")
                 schema_result = gr.Markdown("尚未校验 Schema", elem_classes="sidebar-status")
@@ -1176,14 +1513,19 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     ["mock", "openai-compatible"],
                     value="openai-compatible",
                     label="文本 Provider",
+                    elem_id="text-provider-input",
                 )
                 ocr_input = gr.Dropdown(
-                    ["disabled", "mock", "paddle"], value="paddle", label="OCR Provider"
+                    ["disabled", "mock", "paddle"],
+                    value="paddle",
+                    label="OCR Provider",
+                    elem_id="ocr-provider-input",
                 )
                 vlm_input = gr.Dropdown(
                     ["disabled", "mock", "openai-compatible"],
                     value="openai-compatible",
                     label="视觉 Provider",
+                    elem_id="vision-provider-input",
                 )
                 allow_remote = gr.Checkbox(label="允许远程资源", value=False)
                 case_mode_input = gr.Dropdown(
@@ -1209,6 +1551,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     ["disabled", "mock", "openai-compatible"],
                     value="openai-compatible",
                     label="治理/融合语义建议",
+                    elem_id="semantic-advisor-input",
                 )
                 agent_tokens_input = gr.Number(
                     value=20_000, precision=0, label="Agent 建议 Token 预算"
@@ -1365,9 +1708,17 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                                 ".tiff",
                                 ".bmp",
                             ],
+                            elem_id="document-input",
                         )
-                        run_button = gr.Button("开始构建", variant="primary")
-                        reload_button = gr.Button("刷新运行状态")
+                        run_button = gr.Button(
+                            "开始构建",
+                            variant="primary",
+                            elem_id="start-run-button",
+                        )
+                        reload_button = gr.Button(
+                            "刷新运行状态",
+                            elem_id="refresh-run-status-button",
+                        )
                     with gr.Column(scale=3, min_width=320, elem_id="build-status-panel"):
                         run_status = gr.Markdown(
                             "尚未启动构建",
@@ -1392,9 +1743,98 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     label="批次文件",
                     wrap=True,
                 )
-                claim_table = gr.Dataframe(
-                    headers=claim_headers, interactive=False, label="抽取结果", wrap=True
+                result_insight = gr.Markdown(
+                    "尚无可解释的抽取结果。",
+                    elem_id="result-insight",
+                    elem_classes="result-insight",
                 )
+                aggregated_entity_table = gr.Dataframe(
+                    headers=[
+                        "名称",
+                        "类型",
+                        "出现次数",
+                        "平均置信度",
+                        "最高置信度",
+                        "证据模态",
+                        "审核状态",
+                        "聚合依据",
+                    ],
+                    interactive=False,
+                    label="聚合实体",
+                    wrap=True,
+                )
+                with gr.Accordion("原始提及与全部候选", open=False):
+                    mention_table = gr.Dataframe(
+                        headers=[
+                            "Mention ID",
+                            "原始名称",
+                            "实体类型",
+                            "页码",
+                            "文本上下文",
+                            "bbox",
+                            "Evidence ID",
+                            "置信度",
+                            "来源模态",
+                        ],
+                        interactive=False,
+                        label="原始提及",
+                        wrap=True,
+                    )
+                    claim_table = gr.Dataframe(
+                        headers=claim_headers,
+                        interactive=False,
+                        label="全部原始抽取项",
+                        wrap=True,
+                    )
+                with gr.Accordion("抽取结果预览", open=True):
+                    gr.Markdown(
+                        "候选预览仅用于解释抽取结果，不会写入 GraphStore 或生成 Revision。"
+                    )
+                    with gr.Row(elem_classes="candidate-preview-row"):
+                        candidate_plot = gr.Plot(
+                            label="候选关系图",
+                            elem_id="candidate-result-plot",
+                        )
+                        with gr.Column():
+                            candidate_selector = gr.Dropdown(
+                                label="候选节点或关系",
+                                elem_id="candidate-result-selector",
+                                **empty_dropdown_kwargs("暂无候选节点或关系"),
+                            )
+                            candidate_evidence = gr.JSON(
+                                label="候选与证据详情",
+                                elem_id="candidate-result-evidence",
+                            )
+                    candidate_plot_selection = gr.Textbox(
+                        elem_id="candidate-plot-selection",
+                        elem_classes="browser-bridge",
+                        container=False,
+                    )
+                with gr.Accordion("多模态处理摘要", open=True):
+                    multimodal_summary = gr.Markdown("尚无多模态处理摘要。")
+                    multimodal_media_table = gr.Dataframe(
+                        headers=[
+                            "Media Asset ID",
+                            "来源类型",
+                            "页码",
+                            "尺寸",
+                            "Evidence ID",
+                            "VLM 已处理",
+                        ],
+                        interactive=False,
+                        label="媒体资产处理记录",
+                        wrap=True,
+                    )
+                with gr.Group(elem_classes="result-export-panel"):
+                    export_include_source = gr.Checkbox(
+                        label="在 ZIP 中包含原始文件和已验证派生媒体",
+                        value=False,
+                    )
+                    export_button = gr.Button("准备完整结果 ZIP", variant="primary")
+                    export_download = gr.File(
+                        label="下载完整结果",
+                        interactive=False,
+                    )
                 with gr.Accordion("批次处理", open=False):
                     batch_item_selector = gr.Dropdown(
                         label="批次文件", **empty_dropdown_kwargs("暂无批次文件")
@@ -1962,7 +2402,17 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         schema_source.change(
             switch_schema_source,
             schema_source,
-            [schema_input, schema_text],
+            [schema_input, schema_text, schema_result],
+        )
+        schema_input.change(
+            lambda _value: gr.update(value="尚未校验 Schema"),
+            schema_input,
+            schema_result,
+        )
+        schema_text.input(
+            lambda _value: gr.update(value="尚未校验 Schema"),
+            schema_text,
+            schema_result,
         )
 
         def switch_task_mode(mode: str) -> tuple[Any, Any, Any]:
@@ -2106,6 +2556,42 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                   navigateLabel(input.value);
                 }, 100);
               }
+              if (!window.__prismkeCandidatePlotBound) {
+                window.__prismkeCandidatePlotBound = true;
+                const bindCandidatePlot = () => {
+                  const plot = document.querySelector(
+                    '#candidate-result-plot .js-plotly-plot'
+                  );
+                  if (!plot || plot.dataset.prismkeClickBound === 'true') return;
+                  plot.dataset.prismkeClickBound = 'true';
+                  plot.on?.('plotly_click', event => {
+                    const custom = event?.points?.[0]?.customdata;
+                    const itemId = Array.isArray(custom) ? custom[0] : custom;
+                    const bridge = document.querySelector('#candidate-plot-selection');
+                    const input = bridge instanceof HTMLInputElement ||
+                      bridge instanceof HTMLTextAreaElement
+                      ? bridge
+                      : bridge?.querySelector('input, textarea');
+                    if (!itemId || !input) return;
+                    input.setAttribute('aria-hidden', 'true');
+                    input.tabIndex = -1;
+                    const prototype = input instanceof HTMLTextAreaElement
+                      ? HTMLTextAreaElement.prototype
+                      : HTMLInputElement.prototype;
+                    const setter = Object.getOwnPropertyDescriptor(
+                      prototype,
+                      'value'
+                    )?.set;
+                    setter?.call(input, String(itemId));
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                  });
+                };
+                window.__prismkeCandidatePlotTimer = window.setInterval(
+                  bindCandidatePlot,
+                  250
+                );
+              }
               let resizer = sidebar.querySelector('#workspace-resizer');
               if (!resizer) {
                 resizer = document.createElement('div');
@@ -2194,6 +2680,36 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         refresh_overview.click(
             guard_ui(gr, dashboard, 3), outputs=[overview, recent_runs, graph_health]
         )
+        result_view_outputs = [
+            result_insight,
+            aggregated_entity_table,
+            mention_table,
+            candidate_plot,
+            candidate_selector,
+            candidate_evidence,
+            multimodal_summary,
+            multimodal_media_table,
+        ]
+        current_run.change(
+            guard_ui(gr, select_workspace_run, 2),
+            current_run,
+            [run_id_output, batch_id_output],
+        ).then(
+            guard_ui(gr, load_build, 6),
+            [run_id_output, batch_id_output],
+            [
+                run_status,
+                run_summary,
+                claim_table,
+                batch_table,
+                batch_item_selector,
+                extraction_review_target,
+            ],
+        ).then(
+            guard_ui(gr, load_result_views, 8),
+            run_id_output,
+            result_view_outputs,
+        )
         run_button.click(
             guard_ui(gr, run_document, 8),
             [
@@ -2239,6 +2755,10 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             guard_ui(gr, sidebar_run, 2),
             [run_id_output],
             [current_run, run_context],
+        ).then(
+            guard_ui(gr, load_result_views, 8),
+            run_id_output,
+            result_view_outputs,
         )
         reload_button.click(
             guard_ui(gr, load_build, 6),
@@ -2251,11 +2771,19 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 batch_item_selector,
                 extraction_review_target,
             ],
+        ).then(
+            guard_ui(gr, load_result_views, 8),
+            run_id_output,
+            result_view_outputs,
         )
         batch_item_selector.change(
             guard_ui(gr, select_batch_result, 3),
             [batch_id_output, batch_item_selector],
             [run_id_output, claim_table, extraction_review_target],
+        ).then(
+            guard_ui(gr, load_result_views, 8),
+            run_id_output,
+            result_view_outputs,
         )
         extraction_review_button.click(
             guard_ui(gr, review_extraction_result, 2),
@@ -2267,6 +2795,25 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 extraction_review_reason,
             ],
             [claim_table, extraction_review_outcome],
+        ).then(
+            guard_ui(gr, load_result_views, 8),
+            run_id_output,
+            result_view_outputs,
+        )
+        candidate_selector.change(
+            guard_ui(gr, candidate_detail),
+            [run_id_output, candidate_selector],
+            candidate_evidence,
+        )
+        candidate_plot_selection.change(
+            guard_ui(gr, candidate_detail_from_plot, 2),
+            [run_id_output, candidate_plot_selection],
+            [candidate_selector, candidate_evidence],
+        )
+        export_button.click(
+            guard_ui(gr, prepare_result_export),
+            [run_id_output, export_include_source],
+            export_download,
         )
         batch_action_outputs = [
             run_status,
