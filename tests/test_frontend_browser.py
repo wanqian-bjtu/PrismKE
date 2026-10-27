@@ -305,6 +305,82 @@ def test_status_cards_actions_and_visual_review_are_geometrically_aligned(
 
 
 @pytest.mark.browser
+def test_sidebar_urls_and_detail_panels_show_their_complete_content(
+    workspace_url: str,
+) -> None:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 900})
+        page.add_init_script(f"localStorage.removeItem('{LOCALE_STORAGE_KEY}')")
+        page.goto(workspace_url, wait_until="domcontentloaded", timeout=60_000)
+        page.locator("#workspace-logo img").wait_for(state="visible")
+
+        page.get_by_text("Models and graph storage", exact=True).click()
+        url_fields = page.locator("#workspace-sidebar .sidebar-url-field textarea")
+        expect(url_fields).to_have_count(2)
+        long_base_url = (
+            "https://ws-1hdqnxiyhm6e2w5j.cn-beijing.maas.aliyuncs.com/"
+            "compatible-mode/v1"
+        )
+        for index in range(2):
+            field = url_fields.nth(index)
+            field.fill(long_base_url)
+            assert field.input_value() == long_base_url
+            dimensions = field.evaluate(
+                "element => ({client: element.clientHeight, scroll: element.scrollHeight})"
+            )
+            assert dimensions["scroll"] <= dimensions["client"] + 1
+
+        _open_workspace_page(page, "build-execution", "build")
+        build_detail = page.locator("#build-technical-detail")
+        build_toggle = build_detail.locator("button").first
+        if not page.locator("#build-run-summary").is_visible():
+            build_toggle.click()
+        expect(page.locator("#build-run-summary")).to_be_visible()
+        build_input_box = page.locator("#build-input-panel").bounding_box()
+        build_status_box = page.locator("#build-status-panel").bounding_box()
+        assert build_input_box is not None and build_status_box is not None
+        assert abs(
+            (build_input_box["y"] + build_input_box["height"])
+            - (build_status_box["y"] + build_status_box["height"])
+        ) <= 2
+
+        for group_id, page_id, preview_id, detail_id, json_id in (
+            (
+                "media-knowledge",
+                "media",
+                "media-preview",
+                "media-detail",
+                "media-detail-json",
+            ),
+            (
+                "media-knowledge",
+                "visual-review",
+                "visual-review-preview",
+                "visual-review-detail",
+                "visual-review-detail-json",
+            ),
+        ):
+            _open_workspace_page(page, group_id, page_id)
+            detail = page.locator(f"#{detail_id}")
+            toggle = detail.locator("button").first
+            if not page.locator(f"#{json_id}").is_visible():
+                toggle.click()
+            expect(page.locator(f"#{json_id}")).to_be_visible()
+            preview_box = page.locator(f"#{preview_id}").bounding_box()
+            detail_box = detail.bounding_box()
+            json_box = page.locator(f"#{json_id}").bounding_box()
+            assert preview_box is not None and detail_box is not None and json_box is not None
+            assert abs(preview_box["height"] - detail_box["height"]) <= 2
+            assert (
+                detail_box["y"] + detail_box["height"]
+                - (json_box["y"] + json_box["height"])
+            ) <= 12
+
+        browser.close()
+
+
+@pytest.mark.browser
 @pytest.mark.parametrize(
     ("width", "height", "single_row"),
     [(2560, 1392, True), (1440, 900, True), (820, 1180, True), (390, 844, False)],

@@ -1219,7 +1219,13 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     elem_classes="sidebar-status",
                 )
             with gr.Accordion("模型与图存储", open=False):
-                llm_base = gr.Textbox(label="LLM Base URL", value=public_settings["llm_base_url"])
+                llm_base = gr.Textbox(
+                    label="LLM Base URL",
+                    value=public_settings["llm_base_url"],
+                    lines=3,
+                    max_lines=5,
+                    elem_classes="sidebar-url-field",
+                )
                 llm_model = gr.Textbox(
                     value=public_settings["llm_model"] or "qwen3.7-flash",
                     label="LLM 模型别名",
@@ -1229,7 +1235,13 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     type="password",
                     placeholder="留空则使用服务器配置",
                 )
-                vlm_base = gr.Textbox(label="VLM Base URL", value=public_settings["vlm_base_url"])
+                vlm_base = gr.Textbox(
+                    label="VLM Base URL",
+                    value=public_settings["vlm_base_url"],
+                    lines=3,
+                    max_lines=5,
+                    elem_classes="sidebar-url-field",
+                )
                 vlm_model = gr.Textbox(
                     value=public_settings["vlm_model"] or "qwen3.7-flash",
                     label="VLM 模型别名",
@@ -1325,8 +1337,12 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
 
             with gr.Tab("新建构建", id="build"):
                 page_header(gr, "build")
-                with gr.Row(equal_height=False):
-                    with gr.Column(scale=2, min_width=300):
+                with gr.Row(
+                    equal_height=True,
+                    elem_id="build-primary-row",
+                    elem_classes="balanced-detail-row",
+                ):
+                    with gr.Column(scale=2, min_width=300, elem_id="build-input-panel"):
                         document_input = gr.File(
                             label="文档（最多 20 个）",
                             type="filepath",
@@ -1352,7 +1368,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                         )
                         run_button = gr.Button("开始构建", variant="primary")
                         reload_button = gr.Button("刷新运行状态")
-                    with gr.Column(scale=3, min_width=320):
+                    with gr.Column(scale=3, min_width=320, elem_id="build-status-panel"):
                         run_status = gr.Markdown(
                             "尚未启动构建",
                             elem_classes="workspace-metrics",
@@ -1361,8 +1377,13 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                             "技术详情",
                             open=False,
                             elem_classes="technical-detail",
+                            elem_id="build-technical-detail",
                         ):
-                            run_summary = gr.JSON(label="完整运行状态")
+                            run_summary = gr.JSON(
+                                label="完整运行状态",
+                                elem_id="build-run-summary",
+                                elem_classes="fill-detail-content",
+                            )
                 run_id_output = gr.State()
                 batch_id_output = gr.State()
                 batch_table = gr.Dataframe(
@@ -1538,14 +1559,27 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     label="选择媒体出现记录",
                     **empty_dropdown_kwargs("暂无媒体出现记录"),
                 )
-                with gr.Row(equal_height=False):
-                    media_preview = gr.Image(label="受控证据预览", type="filepath")
+                with gr.Row(
+                    equal_height=True,
+                    elem_id="media-evidence-row",
+                    elem_classes="balanced-evidence-row",
+                ):
+                    media_preview = gr.Image(
+                        label="受控证据预览",
+                        type="filepath",
+                        elem_id="media-preview",
+                    )
                     with gr.Accordion(
                         "媒体、实体与 Claim 详情",
                         open=False,
-                        elem_classes="technical-detail",
+                        elem_classes=["technical-detail", "evidence-detail-panel"],
+                        elem_id="media-detail",
                     ):
-                        media_detail_output = gr.JSON(label="媒体详情")
+                        media_detail_output = gr.JSON(
+                            label="媒体详情",
+                            elem_id="media-detail-json",
+                            elem_classes="fill-detail-content",
+                        )
                 media_refresh.click(
                     guard_ui(gr, media_rows, 2),
                     [media_document_filter, media_type_filter],
@@ -1598,10 +1632,14 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     with gr.Accordion(
                         "候选、实体与 Schema 约束",
                         open=True,
-                        elem_classes="technical-detail",
+                        elem_classes=["technical-detail", "evidence-detail-panel"],
                         elem_id="visual-review-detail",
                     ):
-                        visual_review_detail_output = gr.JSON(label="审核详情")
+                        visual_review_detail_output = gr.JSON(
+                            label="审核详情",
+                            elem_id="visual-review-detail-json",
+                            elem_classes="fill-detail-content",
+                        )
                 with gr.Row():
                     visual_review_decision = gr.Dropdown(
                         [("批准", "approve"), ("拒绝", "reject"), ("暂缓", "defer")],

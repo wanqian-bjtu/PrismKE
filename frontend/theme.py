@@ -93,6 +93,18 @@ APP_CSS = r"""
 #workspace-sidebar .form { width: 100%; gap: 10px !important; margin-inline: auto; }
 #workspace-sidebar .block { width: 100%; margin-inline: auto; }
 #workspace-sidebar label > span { text-align: left; }
+
+#workspace-sidebar .sidebar-url-field textarea {
+  field-sizing: content;
+  min-height: 76px !important;
+  max-height: none !important;
+  height: auto !important;
+  overflow-y: hidden !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-all !important;
+  white-space: pre-wrap !important;
+  resize: vertical;
+}
 .sidebar-status {
   color: var(--prism-muted);
   font-size: 13px;
@@ -492,15 +504,50 @@ body:has(#workspace-sidebar.open) #workspace-sidebar-toggle::before {
   white-space: nowrap;
 }
 
+#build-primary-row,
+#media-evidence-row,
 #visual-review-evidence-row {
   align-items: stretch !important;
   flex-wrap: nowrap !important;
 }
 
+#build-primary-row > *,
+#media-evidence-row > *,
 #visual-review-evidence-row > * {
   min-width: 0 !important;
 }
 
+#build-input-panel,
+#build-status-panel {
+  align-self: stretch !important;
+}
+
+#build-status-panel {
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+#build-technical-detail:has(button[aria-expanded="true"]),
+#build-technical-detail:has(> button.open),
+#build-technical-detail:has(details[open]),
+#build-technical-detail[open] {
+  display: flex !important;
+  flex: 1 1 auto !important;
+  flex-direction: column !important;
+  min-height: 0 !important;
+}
+
+#build-technical-detail:has(button[aria-expanded="true"]) > :last-child,
+#build-technical-detail:has(> button.open) > :last-child,
+#build-technical-detail:has(details[open]) > :last-child,
+#build-technical-detail[open] > :last-child,
+#build-run-summary {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+}
+
+#media-preview,
+#media-detail,
 #visual-review-preview,
 #visual-review-detail {
   align-self: stretch !important;
@@ -509,23 +556,67 @@ body:has(#workspace-sidebar.open) #workspace-sidebar-toggle::before {
   max-height: clamp(280px, 34dvh, 420px) !important;
 }
 
+#media-preview .image-container,
+#media-preview .wrap,
 #visual-review-preview .image-container,
 #visual-review-preview .wrap {
   height: 100% !important;
   min-height: 0 !important;
 }
 
+#media-detail,
 #visual-review-detail {
   display: flex !important;
   flex-direction: column !important;
   overflow: hidden !important;
 }
 
+#media-detail > .wrap,
+#media-detail > div:last-child,
 #visual-review-detail > .wrap,
 #visual-review-detail > div:last-child {
   flex: 1 1 auto !important;
   min-height: 0 !important;
   overflow: auto !important;
+}
+
+.evidence-detail-panel > :last-child,
+.evidence-detail-panel > :last-child > .fill-detail-content,
+.evidence-detail-panel .fill-detail-content,
+.evidence-detail-panel .fill-detail-content > .wrap,
+.evidence-detail-panel .fill-detail-content .json-container {
+  flex: 1 1 auto !important;
+  height: 100% !important;
+  min-height: 0 !important;
+}
+
+.evidence-detail-panel .fill-detail-content .json-container {
+  overflow: auto !important;
+}
+
+#build-technical-detail > [data-testid="accordion-content"],
+.evidence-detail-panel > [data-testid="accordion-content"] {
+  display: flex !important;
+  flex: 1 1 auto !important;
+  flex-direction: column !important;
+  min-height: 0 !important;
+}
+
+#build-technical-detail > [data-testid="accordion-content"] > .column,
+.evidence-detail-panel > [data-testid="accordion-content"] > .column {
+  display: flex !important;
+  flex: 1 1 auto !important;
+  flex-direction: column !important;
+  min-height: 0 !important;
+}
+
+#build-run-summary,
+#media-detail-json,
+#visual-review-detail-json {
+  flex: 1 1 auto !important;
+  height: auto !important;
+  max-height: none !important;
+  min-height: 0 !important;
 }
 
 #case-filter-row {
@@ -682,6 +773,8 @@ table { font-size: 13px; }
   #workspace-tabs { width: 90%; padding-bottom: 24px; }
   .workspace-page-header h1 { font-size: 21px; }
   .compact-action-row,
+  #build-primary-row,
+  #media-evidence-row,
   #visual-review-evidence-row,
   #case-filter-row {
     flex-direction: column !important;
@@ -703,6 +796,8 @@ table { font-size: 13px; }
   .compact-inline-field > .form {
     grid-template-columns: minmax(88px, max-content) minmax(0, 1fr) !important;
   }
+  #media-preview,
+  #media-detail,
   #visual-review-preview,
   #visual-review-detail {
     width: 100% !important;
