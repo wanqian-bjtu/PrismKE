@@ -335,16 +335,22 @@ class ValidationService:
                 if location:
                     add("INVALID_EVIDENCE_LOCATION", "evidence", "evidence_ids", location)
             if entities is not None and mention_map is not None:
+                has_schema_blocker = any(
+                    item.target_id == c.id
+                    and item.stage == "schema"
+                    and item.severity == "blocking"
+                    for item in issues
+                )
                 if any(
                     m.id not in mention_map or mention_map[m.id] not in entities for m in mentions
-                ):
+                ) and not has_schema_blocker:
                     add(
                         "MISSING_ENTITY_REFERENCE",
                         "reference",
                         "mention_to_entity",
                         "提及未映射到规范实体",
                     )
-                elif schema.relation(c.relation) is not None:
+                elif not has_schema_blocker and schema.relation(c.relation) is not None:
                     try:
                         normalize_claims([c], schema, entities, mention_map)
                     except SchemaValidationError:

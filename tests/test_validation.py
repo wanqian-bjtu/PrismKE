@@ -249,6 +249,9 @@ def test_validation_correction_api_previews_and_applies_swap(
     )
     issues = [item for item in state.validation.issues if item.status == "open"]
     assert len(issues) == 2
+    refreshed = asyncio.run(service.validate_run(state.run_id))
+    assert len([item for item in refreshed.issues if item.status == "open"]) == 2
+    assert all(item.code != "MISSING_ENTITY_REFERENCE" for item in refreshed.issues)
     payload = {
         "issue_ids": [item.id for item in issues],
         "action": "swap_endpoints",
