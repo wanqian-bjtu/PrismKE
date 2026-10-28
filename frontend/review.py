@@ -15,6 +15,7 @@ from frontend.presentation import (
     guard_ui,
     status_label,
 )
+from frontend.run_presentation import friendly_run_choices, node_label
 from src.core.ids import stable_id
 from src.domain import ReviewDecision
 from src.workflow import PrismKEService
@@ -24,16 +25,22 @@ class ReviewController:
     def __init__(self, service: PrismKEService) -> None:
         self.service = service
 
-    def runs(self) -> list[tuple[str, str]]:
-        choices = []
-        for state in self.service.runs.list(limit=1000):
-            label = state.run_id
-            if state.review_workspace and state.document:
-                label = state.document.source_filename or "隔离导入文档"
-            choices.append(
-                (f"{label} · {status_label(state.status)} · {state.run_id}", state.run_id)
-            )
-        return choices
+    def runs(
+        self,
+        kind: str | None = None,
+        *,
+        include_all: bool = False,
+    ) -> list[tuple[str, str]]:
+        states = self.service.runs.list(limit=1000)
+        if not include_all and kind == "entity":
+            states = [state for state in states if state.entity_review_tasks]
+        elif not include_all and kind == "claim":
+            states = [state for state in states if state.review_tasks]
+        elif not include_all and kind == "visual":
+            states = [state for state in states if state.visual_review_tasks]
+        elif not include_all and kind == "validation":
+            states = [state for state in states if state.validation.issues]
+        return friendly_run_choices(self.service, states, locale="zh-CN")
 
     async def queue(
         self,
@@ -152,24 +159,26 @@ class ReviewController:
             )
 
 
-def build_review_tabs(service: PrismKEService) -> None:
+def build_review_tabs(service: PrismKEService) -> dict[str, Any]:
     import gradio as gr
 
     controller = ReviewController(service)
+    controls: dict[str, Any] = {}
     for kind, title, tab_id in (
         ("entity", "实体审核", "entity-review"),
         ("claim", "事实审核", "claim-review"),
     ):
         with gr.Tab(title, id=tab_id):
-            _build_review_tab(gr, controller, kind)
+            controls[kind] = _build_review_tab(gr, controller, kind)
     from frontend.corrections import build_correction_tab
 
     build_correction_tab(service)
+    return controls
 
 
-def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
+def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> Any:
     service = controller.service
-    run_choices = controller.runs()
+    run_choices = controller.runs(kind)
     page_header(gr, "entity-review" if kind == "entity" else "claim-review")
     with gr.Row(equal_height=True, elem_classes="compact-action-row"):
         with gr.Row(scale=4, equal_height=True, elem_classes="compact-action-fields"):
@@ -198,6 +207,7 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
             min_width=140,
             elem_classes="compact-action-button",
         )
+    show_all_runs = gr.Checkbox(label="显示全部运行", value=False)
     progress = gr.Textbox(label="审核进度", interactive=False)
     table = gr.Dataframe(
         headers=["对象", "状态", "风险提示", "审核原因"],
@@ -294,7 +304,7 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
             [
                 [
                     row["label"],
-                    status_label(row["status"]),
+                    status_label(row["status"], "zh-CN"),
                     "；".join(row["flags"]),
                     "；".join(row["reasons"]),
                 ]
@@ -309,7 +319,9 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
             ),
             f"实体待审核 {p.get('entity_pending', 0)} · 事实待审核 {p.get('claim_pending', 0)} · "
             f"校验待处理 {p.get('validation_pending', 0)} · "
-            f"{status_label(p.get('status', '未选择运行'))} · {p.get('node', '')}"
+            f"{status_label(p.get('status', '未选择运行'), 'zh-CN')} · "
+            f"{node_label(p.get('node', ''), 'zh-CN')}"
+            + (" · 本运行无需审核" if rid and not rows else "")
             + (" · 同步待恢复：继续与写图已禁用" if p.get("review_sync_pending") else ""),
             gr.update(interactive=p.get("can_resume", False)),
             p.get("submission"),
@@ -453,8 +465,8 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
 
     select_row.__annotations__["event"] = gr.SelectData
 
-    def refresh_runs() -> Any:
-        choices = controller.runs()
+    def refresh_runs(include_all: bool) -> Any:
+        choices = controller.runs(kind, include_all=include_all)
         return dropdown_update(gr, choices, empty_label="暂无运行")
 
     queue_inputs = [run, status, risk]
@@ -476,10 +488,13 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
         trigger(guard_ui(gr, load_queue, 8), queue_inputs, queue_outputs).then(
             guard_ui(gr, load_task, 11), [run, task], task_outputs
         )
-    refresh.click(refresh_runs, outputs=[run]).then(
+    refresh.click(refresh_runs, show_all_runs, [run]).then(
         guard_ui(gr, load_queue, 8),
         queue_inputs,
         queue_outputs,
+    ).then(guard_ui(gr, load_task, 11), [run, task], task_outputs)
+    show_all_runs.change(refresh_runs, show_all_runs, [run]).then(
+        guard_ui(gr, load_queue, 8), queue_inputs, queue_outputs
     ).then(guard_ui(gr, load_task, 11), [run, task], task_outputs)
     table.select(guard_ui(gr, select_row), [task_ids], [task]).then(
         guard_ui(gr, load_task, 11), [run, task], task_outputs
@@ -512,3 +527,4 @@ def _build_review_tab(gr: Any, controller: ReviewController, kind: str) -> None:
             [run, task],
             task_outputs,
         )
+    return run

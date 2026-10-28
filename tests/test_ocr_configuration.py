@@ -9,6 +9,7 @@ from src.core.settings import Settings
 from src.providers.ocr import (
     PaddleOCRProvider,
     detect_ocr_device,
+    ensure_ocr_device_available,
     resolve_ocr_device,
     resolve_ocr_language,
 )
@@ -83,6 +84,22 @@ def test_explicit_ocr_device_bypasses_detection(monkeypatch: pytest.MonkeyPatch)
     assert resolve_ocr_device("gpu:2") == "gpu:2"
     with pytest.raises(ValueError, match="ocr_device"):
         resolve_ocr_device("cuda:0")
+
+
+def test_explicit_gpu_provider_blocks_when_paddle_has_no_cuda(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paddle = SimpleNamespace(
+        device=SimpleNamespace(
+            is_compiled_with_cuda=lambda: False,
+            cuda=SimpleNamespace(device_count=lambda: 0),
+        )
+    )
+    monkeypatch.setattr("src.providers.ocr.import_module", lambda _: paddle)
+    with pytest.raises(RuntimeError, match="OCR_GPU_UNAVAILABLE"):
+        PaddleOCRProvider(device="gpu:0")
+    with pytest.raises(RuntimeError, match="OCR_GPU_UNAVAILABLE"):
+        ensure_ocr_device_available("gpu:0")
 
 
 @pytest.mark.parametrize(

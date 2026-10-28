@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from frontend.app import normalize_session_key
 from frontend.schema_input import resolve_schema, schema_summary
 from src.core.ids import canonical_hash
 from src.core.settings import Settings
@@ -18,6 +19,13 @@ entity_types:
     aliases: [person]
 relations: []
 """
+
+
+def test_empty_session_api_key_safely_falls_back_to_server_configuration() -> None:
+    assert normalize_session_key(None) is None
+    assert normalize_session_key("") is None
+    assert normalize_session_key("   ") is None
+    assert normalize_session_key("  temporary-key  ") == "temporary-key"
 
 
 def test_schema_text_and_upload_materialize_the_same_schema(tmp_path: Path) -> None:

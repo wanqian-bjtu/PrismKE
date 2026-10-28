@@ -28,6 +28,11 @@ from frontend.presentation import (
     visual_target_label,
 )
 from frontend.review import build_review_tabs
+from frontend.run_presentation import (
+    friendly_run_choices,
+    local_time,
+    node_label,
+)
 from frontend.schema_input import resolve_schema, schema_summary
 from frontend.theme import APP_CSS
 from frontend.validation import build_validation_tab
@@ -60,6 +65,12 @@ def _state_summary(state: Any) -> dict[str, Any]:
         "errors": state.errors,
         "provider_calls": [item.model_dump(mode="json") for item in state.provider_calls],
     }
+
+
+def normalize_session_key(value: str | None) -> str | None:
+    """Normalize an optional browser-session credential without persisting it."""
+
+    return (value or "").strip() or None
 
 
 def _state_status(state: Any, execution: dict[str, Any] | None = None) -> str:
@@ -440,8 +451,8 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             vlm_model=vlm_model,
             operator=operator,
             credentials=TransientProviderCredentials(
-                llm_api_key=llm_api_key.strip() or None,
-                vlm_api_key=vlm_api_key.strip() or None,
+                llm_api_key=normalize_session_key(llm_api_key),
+                vlm_api_key=normalize_session_key(vlm_api_key),
             ),
             pdf_parse_mode=PDFParseMode(pdf_parse_mode),
         )
@@ -938,6 +949,20 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             value=choices[0][1] if choices else None,
         )
 
+    def visual_review_runs(include_all: bool = False, selected: str | None = None) -> Any:
+        states = service.runs.list(limit=1000)
+        if not include_all:
+            states = [state for state in states if state.visual_review_tasks]
+        choices = friendly_run_choices(service, states, locale="zh-CN")
+        valid_ids = {state.run_id for state in states}
+        value = selected if selected in valid_ids else choices[0][1] if choices else None
+        return dropdown_update(
+            gr,
+            choices,
+            empty_label="暂无运行",
+            value=value,
+        )
+
     async def visual_review_detail(
         run_id: str | None, task_id: str | None
     ) -> tuple[dict[str, Any], str | None, int]:
@@ -1186,10 +1211,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         ]
 
     def evidence_runs() -> Any:
-        choices = [
-            (f"{Path(state.input_path).name} · {status_label(state.status)}", state.run_id)
-            for state in service.runs.list(limit=1000)
-        ]
+        choices = friendly_run_choices(service, locale="zh-CN")
         return dropdown_update(
             gr,
             choices,
@@ -1322,10 +1344,10 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                         if state.document
                         else Path(state.input_path).name
                     ),
-                    status_label(state.status),
-                    status_label(execution["status"]),
-                    execution["node"],
-                    execution["updated_at"] or "",
+                    status_label(state.status, "zh-CN"),
+                    status_label(execution["status"], "zh-CN"),
+                    node_label(execution["node"], "zh-CN"),
+                    local_time(execution["updated_at"]),
                 ]
             )
         graph = summary["graph_health"]
@@ -1337,10 +1359,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
 
     def sidebar_run(run_id: str | None) -> tuple[Any, str]:
         states = service.runs.list(limit=1000)
-        choices = [
-            (f"{Path(state.input_path).name} · {status_label(state.status)}", state.run_id)
-            for state in states
-        ]
+        choices = friendly_run_choices(service, states, locale="zh-CN")
         if run_id not in {state.run_id for state in states}:
             run_id = states[0].run_id if states else None
         if not run_id:
@@ -1348,9 +1367,10 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         progress = service.review_progress(run_id)
         execution = progress["execution"]
         text = (
-            f"业务：{status_label(progress['status'])}\n"
-            f"执行：{status_label(execution['status'])}\n"
-            f"节点：{execution['node']}\n实体待审：{progress['entity_pending']} · "
+            f"业务：{status_label(progress['status'], 'zh-CN')}\n"
+            f"执行：{status_label(execution['status'], 'zh-CN')}\n"
+            f"节点：{node_label(execution['node'], 'zh-CN')}\n"
+            f"实体待审：{progress['entity_pending']} · "
             f"事实待审：{progress['claim_pending']} · "
             f"视觉待审：{progress['visual_pending']} · 校验：{progress['validation_pending']}"
         )
@@ -1446,12 +1466,12 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 elem_id="navigation-page",
             )
             current_run = gr.Dropdown(
-                label="当前运行",
+                label="当前任务",
                 elem_id="current-run",
-                **empty_dropdown_kwargs("暂无运行"),
+                **empty_dropdown_kwargs("暂无任务"),
             )
-            run_context = gr.Markdown("暂无运行", elem_classes="sidebar-status")
-            refresh_context = gr.Button("刷新运行")
+            run_context = gr.Markdown("暂无任务", elem_classes="sidebar-status")
+            refresh_context = gr.Button("刷新任务")
             with gr.Accordion("任务配置", open=True):
                 task_mode_input = gr.Dropdown(
                     [
@@ -1877,10 +1897,10 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     extraction_review_button = gr.Button("保存抽取审核")
                     extraction_review_outcome = gr.Markdown("尚未审核抽取结果")
 
-            build_review_tabs(service)
+            review_run_controls = build_review_tabs(service)
             from frontend.execution import build_execution_tab
 
-            build_execution_tab(service, llm_api_key, vlm_api_key)
+            execution_run_control = build_execution_tab(service, llm_api_key, vlm_api_key)
 
             with gr.Tab("证据", id="evidence"):
                 page_header(gr, "evidence")
@@ -2050,6 +2070,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                         min_width=180,
                         elem_classes="compact-action-button",
                     )
+                visual_review_show_all = gr.Checkbox(label="显示全部运行", value=False)
                 visual_review_table = gr.Dataframe(
                     headers=["Task ID", "对象类型", "候选 ID", "状态", "决定", "版本", "原因"],
                     interactive=False,
@@ -2096,6 +2117,19 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 visual_review_submit = gr.Button("提交视觉审核", variant="primary")
                 visual_review_outcome = gr.Markdown("尚未提交视觉审核")
                 visual_review_refresh.click(
+                    guard_ui(gr, visual_review_runs),
+                    [visual_review_show_all, visual_review_run],
+                    visual_review_run,
+                ).then(
+                    guard_ui(gr, visual_review_rows, 2),
+                    visual_review_run,
+                    [visual_review_table, visual_review_selector],
+                )
+                visual_review_show_all.change(
+                    guard_ui(gr, visual_review_runs),
+                    [visual_review_show_all, visual_review_run],
+                    visual_review_run,
+                ).then(
                     guard_ui(gr, visual_review_rows, 2),
                     visual_review_run,
                     [visual_review_table, visual_review_selector],
@@ -2219,7 +2253,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                         [history_output],
                     )
 
-            build_validation_tab(gr, service)
+            validation_run_control = build_validation_tab(gr, service)
 
             with gr.Tab("版本", id="revisions"):
                 page_header(gr, "revisions")
@@ -2645,8 +2679,60 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         refresh_context.click(
             guard_ui(gr, sidebar_run, 2), [current_run], [current_run, run_context]
         )
-        current_run.change(guard_ui(gr, sidebar_run, 2), [current_run], [current_run, run_context])
-        demo.load(guard_ui(gr, sidebar_run, 2), [current_run], [current_run, run_context])
+
+        def sync_current_task(run_id: str | None) -> tuple[Any, ...]:
+            states = service.runs.list(limit=1000)
+
+            def update(filtered: list[Any]) -> Any:
+                choices = friendly_run_choices(service, filtered, locale="zh-CN")
+                ids = {state.run_id for state in filtered}
+                selected = run_id if run_id in ids else choices[0][1] if choices else None
+                return dropdown_update(
+                    gr,
+                    choices,
+                    empty_label="暂无运行",
+                    value=selected,
+                )
+
+            return (
+                update(states),
+                update([state for state in states if state.entity_review_tasks]),
+                update([state for state in states if state.review_tasks]),
+                update([state for state in states if state.validation.issues]),
+                update(states),
+                update(states),
+                update(states),
+                update([state for state in states if state.visual_review_tasks]),
+            )
+
+        synced_run_controls = [
+            execution_run_control,
+            review_run_controls["entity"],
+            review_run_controls["claim"],
+            validation_run_control,
+            evidence_run,
+            reflection_run,
+            agent_run,
+            visual_review_run,
+        ]
+        current_run.change(
+            guard_ui(gr, sidebar_run, 2),
+            [current_run],
+            [current_run, run_context],
+        ).then(
+            guard_ui(gr, sync_current_task, 8),
+            current_run,
+            synced_run_controls,
+        )
+        demo.load(
+            guard_ui(gr, sidebar_run, 2),
+            [current_run],
+            [current_run, run_context],
+        ).then(
+            guard_ui(gr, sync_current_task, 8),
+            current_run,
+            synced_run_controls,
+        )
         demo.load(guard_ui(gr, evidence_runs), outputs=evidence_run).then(
             guard_ui(gr, run_claims), evidence_run, evidence_claim
         ).then(
@@ -2656,7 +2742,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         )
         demo.load(guard_ui(gr, evidence_runs), outputs=reflection_run)
         demo.load(guard_ui(gr, evidence_runs), outputs=agent_run)
-        demo.load(guard_ui(gr, evidence_runs), outputs=visual_review_run).then(
+        demo.load(guard_ui(gr, visual_review_runs), outputs=visual_review_run).then(
             guard_ui(gr, visual_review_rows, 2),
             visual_review_run,
             [visual_review_table, visual_review_selector],

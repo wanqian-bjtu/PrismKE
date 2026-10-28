@@ -34,6 +34,7 @@ STATUS_LABELS = {
     "excluded": "已排除",
     "queued": "排队中",
     "running": "运行中",
+    "cancelling": "正在取消",
     "completed": "已完成",
     "succeeded": "已完成",
     "failed": "失败",
@@ -42,6 +43,12 @@ STATUS_LABELS = {
     "cancelled": "已取消",
     "canceled": "已取消",
     "paused": "已暂停",
+    "interrupted": "已中断",
+    "awaiting_review": "等待审核",
+    "awaiting_commit": "等待提交",
+    "credential_required": "需要凭据",
+    "disabled": "禁用",
+    "reused": "已复用",
     "created": "已创建",
     "candidate": "候选",
     "active": "有效",
@@ -67,6 +74,10 @@ VISUAL_TARGET_LABELS = {
 }
 
 _ERROR_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(r"OCR_GPU_UNAVAILABLE", re.I),
+        "所选 OCR GPU 不可用。请安装兼容的 GPU 版 Paddle，或选择自动/CPU。",
+    ),
     (
         re.compile(r"reviewer,\s*reason\s+and\s+request_id\s+are\s+required", re.I),
         "请填写审核人、审核原因和请求编号。",

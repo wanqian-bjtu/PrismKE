@@ -60,6 +60,27 @@ def resolve_ocr_language(value: str) -> str:
     raise ValueError("ocr_lang must be mixed, zh, en or legacy ch")
 
 
+def ensure_ocr_device_available(value: str) -> None:
+    """Fail explicitly when a requested GPU device is unavailable."""
+
+    match = re.fullmatch(r"gpu:(\d+)", value)
+    if match is None:
+        return
+    index = int(match.group(1))
+    try:
+        paddle = import_module("paddle")
+        device = paddle.device
+        compiled_check = getattr(device, "is_compiled_with_cuda", None) or getattr(
+            paddle, "is_compiled_with_cuda", None
+        )
+        available = bool(compiled_check and compiled_check())
+        count = int(device.cuda.device_count()) if available else 0
+    except Exception as exc:
+        raise RuntimeError("OCR_GPU_UNAVAILABLE") from exc
+    if index >= count:
+        raise RuntimeError("OCR_GPU_UNAVAILABLE")
+
+
 class DisabledOCRProvider:
     def fingerprint(self) -> str:
         return "disabled"
@@ -79,6 +100,7 @@ class PaddleOCRProvider:
         self.requested_device = device
         self.requested_language = lang
         self.device = resolve_ocr_device(device)
+        ensure_ocr_device_available(self.device)
         self.lang = resolve_ocr_language(lang)
         self.model = model
         self._engine: Any = None

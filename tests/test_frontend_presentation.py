@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 import ast
+from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 import frontend.presentation as presentation
 from frontend.i18n import EN_BY_ZH, normalize_locale, tr
+from frontend.run_presentation import (
+    friendly_run_label,
+    local_time,
+    node_label,
+    provider_usage_label,
+)
 
 
 class FakeGradio:
@@ -33,6 +41,50 @@ def test_user_facing_enum_labels_keep_internal_values_separate() -> None:
     assert presentation.media_type_label("image", "zh-CN") == "图片"
     assert presentation.status_label("running", "zh-CN") == "运行中"
     assert presentation.media_type_label("future_type") == "future_type"
+    assert presentation.status_label("disabled", "zh-CN") == "禁用"
+    assert presentation.status_label("completed", "zh-CN") == "已完成"
+
+
+def test_friendly_run_label_uses_task_file_count_and_beijing_time() -> None:
+    batch = SimpleNamespace(
+        items=[SimpleNamespace(filename="report.pdf"), SimpleNamespace(filename="photo.png")],
+        created_at=datetime(2026, 10, 27, 12, 17, tzinfo=UTC),
+    )
+    service = SimpleNamespace(
+        batches=SimpleNamespace(exists=lambda _id: True, load=lambda _id: batch),
+        executions=SimpleNamespace(repository=SimpleNamespace()),
+    )
+    state = SimpleNamespace(
+        run_id="run:1",
+        batch_id="batch:1",
+        task_mode="knowledge_graph_construction",
+        input_path="ignored.pdf",
+        document=None,
+    )
+    assert friendly_run_label(service, state, "zh-CN") == (
+        "完整知识构建 · report.pdf · 2个文件 · 2026-10-27 20:17"
+    )
+    assert friendly_run_label(service, state, "en") == (
+        "Knowledge graph construction · report.pdf · 2 files · 2026-10-27 20:17"
+    )
+    assert local_time(datetime(2026, 10, 27, 12, 17, 30, tzinfo=UTC)) == (
+        "2026-10-27 20:17:30"
+    )
+    assert node_label("resolve_entities", "zh-CN") == "实体链接与消歧"
+
+
+def test_provider_usage_is_specific_or_explicitly_unavailable() -> None:
+    item = {
+        "usage": {
+            "prompt_tokens": 120,
+            "completion_tokens": 30,
+            "total_tokens": 150,
+        }
+    }
+    assert provider_usage_label(item, "zh-CN") == "输入 120 · 输出 30 · 总计 150"
+    assert provider_usage_label(item, "en") == "Input 120 · Output 30 · Total 150"
+    assert provider_usage_label({"usage": {}}, "zh-CN") == "未提供"
+    assert provider_usage_label({"usage": {}}, "en") == "Not provided"
 
 
 def test_locale_catalog_has_stable_defaults_and_complete_pairs() -> None:

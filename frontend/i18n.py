@@ -644,6 +644,82 @@ EN_BY_ZH.update(
         "Schema 内容格式无效，请检查 JSON/YAML 语法和字段约束。": "The Schema is invalid. Check its JSON/YAML syntax and field constraints.",
         "实体清单必须是合法的 JSON 数组": "The entity list must be a valid JSON array.",
         "操作失败，请刷新后重试。": "The operation failed. Refresh and try again.",
+        "当前任务": "Current task",
+        "暂无任务": "No tasks available",
+        "刷新任务": "Refresh tasks",
+        "显示全部运行": "Show all runs",
+        "本运行无需审核": "This run requires no review",
+        "本运行无校验问题": "This run has no validation issues",
+        "禁用": "Disabled",
+        "正在取消": "Cancelling",
+        "已中断": "Interrupted",
+        "等待审核": "Awaiting review",
+        "等待提交": "Awaiting commit",
+        "需要凭据": "Credentials required",
+        "已复用": "Reused",
+        "文档级": "Document-level",
+        "未提供": "Not provided",
+        "输入 {input} · 输出 {output} · 总计 {total}": (
+            "Input {input} · Output {output} · Total {total}"
+        ),
+        "工作流节点说明": "Workflow node guide",
+        "节点代码": "Node code",
+        "节点名称": "Node name",
+        "作用": "Purpose",
+        "登记输入": "Ingest input",
+        "解析文档": "Parse document",
+        "生成媒体资产": "Materialize media assets",
+        "执行 OCR": "Run OCR",
+        "持久化证据": "Persist evidence",
+        "加载 Schema": "Load Schema",
+        "文本候选抽取": "Extract text candidates",
+        "视觉候选抽取": "Extract visual candidates",
+        "图文候选对齐": "Align modalities",
+        "候选反思与修复": "Reflect and repair candidates",
+        "实体链接与消歧": "Resolve entities",
+        "事实规范化": "Normalize claims",
+        "冲突检测": "Detect conflicts",
+        "风险路由": "Route by risk",
+        "形成抽取结果": "Finalize extraction result",
+        "准备图谱提交": "Prepare graph commit",
+        "原子写入图谱": "Commit graph atomically",
+        "登记输入文件、任务模式、Schema 与 Provider 配置。": "Register input files, task mode, Schema, and Provider configuration.",
+        "将输入解析为统一的 DocumentIR。": "Parse the input into a unified DocumentIR.",
+        "生成并校验图片、页面、表格等媒体资产。": "Materialize and validate image, page, table, and other media assets.",
+        "只对需要文字识别的图片或页面区域执行 OCR。": "Run OCR only on images or page regions that require text recognition.",
+        "保存证据定位、哈希和派生产物并验证完整性。": "Persist evidence locators, hashes, and derived artifacts and verify integrity.",
+        "读取、规范化并校验本次运行使用的 Schema。": "Load, normalize, and validate the Schema used by this run.",
+        "从文本证据中抽取实体、关系或其他候选。": "Extract entities, relations, and other candidates from textual evidence.",
+        "从视觉证据中抽取媒体关系和视觉候选。": "Extract media relations and visual candidates from visual evidence.",
+        "对齐文本与视觉候选，保留一致或冲突证据。": "Align text and visual candidates while retaining supporting or conflicting evidence.",
+        "按预算对候选执行反思、修复和结构化重试。": "Reflect on, repair, and structurally retry candidates within budget.",
+        "执行实体链接、NIL 判定、规范化与消歧。": "Perform entity linking, NIL decisions, normalization, and disambiguation.",
+        "规范化事实主语、关系、宾语和值。": "Normalize claim subjects, relations, objects, and values.",
+        "识别候选之间以及图文之间的冲突。": "Detect conflicts among candidates and across text and images.",
+        "按风险和证据完整性决定自动通过或人工审核。": "Route candidates to automatic acceptance or human review by risk and evidence integrity.",
+        "形成可查看、审核和导出的抽取结果。": "Create extraction results that can be viewed, reviewed, and exported.",
+        "生成确定性的 GraphCommit 预览并执行硬校验。": "Create a deterministic GraphCommit preview and run hard validation.",
+        "在一个事务中原子写入图谱并创建 Revision。": "Write the graph atomically in one transaction and create a Revision.",
+        "OCR、视觉与图谱提交分支会根据输入媒体、任务模式和写图资格显示为禁用。": "OCR, visual, and graph-commit branches are disabled when the input media, task mode, or graph-write eligibility does not require them.",
+        "文本抽取": "Text extraction",
+        "视觉抽取": "Visual extraction",
+        "OCR 识别": "OCR",
+        "图谱提交": "Graph commit",
+        "安全取消：已完成任务不可取消。恢复运行：已完成任务不可恢复。": "Safe cancellation: completed tasks cannot be cancelled. Resume: completed tasks cannot be resumed.",
+        "安全取消：当前任务正在排队或执行，可请求在安全检查点停止。": "Safe cancellation: this task is queued or running and can stop at a safe checkpoint.",
+        "安全取消：仅排队中、运行中或正在取消的任务可用。": "Safe cancellation is available only for queued, running, or cancelling tasks.",
+        "恢复运行：当前阻断条件已解除，可从检查点继续。": "Resume: blocking conditions are cleared and the task can continue from its checkpoint.",
+        "恢复运行：仅中断、失败、凭据缺失或审核完成后可继续的任务可用。": "Resume is available only for interrupted or failed tasks, missing credentials, or tasks ready after review.",
+        "尚未选择任务。": "No task selected.",
+        "时间未知": "Time unknown",
+        "未命名文件": "Unnamed file",
+        "实体抽取": "Entity extraction",
+        "关系抽取": "Relation extraction",
+        "Schema 信息抽取": "Schema-guided information extraction",
+        "端到端实体关系抽取": "Joint entity and relation extraction",
+        "实体关系抽取与消歧": "Joint extraction and disambiguation",
+        "完整知识构建": "Knowledge graph construction",
+        "所选 OCR GPU 不可用。请安装兼容的 GPU 版 Paddle，或选择自动/CPU。": "The selected OCR GPU is unavailable. Install a compatible GPU build of Paddle or select Automatic/CPU.",
     }
 )
 
@@ -722,6 +798,14 @@ def browser_i18n_bootstrap_js() -> str:
             .replace(/^设置已保存 · 图存储 (.+?) · LLM (.+?)( · 需要重启服务)?$/, (_, store, model, restart) => `Settings saved · Graph store ${{store}} · LLM ${{model}}${{restart ? ' · Service restart required' : ''}}`)
             .replace(/^操作失败，请刷新后重试；如问题持续，请联系管理员。错误编号：([a-f0-9]+)。$/i, 'The operation failed. Refresh and try again. If it persists, contact the administrator with error reference: $1.')
             .replace(/^运行 (\d+) · 执行中 (\d+) · 待审核 (\d+) · 阻断问题 (\d+) · 工作器 (.+)$/, 'Runs $1 · Running $2 · Pending review $3 · Blocking issues $4 · Worker $5')
+            .replace(/^实体抽取 ·/, 'Entity extraction ·')
+            .replace(/^关系抽取 ·/, 'Relation extraction ·')
+            .replace(/^Schema 信息抽取 ·/, 'Schema-guided information extraction ·')
+            .replace(/^端到端实体关系抽取 ·/, 'Joint entity and relation extraction ·')
+            .replace(/^实体关系抽取与消歧 ·/, 'Joint extraction and disambiguation ·')
+            .replace(/^完整知识构建 ·/, 'Knowledge graph construction ·')
+            .replace(/ · (\d+)个文件 · /, (_, count) => ` · ${{count}} ${{count === '1' ? 'file' : 'files'}} · `)
+            .replace(/^输入 (\d+) · 输出 (\d+) · 总计 (\d+)$/, 'Input $1 · Output $2 · Total $3')
             .replace(/· 健康 ·/g, '· Healthy ·');
         }}
         return text;
@@ -731,6 +815,14 @@ def browser_i18n_bootstrap_js() -> str:
         .replace(/^Automatic \(current: (CPU|GPU 0)\)$/, '自动（当前：$1）')
         .replace(/^LLM: (Configured|Not configured) · VLM: (Configured|Not configured)$/, (_, llm, vlm) => `LLM：${{llm === 'Configured' ? '已配置' : '未配置'}} · VLM：${{vlm === 'Configured' ? '已配置' : '未配置'}}`)
         .replace(/^Settings saved · Graph store (.+?) · LLM (.+?)( · Service restart required)?$/, (_, store, model, restart) => `设置已保存 · 图存储 ${{store}} · LLM ${{model}}${{restart ? ' · 需要重启服务' : ''}}`)
+        .replace(/^Entity extraction ·/, '实体抽取 ·')
+        .replace(/^Relation extraction ·/, '关系抽取 ·')
+        .replace(/^Schema-guided information extraction ·/, 'Schema 信息抽取 ·')
+        .replace(/^Joint entity and relation extraction ·/, '端到端实体关系抽取 ·')
+        .replace(/^Joint extraction and disambiguation ·/, '实体关系抽取与消歧 ·')
+        .replace(/^Knowledge graph construction ·/, '完整知识构建 ·')
+        .replace(/ · (\d+) files? · /, ' · $1个文件 · ')
+        .replace(/^Input (\d+) · Output (\d+) · Total (\d+)$/, '输入 $1 · 输出 $2 · 总计 $3')
         .replace(/^✓ Valid · Schema (.+?) · Version (.+?) · Entity types (\d+) · Relations (\d+) · Hash ([a-f0-9]+)$/i, '✓ 有效 · Schema $1 · 版本 $2 · 实体类型 $3 · 关系 $4 · 哈希 $5');
       const translateRaw = (raw, locale) => {{
         if (locale === 'en') return replaceDynamic(prismkeEnglish[raw] || raw, locale);
@@ -853,6 +945,14 @@ def browser_i18n_bootstrap_js() -> str:
           records.forEach(record => {{
             if (record.type === 'characterData') translateTextNode(record.target, locale);
             record.addedNodes?.forEach(node => translateTree(node, locale));
+          }});
+          // Gradio updates dropdown and disabled-input values through DOM
+          // properties rather than text nodes.  Re-translate those controls
+          // after each render batch so late async updates cannot leave a
+          // Chinese empty-state value in the English interface.
+          requestAnimationFrame(() => {{
+            translateComboboxValues(locale);
+            translateApplicationValues(locale);
           }});
         }});
         window.__prismkeI18nObserver.observe(document.body, {{childList: true, subtree: true, characterData: true}});

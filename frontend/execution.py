@@ -1,5 +1,6 @@
 """Execution controls use the same durable service as CLI and API frontend."""
 
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -10,6 +11,14 @@ from frontend.presentation import (
     guard_ui,
     status_label,
 )
+from frontend.run_presentation import (
+    branch_label,
+    friendly_run_choices,
+    local_time,
+    node_label,
+    provider_usage_label,
+    workflow_node_guide,
+)
 from src.domain import RequestReconciliation
 from src.workflow import PrismKEService
 
@@ -18,18 +27,27 @@ def build_execution_tab(
     service: PrismKEService,
     llm_api_key_input: Any | None = None,
     vlm_api_key_input: Any | None = None,
-) -> None:
+) -> Any:
     import gradio as gr
+
+    def action_help(execution: dict[str, Any], can_resume: bool) -> str:
+        if execution["status"] == "completed":
+            return "安全取消：已完成任务不可取消。恢复运行：已完成任务不可恢复。"
+        cancel = (
+            "安全取消：当前任务正在排队或执行，可请求在安全检查点停止。"
+            if execution["can_cancel"]
+            else "安全取消：仅排队中、运行中或正在取消的任务可用。"
+        )
+        resume = (
+            "恢复运行：当前阻断条件已解除，可从检查点继续。"
+            if can_resume
+            else "恢复运行：仅中断、失败、凭据缺失或审核完成后可继续的任务可用。"
+        )
+        return f"{cancel}\n\n{resume}"
 
     def refresh(run_id: str | None) -> tuple[Any, ...]:
         states = service.runs.list(limit=1000)
-        choices = [
-            (
-                f"{s.run_id} · {status_label(service.executions.view(s.run_id)['status'])}",
-                s.run_id,
-            )
-            for s in states
-        ]
+        choices = friendly_run_choices(service, states, locale="zh-CN")
         if run_id not in {s.run_id for s in states}:
             run_id = states[0].run_id if states else None
         if not run_id:
@@ -47,6 +65,10 @@ def build_execution_tab(
                 gr.update(interactive=False),
                 gr.update(interactive=False),
                 gr.update(interactive=False),
+                gr.update(visible=False),
+                gr.update(visible=False),
+                gr.update(visible=False),
+                "尚未选择任务。",
             )
         progress = service.review_progress(run_id)
         execution = progress["execution"]
@@ -62,33 +84,35 @@ def build_execution_tab(
         event_rows = [
             [
                 e.version,
-                status_label(e.status),
-                e.node,
+                status_label(e.status, "zh-CN"),
+                node_label(e.node, "zh-CN"),
                 e.reason or "",
-                e.created_at.isoformat(),
+                local_time(e.created_at),
             ]
             for e in service.executions.repository.events(run_id)
         ]
         branch_rows = [
             [
-                item.branch,
-                status_label(item.status),
+                branch_label(item.branch, "zh-CN"),
+                status_label(item.status, "zh-CN"),
                 f"{item.completed}/{item.total if item.total is not None else '?'}",
                 item.current_asset or "",
-                item.updated_at.isoformat(),
+                local_time(item.updated_at),
             ]
             for item in branches
         ]
         request_rows = [
             [
                 item["request_id"],
-                status_label(item["status"]),
-                item["metadata"].get("node", ""),
-                item["metadata"].get("asset_id", ""),
-                "已知" if item["usage_known"] else "未知",
+                status_label(item["status"], "zh-CN"),
+                node_label(item["metadata"].get("node", ""), "zh-CN"),
+                item["metadata"].get("asset_id") or "文档级",
+                provider_usage_label(item, "zh-CN"),
             ]
             for item in requests
         ]
+        state = service.show_run(run_id)
+        is_pdf = Path(state.input_path).suffix.lower() == ".pdf"
         parse_view = service.pdf_parse_view(run_id)
         decision = parse_view["decision"]
         if decision is None:
@@ -110,7 +134,7 @@ def build_execution_tab(
             if decision.actual_parser == "mineru":
                 parser_summary += (
                     f"\n\nMinerU 状态 "
-                    f"`{status_label(decision.mineru_status or 'pending')}` · "
+                    f"`{status_label(decision.mineru_status or 'pending', 'zh-CN')}` · "
                     f"任务 `{decision.mineru_job_id or '尚未创建'}` · "
                     f"产物清单 "
                     f"`{(decision.artifact_manifest_hash or '尚未生成')[:16]}`"
@@ -122,9 +146,9 @@ def build_execution_tab(
                 and not parse_view["fallback_approved"]
             )
         summary = (
-            f"### {status_label(execution['status'])}\n"
-            f"业务状态：`{status_label(progress['status'])}` · "
-            f"当前节点：`{execution['node']}` · "
+            f"### {status_label(execution['status'], 'zh-CN')}\n"
+            f"业务状态：`{status_label(progress['status'], 'zh-CN')}` · "
+            f"当前节点：`{node_label(execution['node'], 'zh-CN')}` · "
             f"尝试次数：{execution['attempt']} · 未知请求：{len(unknown)}\n\n"
             f"实体待审 {progress['entity_pending']} · 事实待审 "
             f"{progress['claim_pending']} · 校验问题 {progress['validation_pending']}"
@@ -154,11 +178,15 @@ def build_execution_tab(
             gr.update(interactive=progress["can_resume"]),
             gr.update(interactive=bool(request_choices)),
             gr.update(interactive=fallback_available),
+            gr.update(visible=is_pdf),
+            gr.update(visible=fallback_available),
+            gr.update(visible=bool(request_choices)),
+            action_help(execution, progress["can_resume"]),
         )
 
     def cancel(run_id: str, operator: str, reason: str, version: int) -> str:
         task = service.executions.cancel(run_id, operator, reason, uuid4().hex, version)
-        return f"取消请求已保存：{status_label(task.status)}"
+        return f"取消请求已保存：{status_label(task.status, 'zh-CN')}"
 
     def resume(
         run_id: str,
@@ -226,17 +254,18 @@ def build_execution_tab(
                 elem_classes="compact-action-button",
             )
         summary = gr.Markdown("### 尚无执行任务")
-        with gr.Accordion("PDF 解析决定", open=True):
+        with gr.Accordion("PDF 解析决定", open=False, visible=False) as parser_panel:
             parser_summary = gr.Markdown("尚无 PDF 解析决定。")
             gr.Markdown(
                 "自动模式选择 MinerU 后不会静默回退。只有解析阻断时，"
                 "操作者填写身份与原因，才可改用 PyMuPDF 重试。"
             )
-            with gr.Row():
-                fallback_operator = gr.Textbox(label="降级确认人")
-                fallback_reason = gr.Textbox(label="降级原因")
-            fallback_button = gr.Button("确认使用 PyMuPDF 重试", interactive=False)
-            fallback_output = gr.Textbox(label="降级结果", interactive=False)
+            with gr.Group(visible=False) as fallback_group:
+                with gr.Row():
+                    fallback_operator = gr.Textbox(label="降级确认人")
+                    fallback_reason = gr.Textbox(label="降级原因")
+                fallback_button = gr.Button("确认使用 PyMuPDF 重试", interactive=False)
+                fallback_output = gr.Textbox(label="降级结果", interactive=False)
         branches = gr.Dataframe(
             headers=["分支", "状态", "进度", "当前资产", "更新时间"],
             label="分支进度",
@@ -249,15 +278,20 @@ def build_execution_tab(
             interactive=False,
             wrap=True,
         )
+        with gr.Accordion("工作流节点说明", open=False):
+            gr.Markdown(workflow_node_guide("zh-CN"))
         with gr.Row():
             operator = gr.Textbox(label="取消操作者")
             reason = gr.Textbox(label="取消原因")
         with gr.Row():
             cancel_button = gr.Button("安全取消", interactive=False)
             resume_button = gr.Button("恢复运行", interactive=False)
+        operation_help = gr.Markdown("尚未选择任务。", elem_classes="operation-help")
         output = gr.Textbox(label="执行操作结果", interactive=False)
 
-        with gr.Accordion("未知 Provider 请求核对", open=False):
+        with gr.Accordion(
+            "未知 Provider 请求核对", open=False, visible=False
+        ) as reconciliation_panel:
             gr.Markdown(
                 "只有经人工确认“未发送”或“未计费”的请求可重新派发；可能已计费的请求仍保持阻断。"
             )
@@ -301,18 +335,22 @@ def build_execution_tab(
             resume_button,
             reconcile_button,
             fallback_button,
+            parser_panel,
+            fallback_group,
+            reconciliation_panel,
+            operation_help,
         ]
-        timer.tick(guard_ui(gr, refresh, 13), [run], outputs, show_progress="hidden")
-        refresh_button.click(guard_ui(gr, refresh, 13), [run], outputs)
-        run.input(guard_ui(gr, refresh, 13), [run], outputs)
+        timer.tick(guard_ui(gr, refresh, 17), [run], outputs, show_progress="hidden")
+        refresh_button.click(guard_ui(gr, refresh, 17), [run], outputs)
+        run.input(guard_ui(gr, refresh, 17), [run], outputs)
         cancel_button.click(guard_ui(gr, cancel), [run, operator, reason, version], output).then(
-            guard_ui(gr, refresh, 13), [run], outputs
+            guard_ui(gr, refresh, 17), [run], outputs
         )
         resume_inputs = [run, version]
         if llm_api_key_input is not None and vlm_api_key_input is not None:
             resume_inputs.extend([llm_api_key_input, vlm_api_key_input])
         resume_button.click(guard_ui(gr, resume), resume_inputs, output).then(
-            guard_ui(gr, refresh, 13), [run], outputs
+            guard_ui(gr, refresh, 17), [run], outputs
         )
         reconcile_button.click(
             guard_ui(gr, reconcile),
@@ -325,9 +363,10 @@ def build_execution_tab(
                 version,
             ],
             reconcile_output,
-        ).then(guard_ui(gr, refresh, 13), [run], outputs)
+        ).then(guard_ui(gr, refresh, 17), [run], outputs)
         fallback_button.click(
             guard_ui(gr, approve_pdf_fallback),
             [run, fallback_operator, fallback_reason, version],
             fallback_output,
-        ).then(guard_ui(gr, refresh, 13), [run], outputs)
+        ).then(guard_ui(gr, refresh, 17), [run], outputs)
+    return run

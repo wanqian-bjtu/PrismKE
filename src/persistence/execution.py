@@ -268,6 +268,9 @@ class ExecutionRepository:
                 "status": status,
                 "metadata": dict(orjson.loads(metadata)),
                 "usage_known": bool(usage_known),
+                "usage": (
+                    dict(orjson.loads(response)).get("usage", {}) if response else {}
+                ),
                 "recoverable": bool(
                     status == "sent"
                     and dict(orjson.loads(metadata)).get("provider") == "mineru"
