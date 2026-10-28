@@ -116,6 +116,8 @@ from src.domain.tasks import (
 )
 from src.domain.validation import (
     CommitValidationContext,
+    ValidationAction,
+    ValidationCorrectionEvent,
     ValidationIssue,
     ValidationResult,
     ValidationReviewDecision,
@@ -149,6 +151,8 @@ __all__ = [
     "ReviewCorrection",
     "CorrectionGuard",
     "CommitValidationContext",
+    "ValidationAction",
+    "ValidationCorrectionEvent",
     "ValidationIssue",
     "ValidationResult",
     "ValidationReviewDecision",

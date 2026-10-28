@@ -73,9 +73,7 @@ async def test_entity_projection_prefers_canonical_entity_ids_after_resolution(
         )
         assert state.extraction_result is not None
         software_mentions = [
-            item
-            for item in state.extraction_result.entities
-            if item.entity_type == "Software"
+            item for item in state.extraction_result.entities if item.entity_type == "Software"
         ]
         assert len(software_mentions) >= 2
         canonical = CanonicalEntity(
@@ -85,9 +83,7 @@ async def test_entity_projection_prefers_canonical_entity_ids_after_resolution(
             aliases=["Prism KE"],
             source_evidence_ids=list(
                 dict.fromkeys(
-                    evidence_id
-                    for item in software_mentions
-                    for evidence_id in item.evidence_ids
+                    evidence_id for item in software_mentions for evidence_id in item.evidence_ids
                 )
             ),
         )
@@ -159,7 +155,9 @@ async def test_disambiguation_result_can_finish_after_invalid_candidates_are_exc
         assert state.status == "awaiting_review"
         assert state.validation.blocking_count >= 2
 
-        for issue in [item for item in state.validation.issues if item.status == "open"]:
+        open_issues = [item for item in state.validation.issues if item.status == "open"]
+        first_issue_by_candidate = {item.target_id: item for item in reversed(open_issues)}.values()
+        for issue in first_issue_by_candidate:
             state = await service.exclude_validation_issue(
                 state.run_id,
                 issue.id,
@@ -177,5 +175,81 @@ async def test_disambiguation_result_can_finish_after_invalid_candidates_are_exc
             if item.severity == "blocking"
         )
         assert await service.graph_store.list_revisions() == []
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_validation_v2_groups_and_swaps_reversed_candidate(tmp_path: Path) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    schema = repository_root / "configs/schemas/research_documents.yaml"
+    source = tmp_path / "reversed.txt"
+    source.write_text(
+        "Nebula Technology | developed_by | AtlasVision X1 | "
+        "Organization | SoftwareSystem | 0.95\n",
+        encoding="utf-8",
+    )
+    service = PrismKEService(Settings(_env_file=None, runtime_dir=tmp_path / "runtime"))
+    try:
+        state = await service.run(
+            source,
+            schema,
+            "mock",
+            task_mode=TaskMode.JOINT_ENTITY_RELATION_DISAMBIGUATION,
+        )
+        issues = [item for item in state.validation.issues if item.status == "open"]
+        assert len(issues) == 2
+        assert len({item.target_id for item in issues}) == 1
+        assert {item.field_path for item in issues} == {
+            "subject.entity_type",
+            "object.entity_type",
+        }
+
+        preview = await service.preview_validation_correction(
+            state.run_id,
+            [item.id for item in issues],
+            "swap_endpoints",
+            {},
+            state.validation_version,
+        )
+        assert preview["can_apply"] is True
+        assert preview["remaining_issue_count"] == 0
+        assert preview["before"]["subject"]["name"] == "Nebula Technology"
+        assert preview["after"]["subject"]["name"] == "AtlasVision X1"
+
+        corrected = await service.apply_validation_correction(
+            state.run_id,
+            [item.id for item in issues],
+            "swap_endpoints",
+            {},
+            "tester",
+            "the relation direction was reversed",
+            "request-swap-1",
+            state.validation_version,
+        )
+        assert corrected.validation_version == 1
+        assert corrected.validation.blocking_count == 0
+        assert all(item.status == "repaired" for item in corrected.validation.issues)
+        assert corrected.validation_corrections[0].before["id"] != corrected.candidates[0].id
+
+        repeated = await service.apply_validation_correction(
+            state.run_id,
+            [item.id for item in issues],
+            "swap_endpoints",
+            {},
+            "tester",
+            "the relation direction was reversed",
+            "request-swap-1",
+            state.validation_version,
+        )
+        assert repeated.validation_version == 1
+        with pytest.raises(ValueError, match="stale"):
+            await service.preview_validation_correction(
+                state.run_id,
+                [item.id for item in issues],
+                "swap_endpoints",
+                {},
+                0,
+            )
     finally:
         await service.close()

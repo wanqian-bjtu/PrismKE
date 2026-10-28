@@ -47,6 +47,8 @@ from src.api.models import (
     RunAccepted,
     RuntimeSettingsUpdate,
     SplitProposalRequest,
+    ValidationCorrectionApplyRequest,
+    ValidationCorrectionPreviewRequest,
     ValidationExcludeRequest,
     VisualReviewRequest,
 )
@@ -648,6 +650,43 @@ def create_app(
             raise HTTPException(
                 status_code=409, detail="校验问题已处理、过期或当前不可排除"
             ) from exc
+
+    @api.post("/runs/{run_id}/validation-corrections/preview")
+    async def preview_validation_correction(
+        run_id: str, request: ValidationCorrectionPreviewRequest
+    ) -> object:
+        try:
+            return await service.preview_validation_correction(
+                run_id,
+                request.issue_ids,
+                request.action,
+                request.replacement,
+                request.expected_version,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="run not found") from exc
+        except (ValueError, LegacyCheckpointError, Timeout) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @api.post("/runs/{run_id}/validation-corrections/apply")
+    async def apply_validation_correction(
+        run_id: str, request: ValidationCorrectionApplyRequest
+    ) -> object:
+        try:
+            return await service.apply_validation_correction(
+                run_id,
+                request.issue_ids,
+                request.action,
+                request.replacement,
+                request.reviewer,
+                request.reason,
+                request.request_id,
+                request.expected_version,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="run not found") from exc
+        except (ValueError, LegacyCheckpointError, Timeout) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @api.post("/runs/{run_id}/resume", status_code=202)
     async def resume_run(run_id: str, request: ResumeRequest | None = None) -> RunAccepted:

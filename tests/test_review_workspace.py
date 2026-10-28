@@ -118,9 +118,18 @@ async def test_schema_invalid_candidates_are_reviewable_but_never_approved(
     assert len(state.claims) == 1
     assert {i.target_id for i in state.validation.issues} == {wrong_type.id, unknown.id}
     for issue in state.validation.issues:
-        assert issue.allowed_actions == ["exclude"]
+        # Imported runs can contain both validation-v1 issues and freshly generated
+        # validation-v2 issues; exclusion remains the shared safe action.
+        assert "exclude" in issue.allowed_actions
         with pytest.raises((ValueError, KeyError)):
             await service.review(state.run_id, issue.target_id, ReviewDecision.APPROVE, "tester")
+    for target_id in {item.target_id for item in state.validation.issues}:
+        current = service.show_run(state.run_id)
+        issue = next(
+            item
+            for item in current.validation.issues
+            if item.target_id == target_id and item.status == "open"
+        )
         await service.exclude_validation_issue(state.run_id, issue.id, "tester")
     regular = service.show_run(state.run_id).review_tasks[0]
     await service.review(state.run_id, regular.claim_id, ReviewDecision.APPROVE, "tester")

@@ -1,6 +1,24 @@
 """Visual tokens and responsive CSS for the PrismKE Gradio workspace."""
 
 APP_CSS = r"""
+.prismke-export-link {
+  display: flex;
+  min-height: 44px;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: var(--prism-blue, #0758d8);
+  color: #fff !important;
+  font-weight: 650;
+  text-decoration: none !important;
+}
+
+.prismke-export-link:focus-visible {
+  outline: 3px solid var(--prism-amber, #e9a21a);
+  outline-offset: 2px;
+}
+
 :root {
   --prism-bg: #f4f6f8;
   --prism-surface: #ffffff;

@@ -22,6 +22,7 @@ from src.domain import (
     BatchResult,
     BatchRun,
     BatchStatus,
+    CandidateClaim,
     CanonicalEntity,
     ClaimStatus,
     CommitValidationContext,
@@ -42,6 +43,9 @@ from src.domain import (
     SchemaIndex,
     TaskExtractionResult,
     TaskMode,
+    ValidationAction,
+    ValidationCorrectionEvent,
+    ValidationIssue,
     ValidationResult,
     ValidationReviewDecision,
     WorkflowState,
@@ -107,6 +111,7 @@ from src.workflow.cases import (
 from src.workflow.graph import PrismKEWorkflow
 from src.workflow.reflection import REFLECTION_POLICY_VERSION, BoundedReflectionService
 from src.workflow.review_workspace import validate_workspace_run, workspace_metadata
+from src.workflow.validation_corrections import corrected_candidate, replace_candidate
 
 PIPELINE_VERSION = "0.13.0"
 ASSET_POLICY_VERSION = "assets-v3"
@@ -291,9 +296,13 @@ class PrismKEService:
             raise ValueError("run has no parsed document/schema to validate")
         from src.domain import SchemaIndex
 
-        blocked = ValidationService.blocked_candidate_ids(state.candidates, state.validation)
+        excluded = {
+            item.target_id
+            for item in state.validation.issues
+            if item.target_type == "candidate" and item.status == "excluded"
+        }
         issues = await ValidationService().candidates(
-            [c for c in state.candidates if c.id not in blocked],
+            [c for c in state.candidates if c.id not in excluded],
             SchemaIndex(state.output_schema),
             state.document,
             self.evidence_store,
@@ -368,49 +377,266 @@ class PrismKEService:
             len(state.claims),
         )
 
-    async def exclude_validation_issue(
-        self, run_id: str, issue_id: str, reviewer: str, comment: str = ""
+    def _validation_target(
+        self, state: WorkflowState, issue_ids: list[str]
+    ) -> tuple[CandidateClaim, list[Any]]:
+        if not issue_ids:
+            raise ValueError("at least one validation issue is required")
+        issues = [item for item in state.validation.issues if item.id in set(issue_ids)]
+        if len(issues) != len(set(issue_ids)) or any(
+            item.status not in {"open", "deferred"} for item in issues
+        ):
+            raise ValueError("validation issue already handled or unavailable")
+        target_ids = {item.target_id for item in issues}
+        if len(target_ids) != 1:
+            raise ValueError("validation issues must belong to one candidate")
+        target_id = next(iter(target_ids))
+        candidate = next((item for item in state.candidates if item.id == target_id), None)
+        if candidate is None:
+            raise ValueError("validation candidate is unavailable")
+        return candidate, issues
+
+    async def preview_validation_correction(
+        self,
+        run_id: str,
+        issue_ids: list[str],
+        action: ValidationAction,
+        replacement: dict[str, Any] | None = None,
+        expected_version: int | None = None,
+    ) -> dict[str, Any]:
+        state = self.show_run(run_id)
+        if state.pipeline_version != PIPELINE_VERSION or state.status != "awaiting_review":
+            raise ValueError("validation decision is stale or incompatible")
+        if expected_version is not None and state.validation_version != expected_version:
+            raise ValueError("stale validation candidate version")
+        candidate, issues = self._validation_target(state, issue_ids)
+
+        def effective_actions(issue: ValidationIssue) -> set[ValidationAction]:
+            # validation-v1 checkpoints only persisted ``exclude``. The stable
+            # issue code lets validation-v2 reconstruct the safe action set
+            # without rewriting the historical checkpoint.
+            if issue.code == "SCHEMA_DOMAIN_RANGE" and issue.target_type == "candidate":
+                return {
+                    "swap_endpoints",
+                    "replace_relation",
+                    "replace_entity_type",
+                    "replace_entity_link",
+                    "exclude",
+                    "defer",
+                }
+            return set(issue.allowed_actions)
+
+        if any(action not in effective_actions(item) for item in issues):
+            raise ValueError("validation action is not allowed for this issue")
+        patch = dict(replacement or {})
+        projected = corrected_candidate(candidate, action, patch)
+        link_override: dict[str, str | None] = {}
+        if action == "replace_relation" and state.output_schema is not None:
+            relation = SchemaIndex(state.output_schema).relation(str(patch.get("relation") or ""))
+            if relation is None:
+                raise ValueError("replacement relation is not in the run schema")
+            patch["relation"] = relation.id
+            projected = corrected_candidate(candidate, action, patch)
+        elif action == "replace_entity_type" and state.output_schema is not None:
+            entity_type = SchemaIndex(state.output_schema).entity_type(
+                str(patch.get("entity_type") or "")
+            )
+            if entity_type is None:
+                raise ValueError("replacement entity type is not in the run schema")
+            patch["entity_type"] = entity_type
+            projected = corrected_candidate(candidate, action, patch)
+        elif action == "replace_entity_link":
+            endpoint = str(patch.get("endpoint") or "")
+            if endpoint not in {"subject", "object"}:
+                raise ValueError("replacement endpoint must be subject or object")
+            mention = candidate.subject if endpoint == "subject" else candidate.object
+            if not isinstance(mention, type(candidate.subject)):
+                raise ValueError("literal object cannot be linked to an entity")
+            entity_id = str(patch.get("entity_id") or "").strip() or None
+            if entity_id is None:
+                link_override[mention.id] = None
+            else:
+                entity = next((item for item in state.entities if item.id == entity_id), None)
+                if entity is None:
+                    entity = await self.graph_store.get_entity(entity_id)
+                if entity is None or not entity.active:
+                    raise ValueError("replacement canonical entity is unavailable")
+                patch["entity_id"] = entity.id
+                patch["entity_type"] = entity.entity_type
+                projected = corrected_candidate(
+                    candidate,
+                    "replace_entity_type",
+                    {"endpoint": endpoint, "entity_type": entity.entity_type},
+                )
+                link_override[mention.id] = entity.id
+        remaining: list[Any] = []
+        if projected is not None:
+            if state.output_schema is None or state.document is None:
+                raise ValueError("run has no schema or document")
+            remaining = await ValidationService().candidates(
+                [projected],
+                SchemaIndex(state.output_schema),
+                state.document,
+                self.evidence_store,
+            )
+        return {
+            "run_id": run_id,
+            "target_id": candidate.id,
+            "issue_ids": [item.id for item in issues],
+            "action": action,
+            "replacement": patch,
+            "before": candidate.model_dump(mode="json"),
+            "after": projected.model_dump(mode="json") if projected is not None else None,
+            "remaining_issues": [item.model_dump(mode="json") for item in remaining],
+            "remaining_issue_count": len(remaining),
+            "can_apply": action in {"exclude", "defer"} or not remaining,
+            "validation_version": state.validation_version,
+            "link_override": link_override,
+        }
+
+    async def apply_validation_correction(
+        self,
+        run_id: str,
+        issue_ids: list[str],
+        action: ValidationAction,
+        replacement: dict[str, Any],
+        reviewer: str,
+        reason: str,
+        request_id: str,
+        expected_version: int,
     ) -> WorkflowState:
-        if not reviewer.strip():
-            raise ValueError("reviewer is required")
+        person, note, rid = reviewer.strip(), reason.strip(), request_id.strip()
+        if not person or not note or not rid:
+            raise ValueError("reviewer, reason and request_id are required")
         with self.runs.mutation_lock(run_id):
             await self.reviews.recover(run_id)
             state = self.show_run(run_id)
-            if state.pipeline_version != PIPELINE_VERSION or state.status != "awaiting_review":
-                raise ValueError("validation decision is stale or incompatible")
-            issue = next((i for i in state.validation.issues if i.id == issue_id), None)
-            if issue is None or issue.status != "open" or "exclude" not in issue.allowed_actions:
-                raise ValueError("validation issue already handled or unavailable")
-            issue.status = "excluded"
-            state.validation_decisions.append(
-                ValidationReviewDecision(
-                    issue_id=issue_id, reviewer=reviewer.strip(), comment=comment
+            previous = next(
+                (item for item in state.validation_corrections if item.request_id == rid), None
+            )
+            if previous is not None:
+                if (
+                    previous.action != action
+                    or set(previous.issue_ids) != set(issue_ids)
+                    or previous.replacement != replacement
+                    or previous.reviewer != person
+                    or previous.reason != note
+                ):
+                    raise ValueError("request id reused with a different correction")
+                return state
+            preview = await self.preview_validation_correction(
+                run_id, issue_ids, action, replacement, expected_version
+            )
+            if not preview["can_apply"]:
+                raise ValueError("corrected candidate still violates validation constraints")
+            candidate, issues = self._validation_target(state, issue_ids)
+            event_id = stable_id("validation-correction", run_id, rid)
+            projected = (
+                CandidateClaim.model_validate(preview["after"])
+                if preview["after"] is not None
+                else None
+            )
+            if action == "exclude":
+                for item in state.validation.issues:
+                    if item.target_id == candidate.id and item.status in {"open", "deferred"}:
+                        item.status = "excluded"
+            elif action == "defer":
+                for item in state.validation.issues:
+                    if item.target_id == candidate.id and item.status == "open":
+                        item.status = "deferred"
+            else:
+                assert projected is not None
+                state.candidates = replace_candidate(state.candidates, candidate.id, projected)
+                state.text_candidates = replace_candidate(
+                    state.text_candidates, candidate.id, projected
                 )
+                state.visual_candidates = replace_candidate(
+                    state.visual_candidates, candidate.id, projected
+                )
+                if state.extraction_result is not None:
+                    state.extraction_result.relations = replace_candidate(
+                        state.extraction_result.relations, candidate.id, projected
+                    )
+                for item in state.validation.issues:
+                    if item.target_id == candidate.id and item.status in {"open", "deferred"}:
+                        item.status = "repaired"
+                state.validation_entity_overrides.update(preview["link_override"])
+                assert state.output_schema is not None and state.document is not None
+                active = {
+                    item.target_id
+                    for item in state.validation.issues
+                    if item.status == "excluded" and item.target_type == "candidate"
+                }
+                fresh = await ValidationService().candidates(
+                    [item for item in state.candidates if item.id not in active],
+                    SchemaIndex(state.output_schema),
+                    state.document,
+                    self.evidence_store,
+                )
+                state.validation = ValidationService.merge(state.validation, fresh)
+                state.entities = []
+                state.mention_to_entity = {}
+                state.entity_resolution_decisions = []
+                state.entity_review_tasks = []
+                state.claims = []
+                state.conflicts = []
+                state.review_tasks = []
+            state.validation_version += 1
+            event = ValidationCorrectionEvent(
+                id=event_id,
+                run_id=run_id,
+                target_id=candidate.id,
+                issue_ids=[item.id for item in issues],
+                action=action,
+                replacement=preview["replacement"],
+                before=preview["before"],
+                after=preview["after"],
+                reviewer=person,
+                reason=note,
+                request_id=rid,
+                expected_version=expected_version,
+                applied_version=state.validation_version,
+            )
+            state.validation_corrections.append(event)
+            state.validation_decisions.extend(
+                ValidationReviewDecision(
+                    issue_id=item.id,
+                    target_id=candidate.id,
+                    action=action,
+                    reviewer=person,
+                    comment=note,
+                    request_id=rid,
+                    expected_version=expected_version,
+                    replacement=preview["replacement"],
+                )
+                for item in issues
             )
             state.validation = ValidationService.merge(state.validation, [])
-            state.status = (
-                "awaiting_review"
-                if (
-                    state.validation.blocking_count
-                    or any(t.status == "pending" for t in state.entity_review_tasks)
-                    or any(t.status == "pending" for t in state.review_tasks)
-                )
-                else "running"
-            )
-            state.graph_commit = None
+            self.reviews.update_status(state)
             workflow = self.review_workflow(state)
-            if state.current_node == "resolve_entities":
-                updated = await workflow.record_entity_review(state)
-            else:
-                updated = await workflow.record_review(state)
+            updated = await workflow.record_entity_review(state)
             if not updated:
                 raise LegacyCheckpointError("checkpoint unavailable")
-            self.audit.record(
-                "exclude_validation_issue",
-                run_id,
-                state.validation_decisions[-1].model_dump(mode="json"),
-            )
+            self.audit.record("validation_correction", event_id, event.model_dump(mode="json"))
             return state
+
+    async def exclude_validation_issue(
+        self, run_id: str, issue_id: str, reviewer: str, comment: str = ""
+    ) -> WorkflowState:
+        state = self.show_run(run_id)
+        issue = next((item for item in state.validation.issues if item.id == issue_id), None)
+        if issue is None or issue.status != "open":
+            raise ValueError("validation issue already handled or unavailable")
+        return await self.apply_validation_correction(
+            run_id,
+            [issue_id],
+            "exclude",
+            {},
+            reviewer,
+            comment or "excluded by reviewer",
+            stable_id("legacy-validation-request", run_id, issue_id, reviewer, comment),
+            state.validation_version,
+        )
 
     @staticmethod
     def _validate_endpoint(value: str, variable: str) -> None:
@@ -2263,9 +2489,7 @@ class PrismKEService:
             )
             if decision == "approve" and task.target_type == "media_relation":
                 relation_candidate = next(
-                    item
-                    for item in state.candidate_media_relations
-                    if item.id == task.target_id
+                    item for item in state.candidate_media_relations if item.id == task.target_id
                 )
                 if relation_candidate.target_entity_id is None:
                     raise ValueError("VISUAL_REVIEW_TARGET_ENTITY_UNRESOLVED")
@@ -2290,9 +2514,7 @@ class PrismKEService:
                 ]
             elif decision == "approve":
                 assertion_candidate = next(
-                    item
-                    for item in state.candidate_visual_assertions
-                    if item.id == task.target_id
+                    item for item in state.candidate_visual_assertions if item.id == task.target_id
                 )
                 if assertion_candidate.subject_entity_id is None:
                     raise ValueError("VISUAL_REVIEW_SUBJECT_UNRESOLVED")

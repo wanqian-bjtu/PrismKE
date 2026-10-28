@@ -67,6 +67,11 @@ async def test_html_data_uri_image(tmp_path: Path) -> None:
     assert document.media_assets[0].origin == "html_embedded"
     assert "alt: chart" in document.media_assets[0].context_text
     assert "figcaption: Caption" in document.media_assets[0].context_text
+    text_refs = [item for item in document.evidence if item.source_locator]
+    assert text_refs
+    assert all(item.source_locator["document_kind"] == "continuous_html" for item in text_refs)
+    assert text_refs[0].source_locator["selector"] == "p:nth-of-type(1)"
+    assert text_refs[0].source_locator["character_range"] == [0, len("Context")]
 
 
 @pytest.mark.asyncio

@@ -24,6 +24,7 @@ from src.domain import (
     GraphCommit,
     GraphRevision,
     Modality,
+    TaskMode,
     ValidationResult,
 )
 from src.governance.validation import ValidationService
@@ -225,6 +226,54 @@ def test_validation_api_auth_exclusion_and_conflict(tmp_path: Path, schema_path:
         assert client.post(exclude, json={"reviewer": ""}, headers=headers).status_code == 422
         assert client.post(exclude, json={"reviewer": "tester"}, headers=headers).status_code == 200
         assert client.post(exclude, json={"reviewer": "tester"}, headers=headers).status_code == 409
+
+
+def test_validation_correction_api_previews_and_applies_swap(
+    tmp_path: Path, schema_path: Path
+) -> None:
+    import asyncio
+
+    source = tmp_path / "reversed.md"
+    source.write_text(
+        "OpenAI | developed_by | PrismKE | Organization | Software | 0.95",
+        encoding="utf-8",
+    )
+    service = PrismKEService(Settings(_env_file=None, runtime_dir=tmp_path / "runtime"))
+    state = asyncio.run(
+        service.run(
+            source,
+            schema_path,
+            "mock",
+            task_mode=TaskMode.JOINT_ENTITY_RELATION_DISAMBIGUATION,
+        )
+    )
+    issues = [item for item in state.validation.issues if item.status == "open"]
+    assert len(issues) == 2
+    payload = {
+        "issue_ids": [item.id for item in issues],
+        "action": "swap_endpoints",
+        "replacement": {},
+        "expected_version": 0,
+    }
+    with TestClient(create_app(service.settings, service, mount_ui=False)) as client:
+        base = f"/api/v1/runs/{state.run_id}/validation-corrections"
+        preview = client.post(f"{base}/preview", json=payload)
+        assert preview.status_code == 200
+        assert preview.json()["can_apply"] is True
+        applied = client.post(
+            f"{base}/apply",
+            json={
+                **payload,
+                "reviewer": "tester",
+                "reason": "direction is reversed",
+                "request_id": "api-swap-1",
+            },
+        )
+        assert applied.status_code == 200
+        assert applied.json()["validation_version"] == 1
+        stale = client.post(f"{base}/preview", json=payload)
+        assert stale.status_code == 409
+    asyncio.run(service.close())
 
 
 @pytest.mark.asyncio

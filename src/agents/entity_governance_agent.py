@@ -59,6 +59,17 @@ class EntityGovernanceAgent:
         resolution = await resolver.resolve(mentions)
         state.entities = resolution.entities
         state.mention_to_entity = resolution.mention_to_entity
+        for mention_id, entity_id in state.validation_entity_overrides.items():
+            if entity_id is None:
+                state.mention_to_entity.pop(mention_id, None)
+                continue
+            entity = next((item for item in state.entities if item.id == entity_id), None)
+            if entity is None:
+                entity = await self.graph_store.get_entity(entity_id)
+                if entity is None or not entity.active:
+                    raise ValueError("validation entity override is unavailable")
+                state.entities.append(entity)
+            state.mention_to_entity[mention_id] = entity_id
         state.entity_resolution_decisions = resolution.decisions or []
         resolved = {
             item.mention_id: item

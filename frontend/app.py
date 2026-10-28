@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Literal, cast
+from urllib.parse import quote
 from uuid import uuid4
 
 import orjson
@@ -46,7 +47,6 @@ from src.domain import (
     TaskMode,
 )
 from src.workflow import PrismKEService
-from src.workflow.result_export import build_run_export
 from src.workflow.result_projection import (
     aggregate_entity_mentions,
     candidate_graph,
@@ -209,10 +209,7 @@ def _mention_occurrence_rows(state: Any) -> list[list[Any]]:
 def _run_insight_markdown(insight: dict[str, Any]) -> str:
     counts = insight.get("media_type_counts", {})
     lines = [
-        (
-            f"**任务模式** `{insight['task_mode']}` · "
-            f"**输出范围** `{insight['task_mode_scope']}`"
-        ),
+        (f"**任务模式** `{insight['task_mode']}` · **输出范围** `{insight['task_mode_scope']}`"),
         (
             f"**页数** {insight['page_count']} · **DocumentIR 文本块** "
             f"{insight['text_block_count']} · **实体提及** "
@@ -666,6 +663,66 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         state = service.show_run(run_id)
         return run_id, state.batch_id or ""
 
+    def review_destination(run_id: str | None) -> tuple[str, str]:
+        if not run_id:
+            raise ValueError("请先选择待处理任务")
+        state = service.show_run(run_id)
+        if any(item.status in {"open", "deferred"} for item in state.validation.issues):
+            return "review-validation", "validation"
+        if any(item.status == "pending" for item in state.entity_review_tasks):
+            return "review-validation", "entity-review"
+        if any(item.status == "pending" for item in state.review_tasks):
+            return "review-validation", "claim-review"
+        if any(item.status == "pending" for item in state.visual_review_tasks):
+            return "media-knowledge", "visual-review"
+        raise ValueError("当前任务没有待处理的审核或校验事项")
+
+    def pending_review_button(run_id: str | None) -> Any:
+        if not run_id:
+            return gr.update(visible=False, interactive=False)
+        state = service.show_run(run_id)
+        pending = (
+            any(item.status in {"open", "deferred"} for item in state.validation.issues)
+            or any(item.status == "pending" for item in state.entity_review_tasks)
+            or any(item.status == "pending" for item in state.review_tasks)
+            or any(item.status == "pending" for item in state.visual_review_tasks)
+        )
+        return gr.update(visible=state.status == "awaiting_review" and pending, interactive=pending)
+
+    def jump_to_pending(run_id: str | None) -> tuple[Any, Any, Any]:
+        group_id, page_id = review_destination(run_id)
+        choices = page_choices(group_id)
+        return (
+            gr.update(value=group_id),
+            gr.update(choices=choices, value=page_id, visible=len(choices) > 1),
+            gr.update(selected=page_id),
+        )
+
+    def poll_build_status(run_id: str | None) -> tuple[Any, Any, Any, Any]:
+        if not run_id:
+            return (
+                gr.update(),
+                gr.update(),
+                pending_review_button(run_id),
+                gr.update(active=False),
+            )
+        state = service.show_run(run_id)
+        terminal = state.status in {"completed", "failed", "cancelled", "excluded"}
+        if terminal:
+            return (
+                gr.update(),
+                gr.update(),
+                pending_review_button(run_id),
+                gr.update(active=False),
+            )
+        execution = service.executions.view(run_id)
+        return (
+            _state_status(state, execution),
+            _state_summary(state),
+            pending_review_button(run_id),
+            gr.update(active=True),
+        )
+
     def load_result_views(
         run_id: str,
     ) -> tuple[
@@ -760,27 +817,17 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 evidence.append({"id": evidence_id, "hash_verified": False})
         return {"candidate": detail, "evidence": evidence}
 
-    async def candidate_detail_from_plot(
-        run_id: str, item_id: str
-    ) -> tuple[Any, dict[str, Any]]:
+    async def candidate_detail_from_plot(run_id: str, item_id: str) -> tuple[Any, dict[str, Any]]:
         if not item_id:
             return gr.update(), {}
         return gr.update(value=item_id), await candidate_detail(run_id, item_id)
 
-    async def prepare_result_export(run_id: str, include_source: bool) -> str:
+    def result_export_link(run_id: str, include_source: bool) -> str:
         if not run_id:
             raise ValueError("请先选择有抽取结果的运行")
-        export_dir = service.settings.runtime_dir / "ui" / "exports"
-        export_dir.mkdir(parents=True, exist_ok=True)
-        for stale in export_dir.glob("*.zip"):
-            stale.unlink(missing_ok=True)
-        path = await build_run_export(
-            service,
-            run_id,
-            include_source=bool(include_source),
-            output_dir=export_dir,
-        )
-        return str(path)
+        source = "true" if include_source else "false"
+        href = f"/api/v1/runs/{quote(run_id, safe='')}/export?include_source={source}"
+        return f'<a class="prismke-export-link" download href="{href}">下载完整结果 ZIP</a>'
 
     def agent_report(run_id: str | None) -> tuple[list[list[Any]], dict[str, Any]]:
         if not run_id:
@@ -1744,6 +1791,12 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                             "尚未启动构建",
                             elem_classes="workspace-metrics",
                         )
+                        pending_review = gr.Button(
+                            "去处理待办",
+                            variant="primary",
+                            visible=False,
+                            elem_id="pending-review-button",
+                        )
                         with gr.Accordion(
                             "技术详情",
                             open=False,
@@ -1757,6 +1810,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                             )
                 run_id_output = gr.State()
                 batch_id_output = gr.State()
+                build_status_timer = gr.Timer(2)
                 batch_table = gr.Dataframe(
                     headers=["文件", "状态", "Run ID", "复用来源", "失败代码"],
                     interactive=False,
@@ -1807,9 +1861,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                         wrap=True,
                     )
                 with gr.Accordion("抽取结果预览", open=True):
-                    gr.Markdown(
-                        "候选预览仅用于解释抽取结果，不会写入 GraphStore 或生成 Revision。"
-                    )
+                    gr.Markdown("候选预览仅用于解释抽取结果，不会写入 GraphStore 或生成 Revision。")
                     with gr.Row(elem_classes="candidate-preview-row"):
                         candidate_plot = gr.Plot(
                             label="候选关系图",
@@ -1850,11 +1902,8 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                         label="在 ZIP 中包含原始文件和已验证派生媒体",
                         value=False,
                     )
-                    export_button = gr.Button("准备完整结果 ZIP", variant="primary")
-                    export_download = gr.File(
-                        label="下载完整结果",
-                        interactive=False,
-                    )
+                    export_button = gr.Button("生成下载链接", variant="primary")
+                    export_download = gr.HTML()
                 with gr.Accordion("批次处理", open=False):
                     batch_item_selector = gr.Dropdown(
                         label="批次文件", **empty_dropdown_kwargs("暂无批次文件")
@@ -2796,6 +2845,23 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             run_id_output,
             result_view_outputs,
         )
+        pending_review.click(
+            guard_ui(gr, jump_to_pending, 3),
+            run_id_output,
+            [navigation_group, navigation_page, workspace_tabs],
+        )
+        build_status_timer.tick(
+            guard_ui(gr, poll_build_status, 4),
+            run_id_output,
+            [run_status, run_summary, pending_review, build_status_timer],
+            show_progress="hidden",
+        )
+        current_run.change(
+            lambda _run_id: gr.update(active=True),
+            current_run,
+            build_status_timer,
+            queue=False,
+        )
         run_button.click(
             guard_ui(gr, run_document, 8),
             [
@@ -2897,7 +2963,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             [candidate_selector, candidate_evidence],
         )
         export_button.click(
-            guard_ui(gr, prepare_result_export),
+            guard_ui(gr, result_export_link),
             [run_id_output, export_include_source],
             export_download,
         )

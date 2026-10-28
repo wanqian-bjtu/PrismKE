@@ -99,9 +99,18 @@ class ReviewController:
                 for block in state.document.text_blocks
                 if block.evidence_id == evidence_id
             )
+            locator = ref.source_locator or {}
+            if locator.get("document_kind") == "continuous_html":
+                position = (
+                    "不适用：连续 HTML 文档 · "
+                    f"块 {locator.get('ordinal', '—')} · "
+                    f"结构 {locator.get('selector', locator.get('tag', '—'))}"
+                )
+            else:
+                position = f"页码：{ref.page_number or '—'}"
             summary = (
-                f"页码：{ref.page_number or '—'} · 定位："
-                f"{ref.localization_level or ref.kind} · 坐标：{ref.coordinate_space or '—'}"
+                f"{position} · 定位：{ref.localization_level or ref.kind} · "
+                f"坐标：{ref.coordinate_space or '—'} · Evidence ID：{ref.id}"
             )
             if text:
                 summary += f"\n\n{text}"

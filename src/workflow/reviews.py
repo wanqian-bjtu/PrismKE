@@ -41,17 +41,28 @@ class ReviewService:
         state.submission_confirmed = False
 
     def filtered_candidates(self, state: WorkflowState) -> list[CandidateClaim]:
-        originals = [
-            CandidateClaim.model_validate(c) for c in self.repository.original(state.run_id)
-        ]
+        # Validation corrections deliberately supersede archived extraction candidates.
+        # The immutable originals remain in ReviewRepository and correction events retain
+        # before/after snapshots; downstream review must continue from the projected set.
+        originals = (
+            list(state.candidates)
+            if state.validation_corrections
+            else [CandidateClaim.model_validate(c) for c in self.repository.original(state.run_id)]
+        )
         rejected = {
             t.mention_id
             for t in state.entity_review_tasks
             if t.status == "resolved" and t.decision == "reject"
         }
+        excluded = {
+            issue.target_id
+            for issue in state.validation.issues
+            if issue.status == "excluded" and issue.target_type == "candidate"
+        }
         return [
             c
             for c in originals
+            if c.id not in excluded
             if c.subject.id not in rejected
             and not (isinstance(c.object, EntityMention) and c.object.id in rejected)
         ]

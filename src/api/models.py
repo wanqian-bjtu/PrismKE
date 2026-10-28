@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from src.domain import CanonicalEntity, ReviewDecision
+from src.domain import CanonicalEntity, ReviewDecision, ValidationAction
 from src.domain.execution import RequestReconciliation
 
 
@@ -43,6 +43,20 @@ class RollbackRequest(BaseModel):
 class ValidationExcludeRequest(BaseModel):
     reviewer: str = Field(min_length=1)
     comment: str = ""
+
+
+class ValidationCorrectionPreviewRequest(BaseModel):
+    issue_ids: list[str] = Field(min_length=1)
+    action: ValidationAction
+    replacement: dict[str, Any] = Field(default_factory=dict)
+    expected_version: int | None = Field(default=None, ge=0)
+
+
+class ValidationCorrectionApplyRequest(ValidationCorrectionPreviewRequest):
+    reviewer: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+    request_id: str = Field(min_length=1)
+    expected_version: int = Field(ge=0)
 
 
 class EntityReviewRequest(BaseModel):

@@ -36,7 +36,9 @@ class ValidationService:
         candidates: list[CandidateClaim], result: ValidationResult
     ) -> set[str]:
         targets = {
-            i.target_id for i in result.issues if i.severity == "blocking" and i.status == "open"
+            i.target_id
+            for i in result.issues
+            if i.severity == "blocking" and i.status in {"open", "deferred", "excluded"}
         }
         return {
             c.id
@@ -75,6 +77,13 @@ class ValidationService:
         message: str,
         evidence_ids: list[str] | None = None,
         summary: dict[str, Any] | None = None,
+        *,
+        message_key: str = "",
+        message_args: dict[str, Any] | None = None,
+        expected_constraint: dict[str, Any] | None = None,
+        actual_value: dict[str, Any] | None = None,
+        allowed_actions: list[Any] | None = None,
+        candidate_version: int = 0,
     ) -> ValidationIssue:
         return ValidationIssue(
             id=stable_id("validation", code, stage, target_type, target_id, field_path),
@@ -84,6 +93,12 @@ class ValidationService:
             target_id=target_id,
             field_path=field_path,
             message=message,
+            message_key=message_key or f"validation.{code.lower()}",
+            message_args=message_args or {},
+            expected_constraint=expected_constraint or {},
+            actual_value=actual_value or {},
+            allowed_actions=(allowed_actions if allowed_actions is not None else ["exclude"]),
+            candidate_version=candidate_version,
             evidence_ids=evidence_ids or [],
             candidate_summary=summary or {},
         )
@@ -97,14 +112,23 @@ class ValidationService:
     ) -> ValidationResult:
         merged = {item.id: item for item in previous.issues}
         for item in issues:
-            if item.id not in merged:
+            prior = merged.get(item.id)
+            if prior is None:
+                merged[item.id] = item
+            elif prior.status in {"open", "deferred"}:
+                # Refresh policy metadata for compatible open checkpoints while
+                # preserving the review status selected by the operator.
+                item.status = prior.status
                 merged[item.id] = item
         values = list(merged.values())
         return ValidationResult(
             input_fingerprint=fingerprint or previous.input_fingerprint,
             issues=values,
             passed_count=passed_count,
-            blocking_count=sum(i.severity == "blocking" and i.status == "open" for i in values),
+            blocking_count=sum(
+                i.severity == "blocking" and i.status in {"open", "deferred"}
+                for i in values
+            ),
         )
 
     @staticmethod
@@ -177,7 +201,31 @@ class ValidationService:
         type_ids = {t.id for t in schema.schema.entity_types}
         for c in candidates:
 
-            def add(code: str, stage: Any, field: str, message: str, c: CandidateClaim = c) -> None:
+            def add(
+                code: str,
+                stage: Any,
+                field: str,
+                message: str,
+                c: CandidateClaim = c,
+                *,
+                expected: dict[str, Any] | None = None,
+                actual: dict[str, Any] | None = None,
+                actions: list[Any] | None = None,
+            ) -> None:
+                subject = {
+                    "id": c.subject.id,
+                    "name": c.subject.name,
+                    "type": schema.entity_type(c.subject.entity_type),
+                }
+                object_value: dict[str, Any] = (
+                    {
+                        "id": c.object.id,
+                        "name": c.object.name,
+                        "type": schema.entity_type(c.object.entity_type),
+                    }
+                    if isinstance(c.object, EntityMention)
+                    else {"literal": c.object}
+                )
                 issues.append(
                     self.issue(
                         code,
@@ -188,12 +236,15 @@ class ValidationService:
                         message,
                         c.evidence_ids,
                         {
-                            "subject": c.subject.name,
+                            "subject": subject,
                             "relation": c.relation,
-                            "object": (
-                                c.object.name if isinstance(c.object, EntityMention) else c.object
-                            ),
+                            "object": object_value,
                         },
+                        message_key=f"validation.{code.lower()}.{field.replace('.', '_')}",
+                        message_args={"field": field},
+                        expected_constraint=expected,
+                        actual_value=actual,
+                        allowed_actions=actions,
                     )
                 )
 
@@ -224,7 +275,17 @@ class ValidationService:
                         "SCHEMA_DOMAIN_RANGE",
                         "schema",
                         "subject.entity_type",
-                        "主语类型不满足关系 domain 约束",
+                        "Subject type does not satisfy the relation domain constraint",
+                        expected={"domain": relation.domain},
+                        actual={"subject_type": subject_type},
+                        actions=[
+                            "swap_endpoints",
+                            "replace_relation",
+                            "replace_entity_type",
+                            "replace_entity_link",
+                            "exclude",
+                            "defer",
+                        ],
                     )
             if relation and relation.range and isinstance(c.object, EntityMention):
                 object_type = schema.entity_type(c.object.entity_type)
@@ -233,7 +294,17 @@ class ValidationService:
                         "SCHEMA_DOMAIN_RANGE",
                         "schema",
                         "object.entity_type",
-                        "宾语类型不满足关系 range 约束",
+                        "Object type does not satisfy the relation range constraint",
+                        expected={"range": relation.range},
+                        actual={"object_type": object_type},
+                        actions=[
+                            "swap_endpoints",
+                            "replace_relation",
+                            "replace_entity_type",
+                            "replace_entity_link",
+                            "exclude",
+                            "defer",
+                        ],
                     )
             if relation and relation.range and not isinstance(c.object, EntityMention):
                 add(
@@ -477,7 +548,9 @@ class ValidationService:
         context = transaction.validation_context
         failures: list[str] = []
         active = [c for c in transaction.claims if c.tx_to is None]
-        if active and (context is None or context.policy_version != "validation-v1"):
+        if active and (
+            context is None or context.policy_version not in {"validation-v1", "validation-v2"}
+        ):
             raise GraphIntegrityError("MISSING_SCHEMA_CONTEXT: 活动事实提交必须提供校验上下文")
         for claim in active:
             assert context is not None

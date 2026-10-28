@@ -65,9 +65,7 @@ def aggregate_entity_mentions(state: WorkflowState) -> list[dict[str, Any]]:
         evidence_ids = list(
             dict.fromkeys(evidence_id for item in mentions for evidence_id in item.evidence_ids)
         )
-        modalities = {
-            item.modality.value for item in mentions
-        } | {
+        modalities = {item.modality.value for item in mentions} | {
             evidence[item_id].modality.value for item_id in evidence_ids if item_id in evidence
         }
         pages = sorted(
@@ -289,18 +287,23 @@ def candidate_graph(state: WorkflowState) -> dict[str, Any]:
         details[edge_id] = relation.model_dump(mode="json")
 
     content_by_id = {item.id: item for item in result.media_contents}
+    media_ordinals: dict[str, int] = {}
     for occurrence in result.media_occurrences:
         content = content_by_id.get(occurrence.media_content_id)
-        label = occurrence.caption.strip() or (
-            content.asset_type.value if content is not None else occurrence.source_type
-        )
+        media_type = content.asset_type.value if content is not None else occurrence.source_type
+        media_ordinals[media_type] = media_ordinals.get(media_type, 0) + 1
+        label = f"{media_type} {media_ordinals[media_type]}"
         nodes[occurrence.id] = {
             "id": occurrence.id,
             "kind": "media",
             "label": label,
-            "media_type": content.asset_type.value if content is not None else None,
+            "media_type": media_type,
         }
-        details[occurrence.id] = occurrence.model_dump(mode="json")
+        details[occurrence.id] = {
+            **occurrence.model_dump(mode="json"),
+            "display_label": label,
+            "full_description": occurrence.caption,
+        }
 
     for media_relation in result.candidate_media_relations:
         media_target = media_relation.target_entity_id

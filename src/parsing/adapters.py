@@ -11,6 +11,7 @@ import shutil
 import tempfile
 from hashlib import sha256
 from pathlib import Path
+from typing import Any
 from urllib.parse import unquote, urlparse
 
 import httpx
@@ -95,6 +96,7 @@ def _text_block(
     bbox: BBox | None = None,
     char_start: int | None = None,
     char_end: int | None = None,
+    source_locator: dict[str, Any] | None = None,
 ) -> tuple[TextBlock, EvidenceRef]:
     evidence_id = stable_id("ev", document_id, "text", page_number, ordinal, text)
     block = TextBlock(
@@ -118,6 +120,7 @@ def _text_block(
         char_end=char_end,
         localization_level=LocalizationLevel.REGION if bbox else LocalizationLevel.TEXT_SPAN,
         coordinate_space=CoordinateSpace.PDF_POINTS if bbox else None,
+        source_locator=source_locator,
     )
     return block, evidence
 
@@ -572,7 +575,24 @@ class HTMLParser:
         ):
             text = element.get_text(" ", strip=True)
             if text:
-                block, ref = _text_block(document_id, source_hash, text, ordinal)
+                tag = element.name or "element"
+                same_tag_index = len(element.find_all_previous(tag)) + 1
+                locator = {
+                    "document_kind": "continuous_html",
+                    "tag": tag,
+                    "ordinal": ordinal + 1,
+                    "selector": f"{tag}:nth-of-type({same_tag_index})",
+                    "character_range": [0, len(text)],
+                }
+                block, ref = _text_block(
+                    document_id,
+                    source_hash,
+                    text,
+                    ordinal,
+                    char_start=0,
+                    char_end=len(text),
+                    source_locator=locator,
+                )
                 blocks.append(block)
                 evidence.append(ref)
         for ordinal, image in enumerate(soup.find_all("img")):

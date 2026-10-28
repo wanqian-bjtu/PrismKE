@@ -48,7 +48,11 @@ from src.domain.tasks import (
     TaskExtractionResult,
     TaskMode,
 )
-from src.domain.validation import ValidationResult, ValidationReviewDecision
+from src.domain.validation import (
+    ValidationCorrectionEvent,
+    ValidationResult,
+    ValidationReviewDecision,
+)
 
 
 class ExtractionRequest(BaseModel):
@@ -196,6 +200,9 @@ class WorkflowState(BaseModel):
     normalization_issues: dict[str, str] = Field(default_factory=dict)
     validation: ValidationResult = Field(default_factory=ValidationResult)
     validation_decisions: list[ValidationReviewDecision] = Field(default_factory=list)
+    validation_corrections: list[ValidationCorrectionEvent] = Field(default_factory=list)
+    validation_version: int = Field(default=0, ge=0)
+    validation_entity_overrides: dict[str, str | None] = Field(default_factory=dict)
     graph_commit: GraphCommit | None = None
     revision: GraphRevision | None = None
     warnings: list[str] = Field(default_factory=list)
