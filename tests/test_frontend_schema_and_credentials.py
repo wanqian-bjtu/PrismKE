@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from frontend.app import normalize_session_key
+from frontend.app import _batch_status_cell, normalize_session_key
 from frontend.schema_input import resolve_schema, schema_summary
 from src.core.ids import canonical_hash
 from src.core.settings import Settings
@@ -26,6 +26,17 @@ def test_empty_session_api_key_safely_falls_back_to_server_configuration() -> No
     assert normalize_session_key("") is None
     assert normalize_session_key("   ") is None
     assert normalize_session_key("  temporary-key  ") == "temporary-key"
+
+
+def test_batch_status_cell_only_adds_safe_review_action_when_needed() -> None:
+    review = _batch_status_cell("awaiting_review", 'run:<unsafe>&"')
+    assert "Awaiting review" in review
+    assert 'class="batch-inline-review-button"' in review
+    assert 'data-run-id="run:&lt;unsafe&gt;&amp;&quot;"' in review
+    assert "去审核" in review
+
+    assert "batch-inline-review-button" not in _batch_status_cell("completed", "run:done")
+    assert "batch-inline-review-button" not in _batch_status_cell("awaiting_review", None)
 
 
 def test_schema_text_and_upload_materialize_the_same_schema(tmp_path: Path) -> None:

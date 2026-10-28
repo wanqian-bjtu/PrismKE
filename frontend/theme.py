@@ -486,6 +486,40 @@ body:has(#workspace-sidebar.open) #workspace-sidebar-toggle::before {
   pointer-events: none !important;
 }
 
+#batch-files-table .batch-status-actions {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+  min-width: max-content;
+}
+
+#batch-files-table .batch-inline-review-button {
+  align-items: center;
+  background: var(--prism-blue, #145fe2);
+  border: 1px solid var(--prism-blue, #145fe2);
+  border-radius: 6px;
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-weight: 650;
+  justify-content: center;
+  line-height: 1.15;
+  min-height: 28px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
+#batch-files-table .batch-inline-review-button:hover {
+  background: #0f4fbe;
+  border-color: #0f4fbe;
+}
+
+#batch-files-table .batch-inline-review-button:focus-visible {
+  outline: 3px solid rgba(245, 174, 42, 0.55);
+  outline-offset: 2px;
+}
+
 .result-export-panel {
   display: grid !important;
   grid-template-columns: minmax(260px, 1fr) minmax(220px, 0.45fr) minmax(280px, 0.8fr);

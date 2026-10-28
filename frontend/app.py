@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from html import escape
 from pathlib import Path
 from typing import Any, Literal, cast
 from urllib.parse import quote
@@ -71,6 +72,24 @@ def normalize_session_key(value: str | None) -> str | None:
     """Normalize an optional browser-session credential without persisting it."""
 
     return (value or "").strip() or None
+
+
+def _batch_status_cell(status: str, run_id: str | None) -> str:
+    """Render a safe batch status cell with an inline review action when needed."""
+
+    label = escape(status_label(status))
+    if status != "awaiting_review" or not run_id:
+        return label
+    safe_run_id = escape(run_id, quote=True)
+    return (
+        '<div class="batch-status-actions">'
+        f'<span class="batch-status-label">{label}</span>'
+        '<button type="button" class="batch-inline-review-button" '
+        f'data-run-id="{safe_run_id}" aria-label="去审核" title="去审核">'
+        "去审核"
+        "</button>"
+        "</div>"
+    )
 
 
 def _state_status(state: Any, execution: dict[str, Any] | None = None) -> str:
@@ -372,6 +391,18 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
     except ImportError as exc:
         raise RuntimeError("Web UI is not installed; run `uv sync --extra web`") from exc
 
+    def batch_rows(batch: Any) -> list[list[Any]]:
+        return [
+            [
+                item.filename,
+                _batch_status_cell(item.status.value, item.run_id),
+                item.run_id or "",
+                item.reused_from_item_id or "",
+                item.failure_code or "",
+            ]
+            for item in batch.items
+        ]
+
     async def run_document(
         documents: list[str] | str | None,
         schema_source: str,
@@ -458,16 +489,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             "",
         )
         state = service.show_run(first_run_id) if first_run_id else None
-        rows = [
-            [
-                item.filename,
-                status_label(item.status.value),
-                item.run_id or "",
-                item.reused_from_item_id or "",
-                item.failure_code or "",
-            ]
-            for item in batch.items
-        ]
+        rows = batch_rows(batch)
         return (
             f"**批次状态** `{batch.status.value}` · 文件 {len(batch.items)} · "
             f"{'新建' if created else '复用'}",
@@ -494,16 +516,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
     ) -> tuple[str, dict[str, Any], list[list[Any]], list[list[Any]], Any, Any]:
         if batch_id:
             batch = service.refresh_batch(batch_id)
-            rows = [
-                [
-                    item.filename,
-                    status_label(item.status.value),
-                    item.run_id or "",
-                    item.reused_from_item_id or "",
-                    item.failure_code or "",
-                ]
-                for item in batch.items
-            ]
+            rows = batch_rows(batch)
             state = service.show_run(run_id) if run_id else None
             return (
                 f"**批次状态** `{batch.status.value}` · 文件 {len(batch.items)}",
@@ -584,16 +597,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
     def batch_action_view(
         batch: Any, message: str
     ) -> tuple[str, dict[str, Any], list[list[Any]], Any, str]:
-        rows = [
-            [
-                item.filename,
-                status_label(item.status.value),
-                item.run_id or "",
-                item.reused_from_item_id or "",
-                item.failure_code or "",
-            ]
-            for item in batch.items
-        ]
+        rows = batch_rows(batch)
         return (
             f"**批次状态** `{batch.status.value}` · 文件 {len(batch.items)}",
             batch.model_dump(mode="json"),
@@ -677,18 +681,6 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             return "media-knowledge", "visual-review"
         raise ValueError("当前任务没有待处理的审核或校验事项")
 
-    def pending_review_button(run_id: str | None) -> Any:
-        if not run_id:
-            return gr.update(visible=False, interactive=False)
-        state = service.show_run(run_id)
-        pending = (
-            any(item.status in {"open", "deferred"} for item in state.validation.issues)
-            or any(item.status == "pending" for item in state.entity_review_tasks)
-            or any(item.status == "pending" for item in state.review_tasks)
-            or any(item.status == "pending" for item in state.visual_review_tasks)
-        )
-        return gr.update(visible=state.status == "awaiting_review" and pending, interactive=pending)
-
     def jump_to_pending(run_id: str | None) -> tuple[Any, Any, Any]:
         group_id, page_id = review_destination(run_id)
         choices = page_choices(group_id)
@@ -698,28 +690,40 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             gr.update(selected=page_id),
         )
 
-    def poll_build_status(run_id: str | None) -> tuple[Any, Any, Any, Any]:
+    def jump_to_pending_from_bridge(value: str | None) -> tuple[Any, Any, Any, Any]:
+        run_id = (value or "").rsplit("::", 1)[0].strip()
+        if not run_id:
+            raise ValueError("请先选择待处理任务")
+        group_update, page_update, tab_update = jump_to_pending(run_id)
+        return gr.update(value=run_id), group_update, page_update, tab_update
+
+    def poll_build_status(
+        run_id: str | None, batch_id: str | None
+    ) -> tuple[Any, Any, Any, Any]:
         if not run_id:
             return (
                 gr.update(),
                 gr.update(),
-                pending_review_button(run_id),
+                gr.update(),
                 gr.update(active=False),
             )
         state = service.show_run(run_id)
+        table_update: Any = gr.update()
+        if batch_id:
+            table_update = gr.update(value=batch_rows(service.refresh_batch(batch_id)))
         terminal = state.status in {"completed", "failed", "cancelled", "excluded"}
         if terminal:
             return (
                 gr.update(),
                 gr.update(),
-                pending_review_button(run_id),
+                table_update,
                 gr.update(active=False),
             )
         execution = service.executions.view(run_id)
         return (
             _state_status(state, execution),
             _state_summary(state),
-            pending_review_button(run_id),
+            table_update,
             gr.update(active=True),
         )
 
@@ -1791,12 +1795,6 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                             "尚未启动构建",
                             elem_classes="workspace-metrics",
                         )
-                        pending_review = gr.Button(
-                            "去处理待办",
-                            variant="primary",
-                            visible=False,
-                            elem_id="pending-review-button",
-                        )
                         with gr.Accordion(
                             "技术详情",
                             open=False,
@@ -1810,12 +1808,19 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                             )
                 run_id_output = gr.State()
                 batch_id_output = gr.State()
+                review_jump_bridge = gr.Textbox(
+                    elem_id="pending-review-run-bridge",
+                    elem_classes="browser-bridge",
+                    container=False,
+                )
                 build_status_timer = gr.Timer(2)
                 batch_table = gr.Dataframe(
                     headers=["文件", "状态", "Run ID", "复用来源", "失败代码"],
+                    datatype=["str", "html", "str", "str", "str"],
                     interactive=False,
                     label="批次文件",
                     wrap=True,
+                    elem_id="batch-files-table",
                 )
                 result_insight = gr.Markdown(
                     "尚无可解释的抽取结果。",
@@ -2675,6 +2680,50 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                   250
                 );
               }
+              if (!window.__prismkeInlineReviewBound) {
+                window.__prismkeInlineReviewBound = true;
+                const syncInlineReviewButtons = () => {
+                  const isChinese = window.PrismKEI18n?.getLocale() === 'zh-CN';
+                  const label = isChinese ? '去审核' : 'Review';
+                  document.querySelectorAll('.batch-inline-review-button').forEach(button => {
+                    if (button.textContent !== label) button.textContent = label;
+                    if (button.getAttribute('aria-label') !== label) {
+                      button.setAttribute('aria-label', label);
+                    }
+                    if (button.title !== label) button.title = label;
+                  });
+                };
+                const sendInlineReview = event => {
+                  const button = event.target.closest?.('.batch-inline-review-button');
+                  if (!button) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  const runId = button.dataset.runId;
+                  const bridge = document.querySelector('#pending-review-run-bridge');
+                  const input = bridge instanceof HTMLInputElement ||
+                    bridge instanceof HTMLTextAreaElement
+                    ? bridge
+                    : bridge?.querySelector('input, textarea');
+                  if (!runId || !input) return;
+                  const prototype = input instanceof HTMLTextAreaElement
+                    ? HTMLTextAreaElement.prototype
+                    : HTMLInputElement.prototype;
+                  const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+                  setter?.call(input, `${runId}::${Date.now()}`);
+                  input.dispatchEvent(new Event('input', { bubbles: true }));
+                  input.dispatchEvent(new Event('change', { bubbles: true }));
+                };
+                document.addEventListener('click', sendInlineReview, true);
+                window.addEventListener('prismke:localechange', syncInlineReviewButtons);
+                window.__prismkeInlineReviewObserver = new MutationObserver(
+                  syncInlineReviewButtons
+                );
+                window.__prismkeInlineReviewObserver.observe(document.body, {
+                  childList: true,
+                  subtree: true,
+                });
+                syncInlineReviewButtons();
+              }
               let resizer = sidebar.querySelector('#workspace-resizer');
               if (!resizer) {
                 resizer = document.createElement('div');
@@ -2845,15 +2894,15 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             run_id_output,
             result_view_outputs,
         )
-        pending_review.click(
-            guard_ui(gr, jump_to_pending, 3),
-            run_id_output,
-            [navigation_group, navigation_page, workspace_tabs],
+        review_jump_bridge.change(
+            guard_ui(gr, jump_to_pending_from_bridge, 4),
+            review_jump_bridge,
+            [current_run, navigation_group, navigation_page, workspace_tabs],
         )
         build_status_timer.tick(
             guard_ui(gr, poll_build_status, 4),
-            run_id_output,
-            [run_status, run_summary, pending_review, build_status_timer],
+            [run_id_output, batch_id_output],
+            [run_status, run_summary, batch_table, build_status_timer],
             show_progress="hidden",
         )
         current_run.change(

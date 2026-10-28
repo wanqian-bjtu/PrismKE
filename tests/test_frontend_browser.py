@@ -399,6 +399,104 @@ relations:
 
 
 @pytest.mark.browser
+def test_awaiting_review_uses_inline_table_action_and_opens_review_page(
+    candidate_workspace_url: str, tmp_path: Path
+) -> None:
+    schema_path = tmp_path / "inline-review-schema.yaml"
+    schema_path.write_text(
+        """schema_id: inline-review
+version: "1"
+strict: true
+entity_types:
+  - id: Software
+  - id: Organization
+relations:
+  - id: developed_by
+    domain: [Software]
+    range: [Organization]
+""",
+        encoding="utf-8",
+    )
+    document_path = tmp_path / "review-inline.md"
+    document_path.write_text(
+        "Nebula Technology | developed_by | AtlasVision X1 | Organization | Software | 0.95\n",
+        encoding="utf-8",
+    )
+    base_url = candidate_workspace_url.removesuffix("/ui/")
+    response = httpx.post(
+        f"{base_url}/api/v1/batches",
+        files=[
+            (
+                "documents",
+                (document_path.name, document_path.read_bytes(), "text/markdown"),
+            ),
+            (
+                "schema",
+                (schema_path.name, schema_path.read_bytes(), "application/yaml"),
+            ),
+        ],
+        data={"provider": "mock", "task_mode": "knowledge_graph_construction"},
+        timeout=30,
+    )
+    assert response.status_code == 202
+    batch_id = response.json()["batch"]["id"]
+    for _ in range(300):
+        batch = httpx.get(f"{base_url}/api/v1/batches/{batch_id}", timeout=5).json()
+        if batch["status"] not in {"queued", "running"}:
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError("inline review batch execution timed out")
+    assert batch["status"] == "awaiting_review"
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 900})
+        page.add_init_script(f"localStorage.removeItem('{LOCALE_STORAGE_KEY}')")
+        page.goto(candidate_workspace_url, wait_until="domcontentloaded", timeout=60_000)
+        _select_option(page, "navigation-group", "Build and execution")
+        build_page = page.locator("#navigation-page input")
+        build_page.click(force=True)
+        page.get_by_role("option", name="New extraction run", exact=True).last.click()
+        expect(page.locator(".workspace-page-header:visible h1")).to_have_text(
+            "New extraction and construction", timeout=15_000
+        )
+
+        current_run = page.locator("#current-run input")
+        current_run.click()
+        page.get_by_role("option").filter(has_text=document_path.name).click()
+        review_button = page.locator(
+            "#batch-files-table .batch-inline-review-button"
+        ).last
+        expect(review_button).to_have_text("Review", timeout=15_000)
+        expect(page.locator("#pending-review-button")).to_have_count(0)
+        review_button.click()
+
+        expect(page.locator("#navigation-group input")).to_have_value(
+            "Review and validation", timeout=15_000
+        )
+        expect(page.locator("#navigation-page input")).to_have_value(
+            "Validation issues", timeout=15_000
+        )
+        expect(page.locator(".workspace-page-header:visible h1")).to_have_text(
+            "Validation issues", timeout=15_000
+        )
+        expect(current_run).to_have_value(re.compile(document_path.name))
+
+        page.locator("#language-switch input[type='checkbox']").click()
+        _select_option(page, "navigation-group", "构建与执行")
+        build_page.click(force=True)
+        page.get_by_role("option", name="新建构建", exact=True).last.click()
+        expect(page.locator(".workspace-page-header:visible h1")).to_have_text(
+            "新建抽取与构建", timeout=15_000
+        )
+        expect(
+            page.locator("#batch-files-table .batch-inline-review-button").last
+        ).to_have_text("去审核", timeout=15_000)
+        browser.close()
+
+
+@pytest.mark.browser
 def test_locale_storage_keyboard_tab_sync_and_session_isolation(workspace_url: str) -> None:
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()

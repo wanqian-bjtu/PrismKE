@@ -726,6 +726,7 @@ EN_BY_ZH.update(
 EN_BY_ZH.update(
     {
         "去处理待办": "Review pending items",
+        "去审核": "Review",
         "生成下载链接": "Generate download link",
         "下载完整结果 ZIP": "Download complete results ZIP",
         "在 ZIP 中包含原始文件和已验证派生媒体": (
