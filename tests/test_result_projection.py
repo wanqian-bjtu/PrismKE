@@ -133,3 +133,49 @@ async def test_research_pdf_insight_reports_pages_media_and_read_only_candidates
         assert await service.graph_store.list_revisions() == []
     finally:
         await service.close()
+
+
+@pytest.mark.asyncio
+async def test_disambiguation_result_can_finish_after_invalid_candidates_are_excluded(
+    tmp_path: Path,
+) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    schema = repository_root / "configs/schemas/research_documents.yaml"
+    source = tmp_path / "invalid-relations.txt"
+    source.write_text(
+        "Nebula Technology | developed_by | AtlasVision X1 | Organization | SoftwareSystem | 0.95\n"
+        "AtlasVision X1 | evaluated_on | Harbor Laboratory | SoftwareSystem | "
+        "Organization | 0.90\n",
+        encoding="utf-8",
+    )
+    service = PrismKEService(Settings(_env_file=None, runtime_dir=tmp_path / "runtime"))
+    try:
+        state = await service.run(
+            source,
+            schema,
+            "mock",
+            task_mode=TaskMode.JOINT_ENTITY_RELATION_DISAMBIGUATION,
+        )
+        assert state.status == "awaiting_review"
+        assert state.validation.blocking_count >= 2
+
+        for issue in [item for item in state.validation.issues if item.status == "open"]:
+            state = await service.exclude_validation_issue(
+                state.run_id,
+                issue.id,
+                "tester",
+                "synthetic candidate violates schema",
+            )
+
+        completed = await service.resume(state.run_id)
+        assert completed.status == "completed"
+        assert completed.extraction_result is not None
+        assert completed.extraction_result.validation_issues
+        assert all(
+            item.status != "open"
+            for item in completed.extraction_result.validation_issues
+            if item.severity == "blocking"
+        )
+        assert await service.graph_store.list_revisions() == []
+    finally:
+        await service.close()

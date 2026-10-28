@@ -479,6 +479,7 @@ class PrismKEWorkflow:
                 return None
             if self.review_only:
                 allowed = {
+                    "finalize_extraction_result",
                     "normalize_claims",
                     "detect_conflicts",
                     "route_by_risk",

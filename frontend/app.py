@@ -682,7 +682,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         state = service.show_run(run_id)
         insight = run_insight(state)
         try:
-            ocr_provider = service.ocr_provider_for_state(state)
+            ocr_provider = service.ocr_provider(state.ocr_provider_name)
             insight["ocr_device_actual"] = getattr(ocr_provider, "device", None)
         except Exception:
             insight["ocr_device_actual"] = None
