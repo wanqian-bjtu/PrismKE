@@ -607,12 +607,10 @@ relations:
             timeout=10_000
         )
         export_button = page.get_by_role("button", name="Generate download link")
-        expect(export_button).to_be_disabled(timeout=30_000)
-        expect(page.get_by_text(
-            "The complete result is not ready. Resolve pending items and resume the run first.",
-            exact=True,
-        )).to_be_visible(
-            timeout=15_000
+        expect(export_button).to_be_enabled(timeout=30_000)
+        export_button.click()
+        expect(page.locator(".prismke-export-link")).to_have_text(
+            "Download complete results ZIP", timeout=15_000
         )
 
         _open_workspace_page(page, "review-validation", "validation")

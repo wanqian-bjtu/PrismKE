@@ -614,7 +614,7 @@ class PrismKEService:
             state.validation = ValidationService.merge(state.validation, [])
             self.reviews.update_status(state)
             workflow = self.review_workflow(state)
-            updated = await workflow.record_entity_review(state)
+            updated = await workflow.record_validation_correction(state)
             if not updated:
                 raise LegacyCheckpointError("checkpoint unavailable")
             self.audit.record("validation_correction", event_id, event.model_dump(mode="json"))

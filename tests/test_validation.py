@@ -276,6 +276,14 @@ def test_validation_correction_api_previews_and_applies_swap(
         assert applied.json()["validation_version"] == 1
         stale = client.post(f"{base}/preview", json=payload)
         assert stale.status_code == 409
+    corrected = service.show_run(state.run_id)
+    workflow = service.review_workflow(corrected)
+    snapshot = asyncio.run(workflow.execution_snapshot(state.run_id))
+    assert snapshot["next"] == ["resolve_entities"]
+    resumed = asyncio.run(workflow.resume(state.run_id))
+    assert resumed is not None
+    assert resumed.extraction_result is not None
+    assert resumed.validation.blocking_count == 0
     asyncio.run(service.close())
 
 

@@ -368,13 +368,17 @@ class PrismKEWorkflow:
         return builder.compile(checkpointer=checkpointer)
 
     def _build_review_graph(self, checkpointer: Any) -> Any:
-        """A tail-only graph: no parser, OCR, model or entity retrieval nodes exist."""
+        """A tail-only graph with no parser, OCR, LLM, VLM, or extraction nodes."""
         builder = StateGraph(GraphState)
 
-        async def forbidden(_: GraphState) -> GraphState:
-            raise ValueError("review workspace cannot execute entity resolution or extraction")
-
-        builder.add_node("resolve_entities", cast(Any, forbidden))
+        builder.add_node(
+            "validation_correction",
+            cast(Any, lambda value: value),
+        )
+        builder.add_node(
+            "resolve_entities",
+            cast(Any, self._node("resolve_entities", self.nodes.resolve_entities)),
+        )
         builder.add_node(
             "finalize_extraction_result",
             cast(
@@ -393,7 +397,8 @@ class PrismKEWorkflow:
             "commit_graph",
         ):
             builder.add_node(name, cast(Any, self._node(name, getattr(self.nodes, name))))
-        builder.add_edge(START, "resolve_entities")
+        builder.add_edge(START, "validation_correction")
+        builder.add_edge("validation_correction", "resolve_entities")
         builder.add_conditional_edges(
             "resolve_entities",
             self._after_entity_resolution,
@@ -479,6 +484,7 @@ class PrismKEWorkflow:
                 return None
             if self.review_only:
                 allowed = {
+                    "resolve_entities",
                     "finalize_extraction_result",
                     "normalize_claims",
                     "detect_conflicts",
@@ -522,6 +528,22 @@ class PrismKEWorkflow:
                 config,
                 {"payload": state.model_dump(mode="json")},
                 as_node="resolve_entities",
+            )
+        self.runs.save(state)
+        return True
+
+    async def record_validation_correction(self, state: WorkflowState) -> bool:
+        """Schedule entity resolution after a candidate-level validation correction."""
+        async with open_checkpointer(self.checkpoint_path) as saver:
+            graph = self._build_graph(saver)
+            config = self._config(state.run_id)
+            snapshot = await graph.aget_state(config)
+            if not snapshot.values:
+                return False
+            await graph.aupdate_state(
+                config,
+                {"payload": state.model_dump(mode="json")},
+                as_node="validation_correction",
             )
         self.runs.save(state)
         return True
