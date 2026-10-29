@@ -40,6 +40,16 @@ class EntityGovernanceAgent:
     async def resolve(self, state: WorkflowState) -> WorkflowState:
         assert state.output_schema is not None and state.document is not None
         started = perf_counter()
+        # Reference issues describe the result of the previous resolution pass.
+        # A correction-triggered rerun must reevaluate them instead of treating
+        # them as candidate blockers before any mentions can be resolved.
+        for issue in state.validation.issues:
+            if issue.code == "MISSING_ENTITY_REFERENCE" and issue.status in {
+                "open",
+                "deferred",
+            }:
+                issue.status = "repaired"
+        state.validation = ValidationService.merge(state.validation, [])
         issues = await ValidationService().candidates(
             state.candidates, SchemaIndex(state.output_schema), state.document, self.evidence_store
         )

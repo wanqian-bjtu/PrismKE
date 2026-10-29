@@ -277,13 +277,29 @@ def test_validation_correction_api_previews_and_applies_swap(
         stale = client.post(f"{base}/preview", json=payload)
         assert stale.status_code == 409
     corrected = service.show_run(state.run_id)
+    stale_reference = ValidationService.issue(
+        "MISSING_ENTITY_REFERENCE",
+        "reference",
+        "candidate",
+        corrected.candidates[0].id,
+        "mention_to_entity",
+        "mention was not mapped during the previous pass",
+    )
+    corrected.validation = ValidationService.merge(
+        corrected.validation, [stale_reference]
+    )
+    service.runs.save(corrected)
     workflow = service.review_workflow(corrected)
+    assert asyncio.run(workflow.record_validation_correction(corrected)) is True
     snapshot = asyncio.run(workflow.execution_snapshot(state.run_id))
     assert snapshot["next"] == ["resolve_entities"]
     resumed = asyncio.run(workflow.resume(state.run_id))
     assert resumed is not None
     assert resumed.extraction_result is not None
     assert resumed.validation.blocking_count == 0
+    assert next(
+        item for item in resumed.validation.issues if item.id == stale_reference.id
+    ).status == "repaired"
     asyncio.run(service.close())
 
 
