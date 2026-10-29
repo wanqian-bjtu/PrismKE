@@ -121,6 +121,15 @@ async def test_research_pdf_insight_reports_pages_media_and_read_only_candidates
         insight = run_insight(state)
         graph = candidate_graph(state)
 
+        assert state.extraction_result is not None
+        assert set(state.extraction_result.mention_to_entity) == {
+            item.id for item in state.extraction_result.entities
+        }
+        projected_names = [
+            (str(item["name"]).casefold(), item["entity_type"])
+            for item in aggregate_entity_mentions(state)
+        ]
+        assert len(projected_names) == len(set(projected_names))
         assert insight["page_count"] == 4
         assert insight["media_asset_count"] == 1
         assert insight["pdf_actual_parser"] == "pymupdf"

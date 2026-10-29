@@ -55,7 +55,18 @@ class EntityGovernanceAgent:
         )
         state.validation = ValidationService.merge(state.validation, issues)
         excluded = ValidationService.blocked_candidate_ids(state.candidates, state.validation)
-        mentions = collect_mentions([c for c in state.candidates if c.id not in excluded])
+        mentions_by_id = {item.id: item for item in state.extracted_entities}
+        for mention in collect_mentions(
+            [candidate for candidate in state.candidates if candidate.id not in excluded]
+        ):
+            mentions_by_id[mention.id] = mention
+        for attribute in state.candidate_attributes:
+            mentions_by_id[attribute.subject.id] = attribute.subject
+        for event in state.candidate_events:
+            for argument in event.arguments:
+                if isinstance(argument.value, EntityMention):
+                    mentions_by_id[argument.value.id] = argument.value
+        mentions = list(mentions_by_id.values())
         resolver = SemanticEntityResolver(
             SchemaIndex(state.output_schema),
             self.graph_store,
