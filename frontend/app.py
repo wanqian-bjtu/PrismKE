@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import orjson
 
-from frontend.i18n import browser_i18n_bootstrap_js
+from frontend.i18n import browser_i18n_bootstrap_js, tr
 from frontend.layout import (
     build_brand_header,
     compact_checkbox,
@@ -74,10 +74,12 @@ def normalize_session_key(value: str | None) -> str | None:
     return (value or "").strip() or None
 
 
-def _batch_status_cell(status: str, run_id: str | None) -> str:
+def _batch_status_cell(
+    status: str, run_id: str | None, locale: object = "en"
+) -> str:
     """Render a safe batch status cell with an inline review action when needed."""
 
-    label = escape(status_label(status))
+    label = escape(status_label(status, locale))
     if status != "awaiting_review" or not run_id:
         return label
     safe_run_id = escape(run_id, quote=True)
@@ -92,19 +94,24 @@ def _batch_status_cell(status: str, run_id: str | None) -> str:
     )
 
 
-def _state_status(state: Any, execution: dict[str, Any] | None = None) -> str:
+def _state_status(
+    state: Any,
+    execution: dict[str, Any] | None = None,
+    locale: object = "zh-CN",
+) -> str:
     execution_status = (execution or {}).get("status", "未启动")
     warning_count = len(getattr(state, "warnings", []))
     error_count = len(getattr(state, "errors", []))
     return (
-        f"**业务状态** `{status_label(state.status)}` · "
-        f"**执行状态** `{status_label(execution_status)}` · "
-        f"**当前节点** `{state.current_node or '等待中'}`  \n"
-        f"警告 {warning_count} · 错误 {error_count}"
+        f"**{tr('业务状态', locale)}** `{status_label(state.status, locale)}` · "
+        f"**{tr('执行状态', locale)}** `{status_label(execution_status, locale)}` · "
+        f"**{tr('当前节点', locale)}** "
+        f"`{node_label(state.current_node, locale) or tr('等待中', locale)}`  \n"
+        f"{tr('警告', locale)} {warning_count} · {tr('错误', locale)} {error_count}"
     )
 
 
-def _claim_rows(state: Any) -> list[list[Any]]:
+def _claim_rows(state: Any, locale: object = "zh-CN") -> list[list[Any]]:
     rows = [
         [
             claim.id,
@@ -112,7 +119,7 @@ def _claim_rows(state: Any) -> list[list[Any]]:
             claim.relation_id,
             claim.object_entity_id or claim.object_literal,
             claim.confidence,
-            status_label(claim.status.value),
+            status_label(claim.status.value, locale),
             ", ".join(claim.evidence_ids),
         ]
         for claim in state.claims
@@ -192,7 +199,7 @@ def _review_target_choices(state: Any) -> list[tuple[str, str]]:
     return choices
 
 
-def _aggregated_entity_rows(state: Any) -> list[list[Any]]:
+def _aggregated_entity_rows(state: Any, locale: object = "zh-CN") -> list[list[Any]]:
     return [
         [
             item["name"],
@@ -201,8 +208,10 @@ def _aggregated_entity_rows(state: Any) -> list[list[Any]]:
             item["confidence_average"],
             item["confidence_max"],
             ", ".join(item["modalities"]),
-            decision_label(item["review_status"]),
-            "规范实体" if item["grouping"] == "canonical_entity" else "同名提及组",
+            decision_label(item["review_status"], locale),
+            tr("规范实体", locale)
+            if item["grouping"] == "canonical_entity"
+            else tr("同名提及组", locale),
         ]
         for item in aggregate_entity_mentions(state)
     ]
@@ -225,69 +234,85 @@ def _mention_occurrence_rows(state: Any) -> list[list[Any]]:
     ]
 
 
-def _run_insight_markdown(insight: dict[str, Any]) -> str:
+def _run_insight_markdown(
+    insight: dict[str, Any], locale: object = "zh-CN"
+) -> str:
     counts = insight.get("media_type_counts", {})
     lines = [
-        (f"**任务模式** `{insight['task_mode']}` · **输出范围** `{insight['task_mode_scope']}`"),
         (
-            f"**页数** {insight['page_count']} · **DocumentIR 文本块** "
-            f"{insight['text_block_count']} · **实体提及** "
-            f"{insight['entity_mention_count']} · **聚合实体** "
+            f"**{tr('任务模式', locale)}** `{insight['task_mode']}` · "
+            f"**{tr('输出范围', locale)}** `{insight['task_mode_scope']}`"
+        ),
+        (
+            f"**{tr('页数', locale)}** {insight['page_count']} · "
+            f"**DocumentIR {tr('文本块', locale)}** {insight['text_block_count']} · "
+            f"**{tr('实体提及', locale)}** {insight['entity_mention_count']} · "
+            f"**{tr('聚合实体', locale)}** "
             f"{insight['aggregated_entity_count']}"
         ),
         (
-            f"**关系** {insight['relation_count']} · **属性** "
-            f"{insight['attribute_count']} · **事件** {insight['event_count']} · "
-            f"**媒体对象** {insight['media_occurrence_count']} · "
-            f"**视觉断言** {insight['visual_assertion_count']}"
+            f"**{tr('关系', locale)}** {insight['relation_count']} · "
+            f"**{tr('属性', locale)}** {insight['attribute_count']} · "
+            f"**{tr('事件', locale)}** {insight['event_count']} · "
+            f"**{tr('媒体对象', locale)}** {insight['media_occurrence_count']} · "
+            f"**{tr('视觉断言', locale)}** {insight['visual_assertion_count']}"
         ),
         (
-            f"**校验问题** {insight['validation_issue_count']} · "
-            f"**待审核** {insight['review_required_count']}"
+            f"**{tr('校验问题', locale)}** {insight['validation_issue_count']} · "
+            f"**{tr('待审核', locale)}** {insight['review_required_count']}"
         ),
         (
-            f"**媒体构成** 图片 {counts.get('image', 0)} · 图表 "
-            f"{counts.get('chart', 0)} · 表格 {counts.get('table', 0)} · "
-            f"公式 {counts.get('formula', 0)} · 页面渲染 "
+            f"**{tr('媒体构成', locale)}** {tr('图片', locale)} "
+            f"{counts.get('image', 0)} · {tr('图表', locale)} "
+            f"{counts.get('chart', 0)} · {tr('表格', locale)} "
+            f"{counts.get('table', 0)} · {tr('公式', locale)} "
+            f"{counts.get('formula', 0)} · {tr('页面渲染', locale)} "
             f"{counts.get('page_render', 0)}"
         ),
     ]
     if insight["task_mode"] == "entity_extraction":
         lines.extend(
             [
-                "实体抽取只返回实体提及，不返回关系、属性、事件或正式图谱。",
+                tr("实体抽取只返回实体提及，不返回关系、属性、事件或正式图谱。", locale),
                 (
-                    "需要属性、数值和事件时请选择 Schema 信息抽取；需要实体关系及同名"
-                    "消歧时请选择联合实体关系消歧；需要写入正式图谱时请选择完整知识构建。"
+                    tr(
+                        "需要属性、数值和事件时请选择 Schema 信息抽取；需要实体关系及同名"
+                        "消歧时请选择联合实体关系消歧；需要写入正式图谱时请选择完整知识构建。",
+                        locale,
+                    )
                 ),
             ]
         )
     return "  \n".join(lines)
 
 
-def _multimodal_markdown(insight: dict[str, Any]) -> str:
+def _multimodal_markdown(
+    insight: dict[str, Any], locale: object = "zh-CN"
+) -> str:
     parser = insight.get("pdf_actual_parser") or "not_applicable"
     requested = insight.get("pdf_requested_mode") or "not_applicable"
     reasons = ", ".join(insight.get("pdf_route_reasons", [])) or "none"
-    ocr_status = "已调用" if insight.get("ocr_used") else "未调用"
-    vlm_status = "已调用" if insight.get("vlm_called") else "未调用"
+    ocr_status = tr("已调用", locale) if insight.get("ocr_used") else tr("未调用", locale)
+    vlm_status = tr("已调用", locale) if insight.get("vlm_called") else tr("未调用", locale)
     device = insight.get("ocr_device_actual") or "not_recorded"
     return "  \n".join(
         [
-            f"**请求解析模式** `{requested}` · **实际 PDF 解析器** `{parser}`",
-            f"**自动路由原因** `{reasons}`",
-            f"**OCR** {ocr_status} · **实际设备** `{device}`",
-            f"**VLM** {vlm_status} · **调用次数** {insight.get('vlm_call_count', 0)}",
+            f"**{tr('请求解析模式', locale)}** `{requested}` · "
+            f"**{tr('实际 PDF 解析器', locale)}** `{parser}`",
+            f"**{tr('自动路由原因', locale)}** `{reasons}`",
+            f"**OCR** {ocr_status} · **{tr('实际设备', locale)}** `{device}`",
+            f"**VLM** {vlm_status} · **{tr('调用次数', locale)}** "
+            f"{insight.get('vlm_call_count', 0)}",
             (
-                "本次运行未调用视觉模型。PDF 中含有图片不代表已经完成视觉抽取。"
+                tr("本次运行未调用视觉模型。PDF 中含有图片不代表已经完成视觉抽取。", locale)
                 if not insight.get("vlm_called")
-                else "视觉模型已处理媒体资产，具体对象和证据见下表。"
+                else tr("视觉模型已处理媒体资产，具体对象和证据见下表。", locale)
             ),
         ]
     )
 
 
-def _candidate_graph_figure(payload: dict[str, Any]) -> Any:
+def _candidate_graph_figure(payload: dict[str, Any], locale: object = "zh-CN") -> Any:
     import networkx as nx
     import plotly.graph_objects as go
 
@@ -365,7 +390,7 @@ def _candidate_graph_figure(payload: dict[str, Any]) -> Any:
     )
     if not nodes:
         figure.add_annotation(
-            text="暂无候选结果",
+            text=tr("暂无候选结果", locale),
             x=0.5,
             y=0.5,
             xref="paper",
@@ -379,7 +404,7 @@ def _candidate_graph_figure(payload: dict[str, Any]) -> Any:
         yaxis={"visible": False},
         plot_bgcolor="white",
         paper_bgcolor="white",
-        title={"text": "候选预览（不会写入图谱）", "x": 0.02},
+        title={"text": tr("候选预览（不会写入图谱）", locale), "x": 0.02},
         clickmode="event+select",
     )
     return figure
@@ -391,11 +416,11 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
     except ImportError as exc:
         raise RuntimeError("Web UI is not installed; run `uv sync --extra web`") from exc
 
-    def batch_rows(batch: Any) -> list[list[Any]]:
+    def batch_rows(batch: Any, locale: object = "zh-CN") -> list[list[Any]]:
         return [
             [
                 item.filename,
-                _batch_status_cell(item.status.value, item.run_id),
+                _batch_status_cell(item.status.value, item.run_id, locale),
                 item.run_id or "",
                 item.reused_from_item_id or "",
                 item.failure_code or "",
@@ -431,6 +456,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         provided_entities_json: str,
         pdf_parse_mode: str,
         operator: str,
+        chinese: bool,
     ) -> tuple[
         str,
         dict[str, Any],
@@ -489,12 +515,13 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             "",
         )
         state = service.show_run(first_run_id) if first_run_id else None
-        rows = batch_rows(batch)
+        locale = "zh-CN" if chinese else "en"
+        rows = batch_rows(batch, locale)
         return (
             f"**批次状态** `{batch.status.value}` · 文件 {len(batch.items)} · "
             f"{'新建' if created else '复用'}",
             batch.model_dump(mode="json"),
-            _claim_rows(state) if state else [],
+            _claim_rows(state, locale) if state else [],
             first_run_id,
             batch.id,
             rows,
@@ -512,16 +539,17 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         )
 
     def load_build(
-        run_id: str, batch_id: str
+        run_id: str, batch_id: str, chinese: bool
     ) -> tuple[str, dict[str, Any], list[list[Any]], list[list[Any]], Any, Any]:
+        locale = "zh-CN" if chinese else "en"
         if batch_id:
             batch = service.refresh_batch(batch_id)
-            rows = batch_rows(batch)
+            rows = batch_rows(batch, locale)
             state = service.show_run(run_id) if run_id else None
             return (
                 f"**批次状态** `{batch.status.value}` · 文件 {len(batch.items)}",
                 batch.model_dump(mode="json"),
-                _claim_rows(state) if state else [],
+                _claim_rows(state, locale) if state else [],
                 rows,
                 dropdown_update(
                     gr,
@@ -535,7 +563,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     empty_label="暂无审核对象",
                 ),
             )
-        status, summary, claims = load_run(run_id)
+        status, summary, claims = load_run(run_id, locale)
         state = service.show_run(run_id)
         return (
             status,
@@ -550,7 +578,9 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             ),
         )
 
-    def select_batch_result(batch_id: str, item_id: str) -> tuple[str, list[list[Any]], Any]:
+    def select_batch_result(
+        batch_id: str, item_id: str, chinese: bool
+    ) -> tuple[str, list[list[Any]], Any]:
         if not batch_id or not item_id:
             return "", [], dropdown_update(gr, [], empty_label="暂无审核对象")
         batch = service.refresh_batch(batch_id)
@@ -558,9 +588,10 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         if item is None or not item.run_id:
             return "", [], dropdown_update(gr, [], empty_label="暂无审核对象")
         state = service.show_run(item.run_id)
+        locale = "zh-CN" if chinese else "en"
         return (
             item.run_id,
-            _claim_rows(state),
+            _claim_rows(state, locale),
             dropdown_update(
                 gr,
                 _review_target_choices(state),
@@ -656,10 +687,16 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             gr.update(value="尚未校验 Schema"),
         )
 
-    def load_run(run_id: str) -> tuple[str, dict[str, Any], list[list[Any]]]:
+    def load_run(
+        run_id: str, locale: object = "zh-CN"
+    ) -> tuple[str, dict[str, Any], list[list[Any]]]:
         state = service.show_run(run_id)
         execution = service.executions.view(run_id)
-        return _state_status(state, execution), _state_summary(state), _claim_rows(state)
+        return (
+            _state_status(state, execution, locale),
+            _state_summary(state),
+            _claim_rows(state, locale),
+        )
 
     def select_workspace_run(run_id: str | None) -> tuple[str, str]:
         if not run_id:
@@ -698,19 +735,23 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         return gr.update(value=run_id), group_update, page_update, tab_update
 
     def poll_build_status(
-        run_id: str | None, batch_id: str | None
-    ) -> tuple[Any, Any, Any, Any]:
+        run_id: str | None, batch_id: str | None, chinese: bool
+    ) -> tuple[Any, ...]:
         if not run_id:
             return (
                 gr.update(),
                 gr.update(),
                 gr.update(),
                 gr.update(active=False),
+                *export_availability(None, "zh-CN" if chinese else "en"),
             )
         state = service.show_run(run_id)
+        locale = "zh-CN" if chinese else "en"
         table_update: Any = gr.update()
         if batch_id:
-            table_update = gr.update(value=batch_rows(service.refresh_batch(batch_id)))
+            table_update = gr.update(
+                value=batch_rows(service.refresh_batch(batch_id), locale)
+            )
         terminal = state.status in {"completed", "failed", "cancelled", "excluded"}
         if terminal:
             return (
@@ -718,17 +759,37 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 gr.update(),
                 table_update,
                 gr.update(active=False),
+                *export_availability(state, locale),
             )
         execution = service.executions.view(run_id)
         return (
-            _state_status(state, execution),
+            _state_status(state, execution, locale),
             _state_summary(state),
             table_update,
             gr.update(active=True),
+            *export_availability(state, locale),
         )
+
+    def export_availability(
+        state: Any | None, locale: object = "zh-CN"
+    ) -> tuple[Any, str, str]:
+        ready = bool(
+            state is not None
+            and state.extraction_result is not None
+            and state.document is not None
+            and state.output_schema is not None
+        )
+        message = tr(
+            "完整结果已就绪，可以生成 ZIP 下载链接。"
+            if ready
+            else "完整结果尚未生成；请先完成待办并恢复运行。",
+            locale,
+        )
+        return gr.update(interactive=ready), message, ""
 
     def load_result_views(
         run_id: str,
+        chinese: bool,
     ) -> tuple[
         str,
         list[list[Any]],
@@ -738,18 +799,27 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         dict[str, Any],
         str,
         list[list[Any]],
+        Any,
+        str,
+        str,
     ]:
+        locale = "zh-CN" if chinese else "en"
         if not run_id:
             empty_graph = {"semantics": "candidate_only", "nodes": [], "edges": [], "details": {}}
             return (
-                "尚无可解释的抽取结果。",
+                tr("尚无可解释的抽取结果。", locale),
                 [],
                 [],
-                _candidate_graph_figure(empty_graph),
-                dropdown_update(gr, [], empty_label="暂无候选节点或关系"),
+                _candidate_graph_figure(empty_graph, locale),
+                dropdown_update(
+                    gr,
+                    [],
+                    empty_label=tr("暂无候选节点或关系", locale),
+                ),
                 {},
-                "尚无多模态处理摘要。",
+                tr("尚无多模态处理摘要。", locale),
                 [],
+                *export_availability(None, locale),
             )
         state = service.show_run(run_id)
         insight = run_insight(state)
@@ -777,19 +847,24 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 asset.page_number,
                 f"{asset.width or '-'} × {asset.height or '-'}",
                 asset.evidence_id,
-                "是" if asset.id in visual_assets else "否",
+                tr("是", locale) if asset.id in visual_assets else tr("否", locale),
             ]
             for asset in (state.document.media_assets if state.document else [])
         ]
         return (
-            _run_insight_markdown(insight),
-            _aggregated_entity_rows(state),
+            _run_insight_markdown(insight, locale),
+            _aggregated_entity_rows(state, locale),
             _mention_occurrence_rows(state),
-            _candidate_graph_figure(graph),
-            dropdown_update(gr, choices, empty_label="暂无候选节点或关系"),
+            _candidate_graph_figure(graph, locale),
+            dropdown_update(
+                gr,
+                choices,
+                empty_label=tr("暂无候选节点或关系", locale),
+            ),
             {},
-            _multimodal_markdown(insight),
+            _multimodal_markdown(insight, locale),
             media_rows,
+            *export_availability(state, locale),
         )
 
     async def candidate_detail(run_id: str, item_id: str) -> dict[str, Any]:
@@ -826,12 +901,26 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             return gr.update(), {}
         return gr.update(value=item_id), await candidate_detail(run_id, item_id)
 
-    def result_export_link(run_id: str, include_source: bool) -> str:
+    def result_export_link(
+        run_id: str, include_source: bool, chinese: bool
+    ) -> tuple[str, str]:
+        locale = "zh-CN" if chinese else "en"
         if not run_id:
             raise ValueError("请先选择有抽取结果的运行")
+        state = service.show_run(run_id)
+        if (
+            state.extraction_result is None
+            or state.document is None
+            or state.output_schema is None
+        ):
+            return "", tr("完整结果尚未生成；请先完成待办并恢复运行。", locale)
         source = "true" if include_source else "false"
         href = f"/api/v1/runs/{quote(run_id, safe='')}/export?include_source={source}"
-        return f'<a class="prismke-export-link" download href="{href}">下载完整结果 ZIP</a>'
+        return (
+            f'<a class="prismke-export-link" download href="{href}">'
+            f"{escape(tr('下载完整结果 ZIP', locale))}</a>",
+            tr("下载链接已生成。", locale),
+        )
 
     def agent_report(run_id: str | None) -> tuple[list[list[Any]], dict[str, Any]]:
         if not run_id:
@@ -1408,27 +1497,32 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         )
         return headline, recent, graph_text
 
-    def sidebar_run(run_id: str | None) -> tuple[Any, str]:
+    def sidebar_run(run_id: str | None, chinese: bool) -> tuple[Any, str]:
+        locale = "zh-CN" if chinese else "en"
         states = service.runs.list(limit=1000)
-        choices = friendly_run_choices(service, states, locale="zh-CN")
+        choices = friendly_run_choices(service, states, locale=locale)
         if run_id not in {state.run_id for state in states}:
             run_id = states[0].run_id if states else None
         if not run_id:
-            return dropdown_update(gr, [], empty_label="暂无运行"), "暂无运行"
+            return (
+                dropdown_update(gr, [], empty_label=tr("暂无运行", locale)),
+                tr("暂无运行", locale),
+            )
         progress = service.review_progress(run_id)
         execution = progress["execution"]
         text = (
-            f"业务：{status_label(progress['status'], 'zh-CN')}\n"
-            f"执行：{status_label(execution['status'], 'zh-CN')}\n"
-            f"节点：{node_label(execution['node'], 'zh-CN')}\n"
-            f"实体待审：{progress['entity_pending']} · "
-            f"事实待审：{progress['claim_pending']} · "
-            f"视觉待审：{progress['visual_pending']} · 校验：{progress['validation_pending']}"
+            f"{tr('业务状态', locale)}：{status_label(progress['status'], locale)}\n"
+            f"{tr('执行状态', locale)}：{status_label(execution['status'], locale)}\n"
+            f"{tr('当前节点', locale)}：{node_label(execution['node'], locale)}\n"
+            f"{tr('实体待审', locale)}：{progress['entity_pending']} · "
+            f"{tr('事实待审', locale)}：{progress['claim_pending']} · "
+            f"{tr('视觉待审', locale)}：{progress['visual_pending']} · "
+            f"{tr('校验问题', locale)}：{progress['validation_pending']}"
         )
         return dropdown_update(
             gr,
             choices,
-            empty_label="暂无运行",
+            empty_label=tr("暂无运行", locale),
             value=run_id,
         ), text
 
@@ -1770,6 +1864,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                                 ".docx",
                                 ".html",
                                 ".htm",
+                                ".zip",
                                 ".json",
                                 ".png",
                                 ".jpg",
@@ -1866,22 +1961,31 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                         wrap=True,
                     )
                 with gr.Accordion("抽取结果预览", open=True):
-                    gr.Markdown("候选预览仅用于解释抽取结果，不会写入 GraphStore 或生成 Revision。")
-                    with gr.Row(elem_classes="candidate-preview-row"):
-                        candidate_plot = gr.Plot(
-                            label="候选关系图",
-                            elem_id="candidate-result-plot",
-                        )
-                        with gr.Column():
-                            candidate_selector = gr.Dropdown(
-                                label="候选节点或关系",
-                                elem_id="candidate-result-selector",
-                                **empty_dropdown_kwargs("暂无候选节点或关系"),
+                    with gr.Group(elem_id="result-preview-panel"):
+                        with gr.Row(elem_classes="result-preview-toolbar"):
+                            gr.Markdown(
+                                "候选预览仅用于解释抽取结果，不会写入 GraphStore 或生成 Revision。"
                             )
-                            candidate_evidence = gr.JSON(
-                                label="候选与证据详情",
-                                elem_id="candidate-result-evidence",
+                            gr.Button(
+                                "全屏查看",
+                                elem_id="result-preview-fullscreen",
+                                size="sm",
                             )
+                        with gr.Row(elem_classes="candidate-preview-row"):
+                            candidate_plot = gr.Plot(
+                                label="候选关系图",
+                                elem_id="candidate-result-plot",
+                            )
+                            with gr.Column():
+                                candidate_selector = gr.Dropdown(
+                                    label="候选节点或关系",
+                                    elem_id="candidate-result-selector",
+                                    **empty_dropdown_kwargs("暂无候选节点或关系"),
+                                )
+                                candidate_evidence = gr.JSON(
+                                    label="候选与证据详情",
+                                    elem_id="candidate-result-evidence",
+                                )
                     candidate_plot_selection = gr.Textbox(
                         elem_id="candidate-plot-selection",
                         elem_classes="browser-bridge",
@@ -1907,7 +2011,14 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                         label="在 ZIP 中包含原始文件和已验证派生媒体",
                         value=False,
                     )
-                    export_button = gr.Button("生成下载链接", variant="primary")
+                    export_button = gr.Button(
+                        "生成下载链接",
+                        variant="primary",
+                        interactive=False,
+                    )
+                    export_status = gr.Markdown(
+                        "完整结果尚未生成；请先完成待办并恢复运行。"
+                    )
                     export_download = gr.HTML()
                 with gr.Accordion("批次处理", open=False):
                     batch_item_selector = gr.Dropdown(
@@ -1954,7 +2065,12 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             review_run_controls = build_review_tabs(service)
             from frontend.execution import build_execution_tab
 
-            execution_run_control = build_execution_tab(service, llm_api_key, vlm_api_key)
+            execution_run_control = build_execution_tab(
+                service,
+                llm_api_key,
+                vlm_api_key,
+                language_switch,
+            )
 
             with gr.Tab("证据", id="evidence"):
                 page_header(gr, "evidence")
@@ -2307,7 +2423,15 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                         [history_output],
                     )
 
-            validation_run_control = build_validation_tab(gr, service)
+            validation_run_control = build_validation_tab(
+                gr,
+                service,
+                navigation_group=navigation_group,
+                navigation_page=navigation_page,
+                workspace_tabs=workspace_tabs,
+                current_run=current_run,
+                language_switch=language_switch,
+            )
 
             with gr.Tab("版本", id="revisions"):
                 page_header(gr, "revisions")
@@ -2775,20 +2899,23 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             ),
         )
         refresh_context.click(
-            guard_ui(gr, sidebar_run, 2), [current_run], [current_run, run_context]
+            guard_ui(gr, sidebar_run, 2),
+            [current_run, language_switch],
+            [current_run, run_context],
         )
 
-        def sync_current_task(run_id: str | None) -> tuple[Any, ...]:
+        def sync_current_task(run_id: str | None, chinese: bool) -> tuple[Any, ...]:
+            locale = "zh-CN" if chinese else "en"
             states = service.runs.list(limit=1000)
 
             def update(filtered: list[Any]) -> Any:
-                choices = friendly_run_choices(service, filtered, locale="zh-CN")
+                choices = friendly_run_choices(service, filtered, locale=locale)
                 ids = {state.run_id for state in filtered}
                 selected = run_id if run_id in ids else choices[0][1] if choices else None
                 return dropdown_update(
                     gr,
                     choices,
-                    empty_label="暂无运行",
+                    empty_label=tr("暂无运行", locale),
                     value=selected,
                 )
 
@@ -2815,20 +2942,20 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
         ]
         current_run.change(
             guard_ui(gr, sidebar_run, 2),
-            [current_run],
+            [current_run, language_switch],
             [current_run, run_context],
         ).then(
             guard_ui(gr, sync_current_task, 8),
-            current_run,
+            [current_run, language_switch],
             synced_run_controls,
         )
         demo.load(
             guard_ui(gr, sidebar_run, 2),
-            [current_run],
+            [current_run, language_switch],
             [current_run, run_context],
         ).then(
             guard_ui(gr, sync_current_task, 8),
-            current_run,
+            [current_run, language_switch],
             synced_run_controls,
         )
         demo.load(guard_ui(gr, evidence_runs), outputs=evidence_run).then(
@@ -2873,14 +3000,26 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             candidate_evidence,
             multimodal_summary,
             multimodal_media_table,
+            export_button,
+            export_status,
+            export_download,
         ]
+        language_switch.change(
+            guard_ui(gr, sidebar_run, 2),
+            [current_run, language_switch],
+            [current_run, run_context],
+        ).then(
+            guard_ui(gr, load_result_views, 11),
+            [run_id_output, language_switch],
+            result_view_outputs,
+        )
         current_run.change(
             guard_ui(gr, select_workspace_run, 2),
             current_run,
             [run_id_output, batch_id_output],
         ).then(
             guard_ui(gr, load_build, 6),
-            [run_id_output, batch_id_output],
+            [run_id_output, batch_id_output, language_switch],
             [
                 run_status,
                 run_summary,
@@ -2890,8 +3029,8 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 extraction_review_target,
             ],
         ).then(
-            guard_ui(gr, load_result_views, 8),
-            run_id_output,
+            guard_ui(gr, load_result_views, 11),
+            [run_id_output, language_switch],
             result_view_outputs,
         )
         review_jump_bridge.change(
@@ -2900,9 +3039,17 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             [current_run, navigation_group, navigation_page, workspace_tabs],
         )
         build_status_timer.tick(
-            guard_ui(gr, poll_build_status, 4),
-            [run_id_output, batch_id_output],
-            [run_status, run_summary, batch_table, build_status_timer],
+            guard_ui(gr, poll_build_status, 7),
+            [run_id_output, batch_id_output, language_switch],
+            [
+                run_status,
+                run_summary,
+                batch_table,
+                build_status_timer,
+                export_button,
+                export_status,
+                export_download,
+            ],
             show_progress="hidden",
         )
         current_run.change(
@@ -2941,6 +3088,7 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 provided_entities_input,
                 pdf_parse_mode_input,
                 config_operator,
+                language_switch,
             ],
             [
                 run_status,
@@ -2954,16 +3102,16 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             ],
         ).then(
             guard_ui(gr, sidebar_run, 2),
-            [run_id_output],
+            [run_id_output, language_switch],
             [current_run, run_context],
         ).then(
-            guard_ui(gr, load_result_views, 8),
-            run_id_output,
+            guard_ui(gr, load_result_views, 11),
+            [run_id_output, language_switch],
             result_view_outputs,
         )
         reload_button.click(
             guard_ui(gr, load_build, 6),
-            [run_id_output, batch_id_output],
+            [run_id_output, batch_id_output, language_switch],
             [
                 run_status,
                 run_summary,
@@ -2973,17 +3121,17 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                 extraction_review_target,
             ],
         ).then(
-            guard_ui(gr, load_result_views, 8),
-            run_id_output,
+            guard_ui(gr, load_result_views, 11),
+            [run_id_output, language_switch],
             result_view_outputs,
         )
         batch_item_selector.change(
             guard_ui(gr, select_batch_result, 3),
-            [batch_id_output, batch_item_selector],
+            [batch_id_output, batch_item_selector, language_switch],
             [run_id_output, claim_table, extraction_review_target],
         ).then(
-            guard_ui(gr, load_result_views, 8),
-            run_id_output,
+            guard_ui(gr, load_result_views, 11),
+            [run_id_output, language_switch],
             result_view_outputs,
         )
         extraction_review_button.click(
@@ -2997,8 +3145,8 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             ],
             [claim_table, extraction_review_outcome],
         ).then(
-            guard_ui(gr, load_result_views, 8),
-            run_id_output,
+            guard_ui(gr, load_result_views, 11),
+            [run_id_output, language_switch],
             result_view_outputs,
         )
         candidate_selector.change(
@@ -3011,10 +3159,56 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
             [run_id_output, candidate_plot_selection],
             [candidate_selector, candidate_evidence],
         )
+        demo.load(
+            fn=None,
+            js="""() => {
+              if (window.__prismkeResultFullscreenBound) return;
+              window.__prismkeResultFullscreenBound = true;
+              const resizePlot = target => window.setTimeout(() => {
+                const plot = target.querySelector('.js-plotly-plot');
+                if (plot && window.Plotly?.Plots?.resize) window.Plotly.Plots.resize(plot);
+              }, 80);
+              const sync = () => {
+                const current = window.__prismkeResultFullscreen;
+                if (!current) return;
+                const active = current.panel.classList.contains('prismke-fullscreen-fallback');
+                current.panel.classList.toggle('prismke-fullscreen', active);
+                current.button.setAttribute('aria-pressed', String(active));
+                const zh = window.PrismKEI18n?.getLocale() === 'zh-CN';
+                current.button.textContent = active
+                  ? (zh ? '退出全屏' : 'Exit fullscreen')
+                  : (zh ? '全屏查看' : 'View fullscreen');
+                resizePlot(current.panel);
+              };
+              document.addEventListener('click', event => {
+                const target = event.target;
+                if (!(target instanceof Element)) return;
+                const button = target.closest(
+                  'button#result-preview-fullscreen, #result-preview-fullscreen button'
+                );
+                if (!button) return;
+                const panel = button.closest('#result-preview-panel');
+                if (!panel) return;
+                window.__prismkeResultFullscreen = {panel, button};
+                panel.classList.toggle('prismke-fullscreen-fallback');
+                sync();
+                button.focus();
+              }, true);
+              document.addEventListener('keydown', event => {
+                if (event.key !== 'Escape') return;
+                const current = window.__prismkeResultFullscreen;
+                if (!current?.panel.classList.contains('prismke-fullscreen-fallback')) return;
+                current.panel.classList.remove('prismke-fullscreen-fallback');
+                sync();
+              });
+              window.addEventListener('prismke:localechange', sync);
+            }""",
+            queue=False,
+        )
         export_button.click(
-            guard_ui(gr, result_export_link),
-            [run_id_output, export_include_source],
-            export_download,
+            guard_ui(gr, result_export_link, 2),
+            [run_id_output, export_include_source, language_switch],
+            [export_download, export_status],
         )
         batch_action_outputs = [
             run_status,

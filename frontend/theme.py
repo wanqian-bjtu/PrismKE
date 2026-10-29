@@ -1008,6 +1008,84 @@ table { font-size: 13px; }
   #prismke-workspace { overflow-x: hidden !important; }
 }
 
+.correction-preview-comparison {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+  margin: 8px 0;
+}
+.correction-preview-card {
+  border: 1px solid #dbe4f0;
+  border-radius: 12px;
+  padding: 14px;
+  background: #fff;
+}
+.correction-preview-card h4 { margin: 0 0 10px; color: #0f2d5c; }
+.correction-field {
+  display: grid;
+  grid-template-columns: minmax(108px, 0.42fr) minmax(0, 1fr);
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid #eef2f7;
+}
+.correction-field:last-child { border-bottom: 0; }
+.correction-field-label { color: #64748b; font-size: 13px; }
+.correction-field-value { overflow-wrap: anywhere; }
+.correction-value-changed {
+  color: #0b57d0;
+  font-weight: 700;
+  background: #eaf2ff;
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+.correction-preview-arrow {
+  align-self: center;
+  color: #155dd7;
+  font-size: 28px;
+  font-weight: 700;
+}
+.correction-preview-decision {
+  display: grid;
+  align-content: center;
+  background: #f7f9fc;
+}
+.correction-preview-status {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #edf6ff;
+  color: #123b6d;
+}
+.result-preview-toolbar { align-items: center !important; }
+#result-preview-fullscreen { flex: 0 0 auto !important; min-width: 130px !important; }
+#result-preview-panel.prismke-fullscreen,
+#result-preview-panel.prismke-fullscreen-fallback {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 10000 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: none !important;
+  max-height: none !important;
+  overflow: auto !important;
+  padding: 20px !important;
+  background: #f8fafc !important;
+}
+#result-preview-panel.prismke-fullscreen .candidate-preview-row,
+#result-preview-panel.prismke-fullscreen-fallback .candidate-preview-row {
+  min-height: calc(100vh - 110px) !important;
+}
+#result-preview-panel.prismke-fullscreen #candidate-result-plot,
+#result-preview-panel.prismke-fullscreen-fallback #candidate-result-plot {
+  min-height: calc(100vh - 140px) !important;
+}
+
+@media (max-width: 720px) {
+  .correction-preview-comparison { grid-template-columns: 1fr; }
+  .correction-preview-arrow { transform: rotate(90deg); justify-self: center; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .gradio-container .sidebar-parent,
   #workspace-sidebar-toggle,

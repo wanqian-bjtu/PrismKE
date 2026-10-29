@@ -6,13 +6,16 @@ import asyncio
 import base64
 import json
 import mimetypes
+import os
 import re
 import shutil
+import stat
 import tempfile
 from hashlib import sha256
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import unquote, urlparse
+from zipfile import BadZipFile, ZipFile
 
 import httpx
 import pymupdf
@@ -41,6 +44,7 @@ TEXT_TYPES = {"text/plain"}
 IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp", "image/tiff", "image/bmp"}
 MARKDOWN_TYPES = {"text/markdown"}
 HTML_TYPES = {"text/html"}
+HTML_PACKAGE_TYPES = {"application/zip"}
 JSON_TYPES = {"application/json", "application/prismke.document-ir+json"}
 DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 DOC_TYPE = "application/msword"
@@ -58,6 +62,7 @@ def detect_media_type(path: Path, explicit: str | None = None) -> str:
         ".pdf": "application/pdf",
         ".html": "text/html",
         ".htm": "text/html",
+        ".zip": "application/zip",
         ".docx": DOCX_TYPE,
         ".doc": DOC_TYPE,
         ".json": "application/json",
@@ -70,6 +75,17 @@ def detect_media_type(path: Path, explicit: str | None = None) -> str:
         ".bmp": "image/bmp",
     }
     return suffix_map.get(path.suffix.lower()) or mimetypes.guess_type(path.name)[0] or ""
+
+
+def _uploaded_filename(path: Path) -> str:
+    prefix, separator, original = path.name.partition("--")
+    if (
+        separator
+        and len(prefix) == 32
+        and all(character in "0123456789abcdef" for character in prefix)
+    ):
+        return original
+    return path.name
 
 
 class AssetWriter:
@@ -178,7 +194,10 @@ def _asset(
 
 
 async def _resolve_image(
-    source: str, base: Path, allow_remote: bool = False
+    source: str,
+    base: Path,
+    allow_remote: bool = False,
+    asset_root: Path | None = None,
 ) -> tuple[bytes, str, str] | None:
     if source.startswith("data:"):
         header, encoded = source.split(",", 1)
@@ -193,14 +212,15 @@ async def _resolve_image(
             response.raise_for_status()
         media_type = response.headers.get("content-type", "image/png").split(";", 1)[0]
         return response.content, media_type, source
+    root = (asset_root or base).resolve()
     candidate = (base / unquote(parsed.path)).resolve()
     try:
-        candidate.relative_to(base.resolve())
+        relative = candidate.relative_to(root)
     except ValueError:
         return None
     if not candidate.is_file():
         return None
-    return candidate.read_bytes(), detect_media_type(candidate), str(candidate)
+    return candidate.read_bytes(), detect_media_type(candidate), relative.as_posix()
 
 
 def _html_image_context(image: Tag) -> str:
@@ -563,7 +583,7 @@ class HTMLParser:
 
     async def parse(self, source: SourceDocument) -> DocumentIR:
         path = source.path.resolve()
-        source_hash = file_sha256(path)
+        source_hash = source.content_hash or file_sha256(path)
         document_id = stable_id("doc", source_hash)
         soup = BeautifulSoup(path.read_text(encoding="utf-8"), "html.parser")
         blocks: list[TextBlock] = []
@@ -597,7 +617,12 @@ class HTMLParser:
                 evidence.append(ref)
         for ordinal, image in enumerate(soup.find_all("img")):
             src = str(image.get("src", ""))
-            resolved = await _resolve_image(src, path.parent, self.allow_remote)
+            resolved = await _resolve_image(
+                src,
+                path.parent,
+                self.allow_remote,
+                source.asset_root,
+            )
             if resolved is None:
                 kind = (
                     "remote_asset_blocked"
@@ -624,13 +649,152 @@ class HTMLParser:
                 evidence.append(asset_ref)
         return DocumentIR(
             id=document_id,
-            source_path=str(path),
+            source_path=str((source.persisted_source_path or path).resolve()),
+            source_filename=source.source_filename,
+            source_package_filename=source.source_package_filename,
+            source_entry_path=source.source_entry_path,
             source_hash=source_hash,
             media_type="text/html",
             text_blocks=blocks,
             media_assets=assets,
             evidence=evidence,
             warnings=warnings,
+        )
+
+
+class HTMLPackageParser:
+    """Safely extract a single-HTML ZIP package and preserve relative assets."""
+
+    def __init__(
+        self,
+        asset_dir: Path | None = None,
+        allow_remote: bool = False,
+        package_dir: Path | None = None,
+        *,
+        max_entries: int = 1000,
+        max_entry_bytes: int = 200 * 1024 * 1024,
+        max_total_bytes: int = 500 * 1024 * 1024,
+        max_compression_ratio: float = 200.0,
+    ) -> None:
+        self.html = HTMLParser(asset_dir, allow_remote)
+        self.package_dir = package_dir or Path("runtime/derived-documents/html-packages")
+        self.max_entries = max_entries
+        self.max_entry_bytes = max_entry_bytes
+        self.max_total_bytes = max_total_bytes
+        self.max_compression_ratio = max_compression_ratio
+
+    def supports(self, media_type: str) -> bool:
+        return media_type in HTML_PACKAGE_TYPES
+
+    @staticmethod
+    def _relative_path(name: str) -> PurePosixPath:
+        if not name or "\\" in name or "\x00" in name:
+            raise ValueError("HTML_PACKAGE_UNSAFE_PATH")
+        path = PurePosixPath(name)
+        if (
+            path.is_absolute()
+            or any(part in {"", ".", ".."} for part in path.parts)
+            or (path.parts and re.match(r"^[A-Za-z]:", path.parts[0]))
+        ):
+            raise ValueError("HTML_PACKAGE_UNSAFE_PATH")
+        return path
+
+    def _members(self, archive: ZipFile) -> tuple[list[tuple[Any, PurePosixPath]], str]:
+        members: list[tuple[Any, PurePosixPath]] = []
+        html_entries: list[str] = []
+        total = 0
+        archive_entries = archive.infolist()
+        if len(archive_entries) > self.max_entries:
+            raise ValueError("HTML_PACKAGE_TOO_MANY_ENTRIES")
+        for info in archive_entries:
+            if info.is_dir() or info.filename.startswith("__MACOSX/"):
+                continue
+            relative = self._relative_path(info.filename)
+            if info.flag_bits & 0x1:
+                raise ValueError("HTML_PACKAGE_ENCRYPTED_ENTRY")
+            mode = (info.external_attr >> 16) & 0o170000
+            if mode == stat.S_IFLNK:
+                raise ValueError("HTML_PACKAGE_SYMLINK_ENTRY")
+            if info.file_size > self.max_entry_bytes:
+                raise ValueError("HTML_PACKAGE_ENTRY_TOO_LARGE")
+            total += info.file_size
+            if total > self.max_total_bytes:
+                raise ValueError("HTML_PACKAGE_TOO_LARGE")
+            if (
+                info.file_size >= 1024 * 1024
+                and info.file_size / max(info.compress_size, 1)
+                > self.max_compression_ratio
+            ):
+                raise ValueError("HTML_PACKAGE_COMPRESSION_RATIO_EXCEEDED")
+            members.append((info, relative))
+            if relative.suffix.lower() in {".html", ".htm"}:
+                html_entries.append(relative.as_posix())
+        if not html_entries:
+            raise ValueError("HTML_PACKAGE_HTML_MISSING")
+        if len(html_entries) != 1:
+            raise ValueError("HTML_PACKAGE_HTML_AMBIGUOUS")
+        return members, html_entries[0]
+
+    def _extract(self, path: Path, digest: str) -> tuple[Path, str]:
+        self.package_dir.mkdir(parents=True, exist_ok=True)
+        target_root = (self.package_dir / digest).resolve()
+        try:
+            with ZipFile(path) as archive:
+                members, html_entry = self._members(archive)
+                target_html = target_root / PurePosixPath(html_entry)
+                if target_html.is_file():
+                    return target_root, html_entry
+                temporary_root = Path(
+                    tempfile.mkdtemp(prefix=f".{digest}.", dir=self.package_dir)
+                ).resolve()
+                try:
+                    actual_total = 0
+                    for info, relative in members:
+                        destination = (temporary_root / relative).resolve()
+                        try:
+                            destination.relative_to(temporary_root)
+                        except ValueError as exc:
+                            raise ValueError("HTML_PACKAGE_UNSAFE_PATH") from exc
+                        destination.parent.mkdir(parents=True, exist_ok=True)
+                        with archive.open(info) as source_stream, destination.open(
+                            "wb"
+                        ) as destination_stream:
+                            while chunk := source_stream.read(1024 * 1024):
+                                actual_total += len(chunk)
+                                if actual_total > self.max_total_bytes:
+                                    raise ValueError("HTML_PACKAGE_TOO_LARGE")
+                                destination_stream.write(chunk)
+                        if destination.stat().st_size != info.file_size:
+                            raise ValueError("HTML_PACKAGE_SIZE_MISMATCH")
+                    if target_root.exists():
+                        shutil.rmtree(temporary_root)
+                    else:
+                        os.replace(temporary_root, target_root)
+                finally:
+                    if temporary_root.exists():
+                        shutil.rmtree(temporary_root)
+                if not target_html.is_file():
+                    raise ValueError("HTML_PACKAGE_HTML_MISSING")
+                return target_root, html_entry
+        except BadZipFile as exc:
+            raise ValueError("HTML_PACKAGE_INVALID_ZIP") from exc
+
+    async def parse(self, source: SourceDocument) -> DocumentIR:
+        package_path = source.path.resolve()
+        digest = file_sha256(package_path)
+        root, html_entry = self._extract(package_path, digest)
+        package_filename = _uploaded_filename(package_path)
+        return await self.html.parse(
+            SourceDocument(
+                path=root / PurePosixPath(html_entry),
+                media_type="text/html",
+                asset_root=root,
+                content_hash=digest,
+                persisted_source_path=package_path,
+                source_filename=PurePosixPath(html_entry).name,
+                source_package_filename=package_filename,
+                source_entry_path=html_entry,
+            )
         )
 
 

@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from frontend.i18n import tr
 from frontend.layout import compact_dropdown, page_header
 from frontend.presentation import (
     dropdown_update,
@@ -27,39 +28,45 @@ def build_execution_tab(
     service: PrismKEService,
     llm_api_key_input: Any | None = None,
     vlm_api_key_input: Any | None = None,
+    language_switch: Any | None = None,
 ) -> Any:
     import gradio as gr
 
-    def action_help(execution: dict[str, Any], can_resume: bool) -> str:
+    locale_control = language_switch or gr.State(False)
+
+    def action_help(
+        execution: dict[str, Any], can_resume: bool, locale: object
+    ) -> str:
         if execution["status"] == "completed":
-            return "安全取消：已完成任务不可取消。恢复运行：已完成任务不可恢复。"
+            return tr("安全取消：已完成任务不可取消。恢复运行：已完成任务不可恢复。", locale)
         cancel = (
-            "安全取消：当前任务正在排队或执行，可请求在安全检查点停止。"
+            tr("安全取消：当前任务正在排队或执行，可请求在安全检查点停止。", locale)
             if execution["can_cancel"]
-            else "安全取消：仅排队中、运行中或正在取消的任务可用。"
+            else tr("安全取消：仅排队中、运行中或正在取消的任务可用。", locale)
         )
         resume = (
-            "恢复运行：当前阻断条件已解除，可从检查点继续。"
+            tr("恢复运行：当前阻断条件已解除，可从检查点继续。", locale)
             if can_resume
-            else "恢复运行：仅中断、失败、凭据缺失或审核完成后可继续的任务可用。"
+            else tr("恢复运行：仅中断、失败、凭据缺失或审核完成后可继续的任务可用。", locale)
         )
         return f"{cancel}\n\n{resume}"
 
-    def refresh(run_id: str | None) -> tuple[Any, ...]:
+    def refresh(run_id: str | None, chinese: bool = False) -> tuple[Any, ...]:
+        locale = "zh-CN" if chinese else "en"
         states = service.runs.list(limit=1000)
-        choices = friendly_run_choices(service, states, locale="zh-CN")
+        choices = friendly_run_choices(service, states, locale=locale)
         if run_id not in {s.run_id for s in states}:
             run_id = states[0].run_id if states else None
         if not run_id:
             return (
-                dropdown_update(gr, [], empty_label="暂无运行"),
-                "### 尚无执行任务",
-                "尚无 PDF 解析决定。",
+                dropdown_update(gr, [], empty_label=tr("暂无运行", locale)),
+                f"### {tr('尚无执行任务', locale)}",
+                tr("尚无 PDF 解析决定。", locale),
                 [],
                 [],
                 {},
                 [],
-                dropdown_update(gr, [], empty_label="暂无待核对请求"),
+                dropdown_update(gr, [], empty_label=tr("暂无待核对请求", locale)),
                 0,
                 gr.update(interactive=False),
                 gr.update(interactive=False),
@@ -68,7 +75,7 @@ def build_execution_tab(
                 gr.update(visible=False),
                 gr.update(visible=False),
                 gr.update(visible=False),
-                "尚未选择任务。",
+                tr("尚未选择任务。", locale),
             )
         progress = service.review_progress(run_id)
         execution = progress["execution"]
@@ -84,8 +91,8 @@ def build_execution_tab(
         event_rows = [
             [
                 e.version,
-                status_label(e.status, "zh-CN"),
-                node_label(e.node, "zh-CN"),
+                status_label(e.status, locale),
+                node_label(e.node, locale),
                 e.reason or "",
                 local_time(e.created_at),
             ]
@@ -93,8 +100,8 @@ def build_execution_tab(
         ]
         branch_rows = [
             [
-                branch_label(item.branch, "zh-CN"),
-                status_label(item.status, "zh-CN"),
+                branch_label(item.branch, locale),
+                status_label(item.status, locale),
                 f"{item.completed}/{item.total if item.total is not None else '?'}",
                 item.current_asset or "",
                 local_time(item.updated_at),
@@ -104,10 +111,10 @@ def build_execution_tab(
         request_rows = [
             [
                 item["request_id"],
-                status_label(item["status"], "zh-CN"),
-                node_label(item["metadata"].get("node", ""), "zh-CN"),
-                item["metadata"].get("asset_id") or "文档级",
-                provider_usage_label(item, "zh-CN"),
+                status_label(item["status"], locale),
+                node_label(item["metadata"].get("node", ""), locale),
+                item["metadata"].get("asset_id") or tr("文档级", locale),
+                provider_usage_label(item, locale),
             ]
             for item in requests
         ]
@@ -116,29 +123,55 @@ def build_execution_tab(
         parse_view = service.pdf_parse_view(run_id)
         decision = parse_view["decision"]
         if decision is None:
-            parser_summary = f"请求模式：`{parse_view['mode']}` · 尚未完成 PDF 预检"
+            parser_summary = (
+                f"Requested mode: `{parse_view['mode']}` · PDF preflight not completed"
+                if locale == "en"
+                else f"请求模式：`{parse_view['mode']}` · 尚未完成 PDF 预检"
+            )
             fallback_available = False
         else:
             metrics = decision.complexity
-            parser_summary = (
-                f"**请求模式** `{decision.requested_mode}` · **实际解析器** "
-                f"`{decision.actual_parser}` · **原因** "
-                f"`{', '.join(decision.reason_codes) or '无'}`\n\n"
-                f"页数 {metrics.total_pages} · 无原生文本页 "
-                f"{len(metrics.no_native_text_pages)} · 短文本页 "
-                f"{len(metrics.short_text_pages)} · 表格候选页 "
-                f"{len(metrics.table_candidate_pages)} · 绘图密集页 "
-                f"{len(metrics.drawing_dense_pages)} · 多栏异常页 "
-                f"{len(metrics.unstable_multicolumn_pages)}"
-            )
-            if decision.actual_parser == "mineru":
-                parser_summary += (
-                    f"\n\nMinerU 状态 "
-                    f"`{status_label(decision.mineru_status or 'pending', 'zh-CN')}` · "
-                    f"任务 `{decision.mineru_job_id or '尚未创建'}` · "
-                    f"产物清单 "
-                    f"`{(decision.artifact_manifest_hash or '尚未生成')[:16]}`"
+            if locale == "en":
+                parser_summary = (
+                    f"**Requested mode** `{decision.requested_mode}` · **Actual parser** "
+                    f"`{decision.actual_parser}` · **Reasons** "
+                    f"`{', '.join(decision.reason_codes) or 'None'}`\n\n"
+                    f"Pages {metrics.total_pages} · Pages without native text "
+                    f"{len(metrics.no_native_text_pages)} · Short-text pages "
+                    f"{len(metrics.short_text_pages)} · Table candidates "
+                    f"{len(metrics.table_candidate_pages)} · Drawing-dense pages "
+                    f"{len(metrics.drawing_dense_pages)} · Unstable multi-column pages "
+                    f"{len(metrics.unstable_multicolumn_pages)}"
                 )
+            else:
+                parser_summary = (
+                    f"**请求模式** `{decision.requested_mode}` · **实际解析器** "
+                    f"`{decision.actual_parser}` · **原因** "
+                    f"`{', '.join(decision.reason_codes) or '无'}`\n\n"
+                    f"页数 {metrics.total_pages} · 无原生文本页 "
+                    f"{len(metrics.no_native_text_pages)} · 短文本页 "
+                    f"{len(metrics.short_text_pages)} · 表格候选页 "
+                    f"{len(metrics.table_candidate_pages)} · 绘图密集页 "
+                    f"{len(metrics.drawing_dense_pages)} · 多栏异常页 "
+                    f"{len(metrics.unstable_multicolumn_pages)}"
+                )
+            if decision.actual_parser == "mineru":
+                if locale == "en":
+                    parser_summary += (
+                        f"\n\nMinerU status "
+                        f"`{status_label(decision.mineru_status or 'pending', locale)}` · "
+                        f"Job `{decision.mineru_job_id or 'Not created'}` · "
+                        f"Artifact manifest "
+                        f"`{(decision.artifact_manifest_hash or 'Not generated')[:16]}`"
+                    )
+                else:
+                    parser_summary += (
+                        f"\n\nMinerU 状态 "
+                        f"`{status_label(decision.mineru_status or 'pending', locale)}` · "
+                        f"任务 `{decision.mineru_job_id or '尚未创建'}` · "
+                        f"产物清单 "
+                        f"`{(decision.artifact_manifest_hash or '尚未生成')[:16]}`"
+                    )
             fallback_available = (
                 execution["status"] == "parser_blocked"
                 and str(decision.requested_mode) == "auto"
@@ -146,19 +179,21 @@ def build_execution_tab(
                 and not parse_view["fallback_approved"]
             )
         summary = (
-            f"### {status_label(execution['status'], 'zh-CN')}\n"
-            f"业务状态：`{status_label(progress['status'], 'zh-CN')}` · "
-            f"当前节点：`{node_label(execution['node'], 'zh-CN')}` · "
-            f"尝试次数：{execution['attempt']} · 未知请求：{len(unknown)}\n\n"
-            f"实体待审 {progress['entity_pending']} · 事实待审 "
-            f"{progress['claim_pending']} · 校验问题 {progress['validation_pending']}"
+            f"### {status_label(execution['status'], locale)}\n"
+            f"{tr('业务状态', locale)}：`{status_label(progress['status'], locale)}` · "
+            f"{tr('当前节点', locale)}：`{node_label(execution['node'], locale)}` · "
+            f"{tr('尝试次数', locale)}：{execution['attempt']} · "
+            f"{tr('未知请求', locale)}：{len(unknown)}\n\n"
+            f"{tr('实体待审', locale)} {progress['entity_pending']} · "
+            f"{tr('事实待审', locale)} {progress['claim_pending']} · "
+            f"{tr('校验问题', locale)} {progress['validation_pending']}"
         )
         request_choices = [item["request_id"] for item in unknown]
         return (
             dropdown_update(
                 gr,
                 choices,
-                empty_label="暂无运行",
+                empty_label=tr("暂无运行", locale),
                 value=run_id,
             ),
             summary,
@@ -170,7 +205,7 @@ def build_execution_tab(
             dropdown_update(
                 gr,
                 request_choices,
-                empty_label="暂无待核对请求",
+                empty_label=tr("暂无待核对请求", locale),
                 value=request_choices[0] if request_choices else None,
             ),
             execution["version"],
@@ -181,7 +216,7 @@ def build_execution_tab(
             gr.update(visible=is_pdf),
             gr.update(visible=fallback_available),
             gr.update(visible=bool(request_choices)),
-            action_help(execution, progress["can_resume"]),
+            action_help(execution, progress["can_resume"], locale),
         )
 
     def cancel(run_id: str, operator: str, reason: str, version: int) -> str:
@@ -340,17 +375,24 @@ def build_execution_tab(
             reconciliation_panel,
             operation_help,
         ]
-        timer.tick(guard_ui(gr, refresh, 17), [run], outputs, show_progress="hidden")
-        refresh_button.click(guard_ui(gr, refresh, 17), [run], outputs)
-        run.input(guard_ui(gr, refresh, 17), [run], outputs)
+        refresh_inputs = [run, locale_control]
+        timer.tick(
+            guard_ui(gr, refresh, 17),
+            refresh_inputs,
+            outputs,
+            show_progress="hidden",
+        )
+        refresh_button.click(guard_ui(gr, refresh, 17), refresh_inputs, outputs)
+        run.input(guard_ui(gr, refresh, 17), refresh_inputs, outputs)
+        locale_control.change(guard_ui(gr, refresh, 17), refresh_inputs, outputs)
         cancel_button.click(guard_ui(gr, cancel), [run, operator, reason, version], output).then(
-            guard_ui(gr, refresh, 17), [run], outputs
+            guard_ui(gr, refresh, 17), refresh_inputs, outputs
         )
         resume_inputs = [run, version]
         if llm_api_key_input is not None and vlm_api_key_input is not None:
             resume_inputs.extend([llm_api_key_input, vlm_api_key_input])
         resume_button.click(guard_ui(gr, resume), resume_inputs, output).then(
-            guard_ui(gr, refresh, 17), [run], outputs
+            guard_ui(gr, refresh, 17), refresh_inputs, outputs
         )
         reconcile_button.click(
             guard_ui(gr, reconcile),
@@ -363,10 +405,10 @@ def build_execution_tab(
                 version,
             ],
             reconcile_output,
-        ).then(guard_ui(gr, refresh, 17), [run], outputs)
+        ).then(guard_ui(gr, refresh, 17), refresh_inputs, outputs)
         fallback_button.click(
             guard_ui(gr, approve_pdf_fallback),
             [run, fallback_operator, fallback_reason, version],
             fallback_output,
-        ).then(guard_ui(gr, refresh, 17), [run], outputs)
+        ).then(guard_ui(gr, refresh, 17), refresh_inputs, outputs)
     return run

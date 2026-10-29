@@ -86,6 +86,9 @@ EN_BY_ZH: dict[str, str] = {
     "候选节点或关系": "Candidate node or relation",
     "候选与证据详情": "Candidate and evidence details",
     "候选预览（不会写入图谱）": "Candidate preview (not written to the graph)",
+    "暂无候选结果": "No candidate results",
+    "请选择运行。": "Select a run.",
+    "无可定位证据": "No locatable evidence",
     "候选预览仅用于解释抽取结果，不会写入 GraphStore 或生成 Revision。": "The candidate preview only explains extraction results. It never writes to GraphStore or creates a Revision.",
     "停用原因": "Reason for deactivation",
     "停用案例": "Deactivate case",
@@ -782,6 +785,81 @@ EN_BY_ZH.update(
         "不适用：连续 HTML 文档": "Not applicable: continuous HTML document",
         "块": "Block",
         "结构": "Structure",
+        "全屏查看": "View fullscreen",
+        "退出全屏": "Exit fullscreen",
+        "修正前后对比": "Before and after correction",
+        "修正前": "Before correction",
+        "修正后": "After correction",
+        "主语类型": "Subject type",
+        "宾语类型": "Object type",
+        "主语规范实体": "Subject canonical entity",
+        "宾语规范实体": "Object canonical entity",
+        "可以应用": "Ready to apply",
+        "仍有阻断问题": "Blocking issues remain",
+        "剩余问题": "Remaining issues",
+        "修正动作说明": "Correction action guide",
+        "修正预览技术详情": "Correction preview technical details",
+        """
+| 修正动作 | 适用情况 | 结果 |
+|---|---|---|
+| 交换主语与宾语 | 关系方向反了 | 交换两端并重新校验 |
+| 改选关系 | 主宾正确、关系错误 | 仅可选择当前 Schema 关系 |
+| 修正实体类型 | 实体正确、类型错误 | 修改指定端点类型并重新校验 |
+| 修正实体链接 | 链接到错误规范实体 | 改链到已有实体或保持 NIL |
+| 排除候选 | 候选属于误抽取 | 不进入后续处理，保留审计 |
+| 暂缓处理 | 证据暂时不足 | 保持阻断，不自动恢复 |
+""": """
+| Correction | When to use | Result |
+|---|---|---|
+| Swap subject and object | The relation direction is reversed | Swap both endpoints and revalidate |
+| Replace relation | The endpoints are correct but the relation is wrong | Only current Schema relations are allowed |
+| Correct entity type | The entity is correct but its type is wrong | Change the selected endpoint type and revalidate |
+| Correct entity link | The mention links to the wrong canonical entity | Relink to an existing entity or keep NIL |
+| Exclude candidate | The candidate is a false extraction | Exclude from later processing and retain the audit trail |
+| Defer | Evidence is currently insufficient | Keep blocking and do not resume automatically |
+""",
+        "请选择修正动作以查看说明。": "Select a correction action to view its guidance.",
+        "关系语义正确但方向相反时使用；系统交换两端并重新执行确定性校验。": "Use when the relation is correct but reversed; the system swaps both endpoints and reruns deterministic validation.",
+        "主语和宾语正确但关系选错时使用；只能选择当前 Schema 中已有关系。": "Use when both endpoints are correct but the relation is wrong; only relations in the current Schema are allowed.",
+        "实体正确但类型识别错误时使用；选择端点和 Schema 中允许的实体类型。": "Use when the entity is correct but its type is wrong; select the endpoint and a type allowed by the Schema.",
+        "提及链接到错误规范实体时使用；可改链到已有实体，留空表示保持 NIL。": "Use when a mention links to the wrong canonical entity; relink to an existing entity or leave blank to keep NIL.",
+        "候选本身是误抽取时使用；候选不再进入后续处理，但原问题和审计保留。": "Use for a false extraction; it is removed from later processing while the original issue and audit trail remain.",
+        "证据不足时使用；候选保持不变，运行继续阻断且不会自动恢复。": "Use when evidence is insufficient; the candidate stays unchanged and the run remains blocked without auto-resume.",
+        "候选将被排除，原问题和审计记录保留。": "The candidate will be excluded while the original issue and audit trail remain.",
+        "候选保持不变，运行继续阻断。": "The candidate remains unchanged and the run stays blocked.",
+        "全部检验问题已解决。": "All validation issues have been resolved.",
+        "完整结果尚未生成；请先完成待办并恢复运行。": "The complete result is not ready. Resolve pending items and resume the run first.",
+        "完整结果已就绪，可以生成 ZIP 下载链接。": "The complete result is ready. You can generate the ZIP download link.",
+        "下载链接已生成。": "The download link is ready.",
+        "输出范围": "Output scope",
+        "页数": "Pages",
+        "文本块": "text blocks",
+        "实体待审": "Pending entity reviews",
+        "事实待审": "Pending claim reviews",
+        "视觉待审": "Pending visual reviews",
+        "尝试次数": "Attempts",
+        "未知请求": "Unknown requests",
+        "等待中": "Waiting",
+        "是": "Yes",
+        "否": "No",
+        "适用情况": "When to use",
+        "结果": "Result",
+        "关系方向反了": "The relation direction is reversed",
+        "交换两端并重新校验": "Swap both endpoints and revalidate",
+        "主宾正确、关系错误": "The endpoints are correct but the relation is wrong",
+        "仅可选择当前 Schema 关系": "Only current Schema relations are allowed",
+        "实体正确、类型错误": "The entity is correct but its type is wrong",
+        "修改指定端点类型并重新校验": "Change the selected endpoint type and revalidate",
+        "链接到错误规范实体": "The mention links to the wrong canonical entity",
+        "改链到已有实体或保持 NIL": "Relink to an existing entity or keep NIL",
+        "候选属于误抽取": "The candidate is a false extraction",
+        "不进入后续处理，保留审计": "Exclude from later processing and retain the audit trail",
+        "证据暂时不足": "Evidence is currently insufficient",
+        "保持阻断，不自动恢复": "Keep the run blocked without auto-resume",
+        "角色": "Role",
+        "该候选已处理。": "This candidate has already been handled.",
+        "属性": "Attributes",
+        "事件": "Events",
     }
 )
 

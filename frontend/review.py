@@ -30,6 +30,7 @@ class ReviewController:
         kind: str | None = None,
         *,
         include_all: bool = False,
+        locale: object = "zh-CN",
     ) -> list[tuple[str, str]]:
         states = self.service.runs.list(limit=1000)
         if not include_all and kind == "entity":
@@ -40,7 +41,7 @@ class ReviewController:
             states = [state for state in states if state.visual_review_tasks]
         elif not include_all and kind == "validation":
             states = [state for state in states if state.validation.issues]
-        return friendly_run_choices(self.service, states, locale="zh-CN")
+        return friendly_run_choices(self.service, states, locale=locale)
 
     async def queue(
         self,

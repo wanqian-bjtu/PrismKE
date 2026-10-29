@@ -56,6 +56,8 @@ class Settings(BaseSettings):
     max_batch_files: int = 20
     max_file_bytes: int = 200 * 1024 * 1024
     max_batch_bytes: int = 500 * 1024 * 1024
+    max_archive_entries: int = 1000
+    max_archive_compression_ratio: float = 200.0
     pdf_parse_mode: str = "auto"
     pdf_no_text_ratio: float = 0.15
     pdf_short_text_chars: int = 80

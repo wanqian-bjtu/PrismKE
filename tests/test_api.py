@@ -130,6 +130,77 @@ def test_run_export_is_sanitized_and_source_is_opt_in(
             assert any(name.startswith("source/") for name in archive.namelist())
 
 
+def test_run_export_reports_not_ready_before_execution(
+    tmp_path: Path, schema_path: Path
+) -> None:
+    settings = Settings(_env_file=None, runtime_dir=tmp_path / "runtime")
+    service = PrismKEService(settings)
+    document = tmp_path / "pending.md"
+    document.write_text(
+        "PrismKE | developed_by | OpenAI | Software | Organization | 0.92\n",
+        encoding="utf-8",
+    )
+    state, created = service.create_run(document, schema_path, "mock")
+    assert created is True
+
+    with TestClient(create_app(settings, service, mount_ui=False)) as client:
+        response = client.get(f"/api/v1/runs/{state.run_id}/export")
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": {"code": "RUN_RESULT_NOT_READY"}}
+
+
+def test_html_package_upload_and_source_export(
+    tmp_path: Path, schema_path: Path
+) -> None:
+    settings = Settings(_env_file=None, runtime_dir=tmp_path / "runtime")
+    service = PrismKEService(settings)
+    app = create_app(settings, service, mount_ui=False)
+    package_stream = io.BytesIO()
+    with zipfile.ZipFile(package_stream, "w", compression=zipfile.ZIP_DEFLATED) as package:
+        package.writestr(
+            "site/pages/research.html",
+            "<p>PrismKE | developed_by | OpenAI | Software | Organization | 0.92</p>",
+        )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/runs",
+            files={
+                "document": (
+                    "research-package.zip",
+                    package_stream.getvalue(),
+                    "application/zip",
+                ),
+                "schema": (
+                    "schema.yaml",
+                    schema_path.read_bytes(),
+                    "application/yaml",
+                ),
+            },
+            data={"provider": "mock"},
+        )
+        assert response.status_code == 202
+        run_id = response.json()["run_id"]
+        wait_execution(client, run_id)
+        state = client.get(f"/api/v1/runs/{run_id}").json()
+        export = client.get(
+            f"/api/v1/runs/{run_id}/export", params={"include_source": "true"}
+        )
+
+    assert state["document"]["source_filename"] == "research.html"
+    assert state["document"]["source_package_filename"] == "research-package.zip"
+    assert state["document"]["source_entry_path"] == "site/pages/research.html"
+    assert export.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(export.content)) as archive:
+        manifest = json.loads(archive.read("manifest.json"))
+        assert manifest["format_version"] == "1.1"
+        assert manifest["source_package_filename"] == "research-package.zip"
+        assert manifest["source_entry_path"] == "site/pages/research.html"
+        assert manifest["source_package_hash"] == state["document"]["source_hash"]
+        assert "source/research-package.zip" in archive.namelist()
+
+
 def test_unknown_run_returns_not_found(tmp_path: Path) -> None:
     settings = Settings(_env_file=None, runtime_dir=tmp_path / "runtime")
     with TestClient(create_app(settings, mount_ui=False)) as client:

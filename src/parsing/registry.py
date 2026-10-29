@@ -6,6 +6,7 @@ from src.core.errors import UnsupportedDocumentError
 from src.domain import DocumentIR, PDFComplexityThresholds, PDFParseMode, SourceDocument
 from src.parsing.adapters import (
     DOCXParser,
+    HTMLPackageParser,
     HTMLParser,
     ImageParser,
     JSONParser,
@@ -33,6 +34,10 @@ class ParserRegistry:
         pdf_thresholds: PDFComplexityThresholds | None = None,
         mineru_client: MinerUV1Client | None = None,
         pdf_fallback_approved: bool = False,
+        archive_max_entries: int = 1000,
+        archive_max_entry_bytes: int = 200 * 1024 * 1024,
+        archive_max_total_bytes: int = 500 * 1024 * 1024,
+        archive_max_compression_ratio: float = 200.0,
     ) -> None:
         lightweight_pdf = PDFParser(asset_dir)
         routed_pdf = RoutedPDFParser(
@@ -46,6 +51,15 @@ class ParserRegistry:
         self._parsers = parsers or [
             TextParser(),
             MarkdownParser(asset_dir, allow_remote_assets),
+            HTMLPackageParser(
+                asset_dir,
+                allow_remote_assets,
+                (derived_dir or Path("runtime/derived-documents")) / "html-packages",
+                max_entries=archive_max_entries,
+                max_entry_bytes=archive_max_entry_bytes,
+                max_total_bytes=archive_max_total_bytes,
+                max_compression_ratio=archive_max_compression_ratio,
+            ),
             HTMLParser(asset_dir, allow_remote_assets),
             JSONParser(),
             LegacyDOCParser(
@@ -65,7 +79,7 @@ class ParserRegistry:
             if parser.supports(media_type):
                 document = await parser.parse(source)
                 if document.source_filename is None:
-                    name = source.path.name
+                    name = source.source_filename or source.path.name
                     prefix, separator, original = name.partition("--")
                     document.source_filename = (
                         original

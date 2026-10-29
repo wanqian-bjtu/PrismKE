@@ -59,6 +59,12 @@ class BBox(BaseModel):
 class SourceDocument(BaseModel):
     path: Path
     media_type: str | None = None
+    asset_root: Path | None = None
+    content_hash: str | None = None
+    persisted_source_path: Path | None = None
+    source_filename: str | None = None
+    source_package_filename: str | None = None
+    source_entry_path: str | None = None
 
 
 class TextBlock(BaseModel):
@@ -162,6 +168,8 @@ class DocumentIR(BaseModel):
     id: str
     source_path: str
     source_filename: str | None = None
+    source_package_filename: str | None = None
+    source_entry_path: str | None = None
     source_hash: str
     media_type: str
     pages: list[DocumentPage] = Field(default_factory=list)

@@ -143,10 +143,16 @@ async def build_run_export(
 
     export_dir = output_dir or service.settings.runtime_dir / "exports"
     export_dir.mkdir(parents=True, exist_ok=True)
-    source_name = _safe_name(
+    source_filename = _safe_name(
         state.document.source_filename or Path(state.input_path).name,
         "document",
     )
+    source_package_filename = (
+        _safe_name(state.document.source_package_filename, "document.zip")
+        if state.document.source_package_filename
+        else None
+    )
+    included_source_name = source_package_filename or source_filename
     archive_path = export_dir / f"{_safe_name(run_id, 'run')}-{uuid4().hex[:12]}.zip"
     groups = aggregate_entity_mentions(state)
     mentions = mention_occurrences(state)
@@ -154,14 +160,19 @@ async def build_run_export(
     insight = run_insight(state)
     manifest = {
         "format": "prismke-run-export",
-        "format_version": "1.0",
+        "format_version": "1.1",
         "run_id": state.run_id,
         "batch_id": state.batch_id,
         "task_mode": state.task_mode.value,
         "entity_source_mode": state.entity_source_mode.value,
         "software_version": __version__,
         "workflow_protocol": state.pipeline_version,
-        "source_filename": source_name,
+        "source_filename": source_filename,
+        "source_package_filename": source_package_filename,
+        "source_entry_path": state.document.source_entry_path,
+        "source_package_hash": (
+            state.document.source_hash if source_package_filename is not None else None
+        ),
         "source_hash": state.document.source_hash,
         "source_included": include_source,
         "schema_id": state.output_schema.schema_id,
@@ -288,7 +299,7 @@ async def build_run_export(
         )
         if include_source:
             source_path = service.evidence_store.verified_blob_path(state.document.source_hash)
-            archive.write(source_path, f"source/{source_name}")
+            archive.write(source_path, f"source/{included_source_name}")
             included_assets: set[str] = set()
             for asset in state.document.media_assets:
                 if not asset.blob_hash or asset.blob_hash in included_assets:

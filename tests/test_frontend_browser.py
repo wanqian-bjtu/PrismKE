@@ -395,6 +395,28 @@ relations:
             item_id,
             timeout=15_000,
         )
+        fullscreen = page.locator("button#result-preview-fullscreen")
+        expect(fullscreen).to_have_text("View fullscreen")
+        fullscreen.click()
+        page.wait_for_function(
+            """Array.from(document.querySelectorAll('#result-preview-panel'))
+              .some(element => element.classList.contains('prismke-fullscreen'))""",
+            timeout=5_000,
+        )
+        expect(fullscreen).to_have_text("Exit fullscreen")
+        page.keyboard.press("Escape")
+        page.wait_for_function(
+            """!Array.from(document.querySelectorAll('#result-preview-panel'))
+              .some(element => element.classList.contains('prismke-fullscreen'))"""
+        )
+        expect(fullscreen).to_have_text("View fullscreen")
+
+        export_button = page.get_by_role("button", name="Generate download link")
+        expect(export_button).to_be_enabled(timeout=15_000)
+        export_button.click()
+        expect(page.locator(".prismke-export-link")).to_have_text(
+            "Download complete results ZIP", timeout=15_000
+        )
         browser.close()
 
 
@@ -493,6 +515,110 @@ relations:
         expect(
             page.locator("#batch-files-table .batch-inline-review-button").last
         ).to_have_text("去审核", timeout=15_000)
+        browser.close()
+
+
+@pytest.mark.browser
+def test_validation_preview_resets_and_auto_resumes_to_build(
+    candidate_workspace_url: str, tmp_path: Path
+) -> None:
+    schema_path = tmp_path / "auto-resume-schema.yaml"
+    schema_path.write_text(
+        """schema_id: auto-resume
+version: "1"
+strict: true
+entity_types:
+  - id: Software
+  - id: Organization
+relations:
+  - id: developed_by
+    domain: [Software]
+    range: [Organization]
+""",
+        encoding="utf-8",
+    )
+    document_path = tmp_path / "auto-resume.md"
+    document_path.write_text(
+        "Nebula Technology | developed_by | AtlasVision X1 | Organization | Software | 0.95\n",
+        encoding="utf-8",
+    )
+    base_url = candidate_workspace_url.removesuffix("/ui/")
+    response = httpx.post(
+        f"{base_url}/api/v1/batches",
+        files=[
+            (
+                "documents",
+                (document_path.name, document_path.read_bytes(), "text/markdown"),
+            ),
+            (
+                "schema",
+                (schema_path.name, schema_path.read_bytes(), "application/yaml"),
+            ),
+        ],
+        data={"provider": "mock", "task_mode": "knowledge_graph_construction"},
+        timeout=30,
+    )
+    assert response.status_code == 202
+    batch_id = response.json()["batch"]["id"]
+    for _ in range(300):
+        batch = httpx.get(f"{base_url}/api/v1/batches/{batch_id}", timeout=5).json()
+        if batch["status"] == "awaiting_review":
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError("validation auto-resume fixture did not reach review")
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 900})
+        page.add_init_script(f"localStorage.removeItem('{LOCALE_STORAGE_KEY}')")
+        page.goto(candidate_workspace_url, wait_until="domcontentloaded", timeout=60_000)
+        _open_workspace_page(page, "review-validation", "validation")
+
+        run_input = page.get_by_label("Validation run")
+        run_input.click()
+        page.get_by_role("option").filter(has_text=document_path.name).last.click()
+        expect(page.get_by_text(re.compile(r"2 issues across 1 candidate"))).to_be_visible(
+            timeout=15_000
+        )
+        expect(page.get_by_text("Correction action guide", exact=True)).to_be_visible()
+
+        action = page.get_by_label("Correction action")
+        action.click()
+        page.get_by_role("option", name="Swap subject and object", exact=True).last.click()
+        page.get_by_role("button", name="Preview correction", exact=True).click()
+        preview = page.locator(".correction-preview-comparison")
+        expect(preview).to_be_visible(timeout=15_000)
+        expect(preview).to_contain_text("Before correction")
+        expect(preview).to_contain_text("After correction")
+        expect(page.locator(".correction-value-changed")).not_to_have_count(0)
+
+        page.get_by_label("Validation reviewer").fill("browser-tester")
+        page.get_by_label("Correction reason").fill("The relation direction is reversed")
+        page.get_by_label(
+            "I reviewed the preview and confirm this correction"
+        ).check()
+        page.get_by_role("button", name="Apply correction", exact=True).click()
+
+        expect(page.locator(".workspace-page-header:visible h1")).to_have_text(
+            "New extraction and construction", timeout=20_000
+        )
+        expect(page.get_by_text("All validation issues have been resolved.")).to_be_visible(
+            timeout=10_000
+        )
+        export_button = page.get_by_role("button", name="Generate download link")
+        expect(export_button).to_be_disabled(timeout=30_000)
+        expect(page.get_by_text(
+            "The complete result is not ready. Resolve pending items and resume the run first.",
+            exact=True,
+        )).to_be_visible(
+            timeout=15_000
+        )
+
+        _open_workspace_page(page, "review-validation", "validation")
+        expect(page.get_by_label("Validation reviewer")).to_have_value("")
+        expect(page.get_by_label("Correction reason")).to_have_value("")
+        expect(page.locator(".correction-preview-comparison")).to_have_count(0)
         browser.close()
 
 
