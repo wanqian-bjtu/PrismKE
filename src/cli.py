@@ -32,6 +32,7 @@ from src.evaluation import (
     evaluate_reflection_manifest,
 )
 from src.evaluation.annotations import export_reviewed_annotations
+from src.evaluation.mnre_v2_cli import app as mnre_v2_app
 from src.evaluation.twitter2017_cli import app as twitter2017_app
 from src.governance import rebuild_entity_index
 from src.persistence import FileEvidenceStore, Neo4jGraphStore, migrate_json_graph
@@ -50,6 +51,7 @@ from src.workflow import PrismKEService
 
 app = typer.Typer(no_args_is_help=True, help="PrismKE knowledge construction CLI")
 app.add_typer(twitter2017_app, name="twitter2017")
+app.add_typer(mnre_v2_app, name="mnre-v2")
 console = Console()
 
 

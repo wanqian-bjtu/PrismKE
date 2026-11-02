@@ -69,6 +69,25 @@ Twitter-2017 的公开图片包包含已知失效图片。原文件必须原样�
 `manifests/benchmarks/twitter2017.invalid-images.json`；加载失败时应统一回退到明确的占位图，
 不得静默删除对应样本或改变训练、验证、测试划分。
 
+MNRE-V2 的关系抽取评测使用独立案例库，不写入生产 `runtime/cases.sqlite`。Schema 将数据集
+标签映射到规范实体与关系名称，原始标签仅作为评测别名。训练和验证中的测试文本重复项及
+同文本、同有向实体对的跨划分冲突项不得进入案例库；固定排除清单记录在
+`manifests/benchmarks/mnre-v2.case-library-exclusions.json`。执行顺序为：
+
+```powershell
+uv run prismke mnre-v2 prepare
+uv run prismke mnre-v2 caption --smoke
+uv run prismke mnre-v2 caption
+uv run prismke mnre-v2 embed
+uv run prismke mnre-v2 run-dev
+uv run prismke mnre-v2 run-holdout
+uv run prismke mnre-v2 finalize-library
+uv run prismke mnre-v2 run-test
+```
+
+验证阶段只从训练案例检索；提示词冻结并完成验证复核后，才允许将清理后的完整验证集加入
+最终案例库。测试集不得用于提示词选择、案例检索库构建或配置调整。
+
 准备或搬迁数据后执行以下命令重新验证数量、引用、可解码性并生成逐文件校验清单：
 
 ```powershell

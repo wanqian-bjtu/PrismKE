@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "dataset": "MNRE-V2",
+  "policy": {
+    "test_text_overlap": "Exclude train/validation cases whose reconstructed text occurs in the untouched test split.",
+    "cross_split_pair_label_conflict": "Exclude both sides when train and validation contain the same text and ordered entity pair with different labels."
+  },
+  "counts": {
+    "original_train_validation_cases": 13871,
+    "test_text_overlap_exclusions": 3,
+    "conflict_exclusions": 12,
+    "final_case_library_cases": 13856
+  },
+  "cases": [
+    {"id": "train:03527", "label": "None", "reason": "cross_split_pair_label_conflict"},
+    {"id": "train:05451", "label": "/per/per/peer", "reason": "cross_split_pair_label_conflict"},
+    {"id": "train:06646", "label": "/org/loc/locate_at", "reason": "test_text_overlap"},
+    {"id": "train:08771", "label": "None", "reason": "test_text_overlap"},
+    {"id": "train:09005", "label": "/per/org/member_of", "reason": "cross_split_pair_label_conflict"},
+    {"id": "train:09007", "label": "/org/org/subsidiary", "reason": "cross_split_pair_label_conflict"},
+    {"id": "train:09635", "label": "/per/per/peer", "reason": "cross_split_pair_label_conflict"},
+    {"id": "train:10341", "label": "/org/org/subsidiary", "reason": "cross_split_pair_label_conflict"},
+    {"id": "validation:00380", "label": "None", "reason": "cross_split_pair_label_conflict"},
+    {"id": "validation:00381", "label": "None", "reason": "cross_split_pair_label_conflict"},
+    {"id": "validation:00540", "label": "/per/per/couple", "reason": "cross_split_pair_label_conflict"},
+    {"id": "validation:00574", "label": "/per/per/couple", "reason": "cross_split_pair_label_conflict"},
+    {"id": "validation:00780", "label": "/per/org/member_of", "reason": "cross_split_pair_label_conflict"},
+    {"id": "validation:00927", "label": "None", "reason": "cross_split_pair_label_conflict"},
+    {"id": "validation:01045", "label": "None", "reason": "test_text_overlap"}
+  ]
+}

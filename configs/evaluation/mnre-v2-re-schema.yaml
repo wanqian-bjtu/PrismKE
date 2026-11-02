@@ -1,0 +1,185 @@
+schema_id: mnre-v2-re
+version: 1.0.0
+task: schema_guided_multimodal_relation_classification
+endpoint_policy:
+  supplied_pair_only: true
+  preserve_head_tail_order: true
+  token_interval: half_open
+  predict_entity_types: false
+negative_relation: NoRelation
+entity_types:
+  - id: Person
+    aliases: [per, PER]
+    definition: A specifically named person or named group of people treated as a person.
+  - id: Organization
+    aliases: [org, ORG]
+    definition: A named company, institution, team, agency, government body, or organized group.
+  - id: Location
+    aliases: [loc, LOC]
+    definition: A named country, region, city, geographic place, or facility used as a place.
+  - id: Miscellaneous
+    aliases: [misc, MISC]
+    definition: A dataset entity outside Person, Organization, and Location, such as an event, work, award, nationality, religion, or other named item.
+relations:
+  - id: NoRelation
+    aliases: [None]
+    evaluation_label: None
+    symmetric: false
+    negative_class: true
+    definition: The supplied head and tail do not express any positive relation in this Schema.
+  - id: Contains
+    aliases: [/loc/loc/contain]
+    evaluation_label: /loc/loc/contain
+    domain: Location
+    range: Location
+    symmetric: false
+    definition: The head location contains or includes the tail location.
+  - id: HeldAt
+    aliases: [/misc/loc/held_on]
+    evaluation_label: /misc/loc/held_on
+    domain: Miscellaneous
+    range: Location
+    symmetric: false
+    definition: The head event, activity, or miscellaneous item is held at the tail location.
+  - id: PartOf
+    aliases: [/misc/misc/part_of]
+    evaluation_label: /misc/misc/part_of
+    domain: Miscellaneous
+    range: Miscellaneous
+    symmetric: false
+    definition: The head item is a component, edition, or part of the tail item.
+  - id: LocatedAt
+    aliases: [/org/loc/locate_at]
+    evaluation_label: /org/loc/locate_at
+    domain: Organization
+    range: Location
+    symmetric: false
+    definition: The head organization is located or operates at the tail location.
+  - id: OrganizationAlternateName
+    aliases: [/org/org/alternate_names]
+    evaluation_label: /org/org/alternate_names
+    domain: Organization
+    range: Organization
+    symmetric: true
+    definition: The two organization mentions are alternate names of the same organization.
+  - id: SubsidiaryOf
+    aliases: [/org/org/subsidiary]
+    evaluation_label: /org/org/subsidiary
+    domain: Organization
+    range: Organization
+    symmetric: false
+    definition: The head organization is a subsidiary, unit, brand, or subordinate organization of the tail organization.
+  - id: PlaceOfBirth
+    aliases: [/per/loc/place_of_birth]
+    evaluation_label: /per/loc/place_of_birth
+    domain: Person
+    range: Location
+    symmetric: false
+    definition: The head person was born in the tail location.
+  - id: PlaceOfResidence
+    aliases: [/per/loc/place_of_residence]
+    evaluation_label: /per/loc/place_of_residence
+    domain: Person
+    range: Location
+    symmetric: false
+    definition: The head person resides or resided in the tail location.
+  - id: ReceivedAward
+    aliases: [/per/misc/awarded]
+    evaluation_label: /per/misc/awarded
+    domain: Person
+    range: Miscellaneous
+    symmetric: false
+    definition: The head person received or won the tail award, honor, or title.
+  - id: HasNationality
+    aliases: [/per/misc/nationality]
+    evaluation_label: /per/misc/nationality
+    domain: Person
+    range: Miscellaneous
+    symmetric: false
+    definition: The tail item denotes the nationality associated with the head person.
+  - id: PresentIn
+    aliases: [/per/misc/present_in]
+    evaluation_label: /per/misc/present_in
+    domain: Person
+    range: Miscellaneous
+    symmetric: false
+    definition: The head person appears, participates, or is present in the tail event, work, or item.
+  - id: HasRace
+    aliases: [/per/misc/race]
+    evaluation_label: /per/misc/race
+    domain: Person
+    range: Miscellaneous
+    symmetric: false
+    definition: The tail item is the dataset race or ethnicity category associated with the head person.
+  - id: HasReligion
+    aliases: [/per/misc/religion]
+    evaluation_label: /per/misc/religion
+    domain: Person
+    range: Miscellaneous
+    symmetric: false
+    definition: The tail item is the religion associated with the head person.
+  - id: MemberOf
+    aliases: [/per/org/member_of]
+    evaluation_label: /per/org/member_of
+    domain: Person
+    range: Organization
+    symmetric: false
+    definition: The head person is a member, participant, employee, or player of the tail organization.
+  - id: PersonAlternateName
+    aliases: [/per/per/alternate_names]
+    evaluation_label: /per/per/alternate_names
+    domain: Person
+    range: Person
+    symmetric: true
+    definition: The two person mentions are alternate names of the same person.
+  - id: FellowAlumni
+    aliases: [/per/per/alumi]
+    evaluation_label: /per/per/alumi
+    domain: Person
+    range: Person
+    symmetric: true
+    definition: The two people share an alumni or same-institution association; the original alumi spelling is retained only as an evaluation alias.
+  - id: ChargeRelation
+    aliases: [/per/per/charges]
+    evaluation_label: /per/per/charges
+    domain: Person
+    range: Person
+    symmetric: false
+    noisy_operational_semantics: true
+    definition: A dataset-specific directed charge, accusation, or action association from the head person to the tail person; do not infer broader semantics.
+  - id: CoupleWith
+    aliases: [/per/per/couple]
+    evaluation_label: /per/per/couple
+    domain: Person
+    range: Person
+    symmetric: true
+    definition: The two people form a romantic or spousal couple.
+  - id: NeighborOf
+    aliases: [/per/per/neighbor]
+    evaluation_label: /per/per/neighbor
+    domain: Person
+    range: Person
+    symmetric: true
+    noisy_operational_semantics: true
+    definition: The two people have the dataset neighbor or close-association relation.
+  - id: ParentOf
+    aliases: [/per/per/parent]
+    evaluation_label: /per/per/parent
+    domain: Person
+    range: Person
+    symmetric: false
+    definition: The head person is a parent of the tail person.
+  - id: PeerWith
+    aliases: [/per/per/peer]
+    evaluation_label: /per/per/peer
+    domain: Person
+    range: Person
+    symmetric: true
+    definition: The two people are peers, colleagues, or people linked as peers by the dataset.
+  - id: SiblingOf
+    aliases: [/per/per/siblings]
+    evaluation_label: /per/per/siblings
+    domain: Person
+    range: Person
+    symmetric: true
+    definition: The two people are siblings.
