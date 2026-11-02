@@ -1,0 +1,33 @@
+schema_id: twitter2017-ner
+version: 1.0.0
+task: schema_guided_named_entity_recognition
+boundary_policy:
+  interval: half_open
+  exact_source_substring: true
+  preserve_complete_multiword_names: true
+  translate_or_normalize_surface_form: false
+entity_types:
+  - id: Person
+    aliases: [PER]
+    evaluation_label: PER
+    definition: A specifically named person or named group of people treated as a person mention.
+    boundary_rule: Include the complete personal name and exclude surrounding titles and punctuation unless they are part of the name.
+    exclude: Pronouns, unnamed roles, and generic descriptions of people.
+  - id: Organization
+    aliases: [ORG]
+    evaluation_label: ORG
+    definition: A specifically named organization, institution, company, team, agency, or organized group.
+    boundary_rule: Include the complete official or source-written organization name.
+    exclude: Generic organization categories without a proper name.
+  - id: Location
+    aliases: [LOC]
+    evaluation_label: LOC
+    definition: A specifically named geographic place, facility used as a place, city, region, or country.
+    boundary_rule: Include the complete location name exactly as written.
+    exclude: Generic spatial expressions and unnamed places.
+  - id: Miscellaneous
+    aliases: [MISC]
+    evaluation_label: MISC
+    definition: A named entity in the dataset that is not a person, organization, or location, including named events, works, products, and other proper names.
+    boundary_rule: Include the complete proper name exactly as written.
+    exclude: Ordinary common nouns and descriptive phrases that are not named entities.
