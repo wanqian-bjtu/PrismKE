@@ -427,6 +427,29 @@ class CNYBudgetLedger:
         self.persist()
         return crossed
 
+    def record_failed(
+        self,
+        operation_id: str,
+        record: ProviderCallRecord,
+        *,
+        conservative_cost_cny: float = 0.01,
+    ) -> None:
+        self.payload.setdefault("reservations", {}).pop(operation_id, None)
+        self.payload["calls"].append(record.model_dump(mode="json"))
+        self.payload["estimated_cost_cny"] = round(
+            self.cost + conservative_cost_cny, 8
+        )
+        self.payload.setdefault("conservative_failure_costs", []).append(
+            {
+                "operation_id": operation_id,
+                "cost_cny": conservative_cost_cny,
+                "error_code": record.error_code,
+            }
+        )
+        if self.cost >= self.limit_cny:
+            self.payload["stopped_reason"] = f"{self.limit_cny:.2f} CNY hard limit reached"
+        self.persist()
+
 
 def _image_data_url(path: Path, max_edge: int = 2048) -> str:
     with Image.open(path) as source:
@@ -480,6 +503,7 @@ async def _chat(
                 ledger.path.with_name("last-failed-call.json"),
                 exc.call_record.model_dump(mode="json"),
             )
+            ledger.record_failed(operation_id, exc.call_record)
         raise
     return response, ledger.record(operation_id, record)
 
@@ -557,14 +581,30 @@ async def generate_captions(
             "response_format": {"type": "json_object"},
         }
         try:
-            response, crossed = await _chat(
-                settings,
-                ledger,
-                body,
-                f"twitter2017:caption:{case.split}:{case.id}",
-                CAPTION_PROMPT_VERSION,
-                "vlm",
-            )
+            operation_id = f"twitter2017:caption:{case.split}:{case.id}"
+            response: dict[str, Any] | None = None
+            crossed: list[float] = []
+            for attempt in range(2):
+                try:
+                    response, crossed = await _chat(
+                        settings,
+                        ledger,
+                        body,
+                        operation_id,
+                        CAPTION_PROMPT_VERSION,
+                        "vlm",
+                    )
+                    break
+                except ProviderRequestError as exc:
+                    record = exc.call_record
+                    retryable = (
+                        isinstance(record, ProviderCallRecord)
+                        and record.error_code == "request_failed"
+                    )
+                    if not retryable or attempt == 1:
+                        raise
+                    await asyncio.sleep(2.0)
+            assert response is not None
             content = response["choices"][0]["message"]["content"]
             payload = parse_json_object(content)
             description = str(payload.get("description", "")).strip()

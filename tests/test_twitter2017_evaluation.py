@@ -129,6 +129,28 @@ def test_budget_ledger_stops_before_crossing_limit(tmp_path: Path) -> None:
         ledger.authorize("two", reserve_cny=0.01)
 
 
+def test_failed_call_releases_reservation_and_is_conservatively_charged(
+    tmp_path: Path,
+) -> None:
+    ledger = CNYBudgetLedger(tmp_path / "budget.json", limit_cny=1.0)
+    ledger.authorize("failed")
+    ledger.record_failed(
+        "failed",
+        ProviderCallRecord(
+            id="failed-call",
+            provider="vlm",
+            operation_id="failed",
+            requested_model="qwen3.7-flash",
+            latency_ms=1,
+            status="failed",
+            error_code="request_failed",
+            prompt_version="test",
+        ),
+    )
+    assert ledger.payload["reservations"] == {}
+    assert ledger.cost == 0.01
+
+
 def test_invalid_image_caption_is_free_and_resume_is_idempotent(tmp_path: Path) -> None:
     prepared = tmp_path / "prepared"
     prepared.mkdir()
