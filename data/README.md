@@ -4,6 +4,7 @@
 
 - `synthetic/`：完全虚构、可提交 Git、可重复生成的完整研究报告式材料；同一篇连贯内容以多种格式呈现，并配套设备图、部署图、性能图表、扫描件和嵌套 JSON。
 - `public/`：从官方来源下载的开放许可真实材料。原文件及派生二进制不进入 Git。
+- `benchmarks/`：用户为论文评估准备的标准研究基准。数据本体不进入 Git，仅在本地与受控服务器保存；Git 只记录来源、数量、异常策略和逐文件 SHA-256。
 
 公开材料不是生产数据，也不应包含 PrismKE 的运行数据库、模型请求、密钥或密码。
 
@@ -57,3 +58,22 @@ uv run python data/tools/import_local_html.py "C:\path\article.html" `
 本地来源记录都不得提交或对外分发；只有导入工具和操作说明进入 Git。如果页面图片来自
 允许列表中的官方媒体域名，`--include-images` 会保存本地图片、保留说明和署名，并额外生成
 一个可单文件上传的 `*-multimodal.pdf`。图片版权状态不会因下载或格式转换而改变。
+
+## 论文评估基准
+
+Twitter-2017 与 MNRE-V2 保存在 `data/benchmarks/`，其规范相对路径、数据来源、划分数量和
+校验清单记录在 `manifests/evaluation_benchmarks.yaml`。原始数据受数据集提供方及 Twitter/X
+相关条款约束，不随 PrismKE 仓库分发。
+
+Twitter-2017 的公开图片包包含已知失效图片。原文件必须原样保留，文件名和失败类型记录在
+`manifests/benchmarks/twitter2017.invalid-images.json`；加载失败时应统一回退到明确的占位图，
+不得静默删除对应样本或改变训练、验证、测试划分。
+
+准备或搬迁数据后执行以下命令重新验证数量、引用、可解码性并生成逐文件校验清单：
+
+```powershell
+py data/tools/prepare_evaluation_benchmarks.py `
+  --twitter-root data/benchmarks/twitter2017 `
+  --mnre-root data/benchmarks/mnre-v2 `
+  --manifest-dir data/manifests/benchmarks
+```

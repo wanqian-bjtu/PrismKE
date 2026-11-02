@@ -1,0 +1,41 @@
+schema_version: 1
+datasets:
+  - id: twitter2017
+    display_name: Twitter-2017
+    root: data/benchmarks/twitter2017
+    task: multimodal_named_entity_recognition
+    source_repository: https://github.com/jefferyYu/UMT
+    source_paper: https://aclanthology.org/P18-1185/
+    distribution_policy: research-use-under-provider-and-twitter-terms
+    committed_to_git: false
+    splits:
+      train: 3373
+      validation: 723
+      test: 723
+    image_count: 4819
+    unique_image_references: 4819
+    missing_image_references: 0
+    invalid_image_count: 358
+    invalid_image_policy: preserve-original-and-fallback-to-placeholder-at-load-time
+    invalid_image_manifest: data/manifests/benchmarks/twitter2017.invalid-images.json
+    checksum_manifest: data/manifests/benchmarks/twitter2017.sha256
+    checksum_manifest_sha256: a4d0b607a87d8bd532ca67ddcd8c50540641b7dc0c028bdbd12c11012330a2d1
+
+  - id: mnre-v2
+    display_name: MNRE-V2
+    root: data/benchmarks/mnre-v2
+    task: multimodal_relation_extraction
+    source_repository: https://github.com/thecharm/MNRE
+    distribution_policy: research-use-under-dataset-provider-terms
+    committed_to_git: false
+    splits:
+      train: 12247
+      validation: 1624
+      test: 1614
+    annotation_count: 15485
+    image_count: 9201
+    unique_image_references: 9201
+    missing_image_references: 0
+    invalid_image_count: 0
+    checksum_manifest: data/manifests/benchmarks/mnre-v2.sha256
+    checksum_manifest_sha256: 695c7b45970eb37b8de7efac224d4912c6bd203a92f7a5fa915d8cec63ea8ae2

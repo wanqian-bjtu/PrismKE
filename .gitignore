@@ -22,6 +22,9 @@ data/public/smoke/
 data/public/provenance/local/
 data/public/*.part
 data/**/dataset-report.json
+# Evaluation benchmark binaries are kept on the local and server data volumes.
+# Only their source metadata and checksum manifests are committed.
+data/benchmarks/
 /tmp/
 models/
 evidence/
