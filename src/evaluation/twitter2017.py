@@ -948,6 +948,18 @@ def _aggregate(results: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _git_commit() -> str:
+    try:
+        return subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+
+
 async def _run_one_prediction(
     prepared: Path,
     settings: Settings,
@@ -1118,15 +1130,6 @@ async def run_prompt_dev(
     )
     best = summaries[0]
     manifest = load_json(prepared / "manifest.json")
-    try:
-        commit = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-    except (OSError, subprocess.CalledProcessError):
-        commit = "unknown"
     frozen = {
         "prompt_version": best["prompt_version"],
         "prompt_hash": canonical_hash(_prompt_instruction(str(best["prompt_version"]))),
@@ -1136,7 +1139,7 @@ async def run_prompt_dev(
         "schema_hash": manifest["schema_hash"],
         "case_library_hash": manifest["case_library_hash"],
         "validation_split_hash": canonical_hash(split),
-        "code_commit": commit,
+        "code_commit": _git_commit(),
         "dev_metrics": best,
     }
     report = {"cells": summaries, "selected": frozen, "estimated_cost_cny": ledger.cost}
@@ -1187,6 +1190,13 @@ async def run_prompt_holdout(
         )
     report = {
         "configuration": frozen,
+        "execution_commit": _git_commit(),
+        "protocol_amendment": {
+            "applied_after_freeze": True,
+            "reason": "retain provider-content-filtered cases as empty predictions",
+            "configuration_changed": False,
+            "existing_predictions_rerun": False,
+        },
         "metrics": _aggregate(results),
         "estimated_cost_cny": ledger.cost,
         "test_artifacts_generated": 0,
