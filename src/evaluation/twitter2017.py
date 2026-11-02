@@ -1002,14 +1002,47 @@ async def _run_one_prediction(
         "enable_thinking": False,
         "response_format": {"type": "json_object"},
     }
-    response, _ = await _chat(
-        settings,
-        ledger,
-        body,
-        f"twitter2017:ner:{prompt_version}:k{top_k}:{case.id}",
-        prompt_version,
-        "llm",
-    )
+    operation_id = f"twitter2017:ner:{prompt_version}:k{top_k}:{case.id}"
+    response: dict[str, Any] | None = None
+    for attempt in range(2):
+        try:
+            response, _ = await _chat(
+                settings,
+                ledger,
+                body,
+                operation_id,
+                prompt_version,
+                "llm",
+            )
+            break
+        except ProviderRequestError as exc:
+            record = exc.call_record
+            if (
+                isinstance(record, ProviderCallRecord)
+                and record.error_code == "content_filtered"
+            ):
+                result = {
+                    "id": case.id,
+                    "prompt_version": prompt_version,
+                    "top_k": top_k,
+                    "retrieved_case_ids": retrieved_ids,
+                    "predicted": [],
+                    "gold": [item.model_dump(mode="json") for item in case.entities],
+                    "errors": ["provider_content_filtered"],
+                    "metrics": _result_metrics(case, []),
+                    "raw_response": "",
+                    "scoring_version": SCORING_VERSION,
+                }
+                atomic_json(output, result)
+                return result
+            retryable = (
+                isinstance(record, ProviderCallRecord)
+                and record.error_code == "request_failed"
+            )
+            if not retryable or attempt == 1:
+                raise
+            await asyncio.sleep(2.0)
+    assert response is not None
     errors: list[str] = []
     raw_content = ""
     try:
