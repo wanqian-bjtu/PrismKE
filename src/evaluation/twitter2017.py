@@ -9,6 +9,7 @@ import math
 import os
 import random
 import struct
+import subprocess
 from collections import defaultdict
 from functools import lru_cache
 from hashlib import sha256
@@ -32,6 +33,7 @@ from src.providers.http_client import post_chat_completion
 DATASET_VERSION = "twitter2017-eval-v1"
 CAPTION_PROMPT_VERSION = "twitter2017-caption-v1"
 NER_PROMPT_VERSIONS = ("twitter2017-ner-v1", "twitter2017-ner-v2", "twitter2017-ner-v3")
+SCORING_VERSION = "exact-surface-align-v2"
 IMAGE_UNAVAILABLE = "IMAGE_UNAVAILABLE:v1"
 IMAGE_UNAVAILABLE_PROVIDER_FILTER = "IMAGE_UNAVAILABLE:provider_content_filter:v1"
 IMAGE_UNAVAILABLE_PROVIDER_RESPONSE = "IMAGE_UNAVAILABLE:provider_response_invalid:v1"
@@ -857,22 +859,59 @@ def validate_prediction(case: TwitterCase, payload: Any) -> tuple[list[Predicted
     if not isinstance(payload, dict) or not isinstance(payload.get("entities"), list):
         return [], ["invalid_json_shape"]
     output: list[PredictedEntity] = []
+    used_spans: set[tuple[int, int]] = set()
     for index, raw in enumerate(payload["entities"]):
-        try:
-            entity = PredictedEntity.model_validate(raw)
-        except Exception:
+        if not isinstance(raw, dict):
             errors.append(f"invalid_entity_structure:{index}")
             continue
-        if entity.type not in DATASET_LABELS:
+        text = raw.get("text")
+        entity_type = raw.get("type")
+        if not isinstance(text, str) or not text or not isinstance(entity_type, str):
+            errors.append(f"invalid_entity_structure:{index}")
+            continue
+        if entity_type not in DATASET_LABELS:
             errors.append(f"type_not_in_schema:{index}")
             continue
-        if entity.end > len(case.text) or entity.start >= entity.end:
-            errors.append(f"invalid_boundary:{index}")
+        candidates: list[tuple[int, int]] = []
+        cursor = 0
+        while True:
+            start = case.text.find(text, cursor)
+            if start < 0:
+                break
+            span = (start, start + len(text))
+            if span not in used_spans:
+                candidates.append(span)
+            cursor = start + 1
+        if not candidates:
+            errors.append(f"surface_not_in_source:{index}")
             continue
-        if case.text[entity.start : entity.end] != entity.text:
-            errors.append(f"surface_boundary_mismatch:{index}")
-            continue
-        output.append(entity)
+        raw_start = raw.get("start")
+        raw_end = raw.get("end")
+        exact = (
+            (raw_start, raw_end)
+            if type(raw_start) is int and type(raw_end) is int
+            else None
+        )
+        if exact in candidates:
+            chosen = exact
+        else:
+            chosen = min(
+                candidates,
+                key=lambda span: abs(span[0] - raw_start)
+                if type(raw_start) is int
+                else span[0],
+            )
+            errors.append(f"offset_repaired:{index}")
+        assert chosen is not None
+        used_spans.add(chosen)
+        output.append(
+            PredictedEntity(
+                text=text,
+                start=chosen[0],
+                end=chosen[1],
+                type=entity_type,
+            )
+        )
     return output, errors
 
 
@@ -921,7 +960,28 @@ async def _run_one_prediction(
     output: Path,
 ) -> dict[str, Any]:
     if output.exists():
-        return dict(load_json(output))
+        saved = dict(load_json(output))
+        if saved.get("scoring_version") == SCORING_VERSION:
+            return saved
+        saved_errors: list[str] = []
+        try:
+            payload = parse_json_object(str(saved.get("raw_response", "")))
+            saved_predicted, saved_errors = validate_prediction(case, payload)
+        except (TypeError, json.JSONDecodeError):
+            saved_predicted = []
+            saved_errors = ["invalid_json_shape"]
+        saved.update(
+            {
+                "predicted": [
+                    item.model_dump(mode="json") for item in saved_predicted
+                ],
+                "errors": saved_errors,
+                "metrics": _result_metrics(case, saved_predicted),
+                "scoring_version": SCORING_VERSION,
+            }
+        )
+        atomic_json(output, saved)
+        return saved
     retrieved_ids = retrieve_case_ids(prepared, case.id, top_k)
     examples = [
         _example_payload(train_by_id[item], caption_for_case(prepared, train_by_id[item]))
@@ -969,6 +1029,7 @@ async def _run_one_prediction(
         "errors": errors,
         "metrics": _result_metrics(case, predicted),
         "raw_response": raw_content,
+        "scoring_version": SCORING_VERSION,
     }
     atomic_json(output, result)
     return result
@@ -1024,13 +1085,25 @@ async def run_prompt_dev(
     )
     best = summaries[0]
     manifest = load_json(prepared / "manifest.json")
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        commit = "unknown"
     frozen = {
         "prompt_version": best["prompt_version"],
+        "prompt_hash": canonical_hash(_prompt_instruction(str(best["prompt_version"]))),
         "top_k": best["top_k"],
         "model": settings.llm_model,
+        "scoring_version": SCORING_VERSION,
         "schema_hash": manifest["schema_hash"],
         "case_library_hash": manifest["case_library_hash"],
         "validation_split_hash": canonical_hash(split),
+        "code_commit": commit,
         "dev_metrics": best,
     }
     report = {"cells": summaries, "selected": frozen, "estimated_cost_cny": ledger.cost}

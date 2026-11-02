@@ -64,13 +64,30 @@ def test_prediction_requires_schema_type_and_exact_source_boundary() -> None:
         {
             "entities": [
                 {"text": "Maya Chen", "start": 0, "end": 9, "type": "Person"},
-                {"text": "Maya", "start": 0, "end": 9, "type": "Person"},
+                {"text": "Mya", "start": 0, "end": 9, "type": "Person"},
                 {"text": "sample", "start": 10, "end": 16, "type": "PER"},
             ]
         },
     )
     assert valid == [PredictedEntity(text="Maya Chen", start=0, end=9, type="Person")]
-    assert errors == ["surface_boundary_mismatch:1", "type_not_in_schema:2"]
+    assert errors == [
+        "surface_not_in_source:1",
+        "type_not_in_schema:2",
+    ]
+
+
+def test_prediction_repairs_offsets_from_exact_surface_without_using_gold() -> None:
+    case = _case("sample", "PER")
+    valid, errors = validate_prediction(
+        case,
+        {
+            "entities": [
+                {"text": "Maya Chen", "start": 3, "end": 12, "type": "Person"}
+            ]
+        },
+    )
+    assert valid == [PredictedEntity(text="Maya Chen", start=0, end=9, type="Person")]
+    assert errors == ["offset_repaired:0"]
 
 
 def test_retrieval_text_never_contains_gold_labels() -> None:
