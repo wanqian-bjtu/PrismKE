@@ -107,7 +107,9 @@ def test_valid_image_hash_leakage_is_detected_but_invalid_hash_is_ignored() -> N
 
 def test_budget_ledger_stops_before_crossing_limit(tmp_path: Path) -> None:
     ledger = CNYBudgetLedger(tmp_path / "budget.json", limit_cny=0.02)
+    ledger.authorize("one", reserve_cny=0.01)
     ledger.record(
+        "one",
         ProviderCallRecord(
             id="call",
             provider="llm",

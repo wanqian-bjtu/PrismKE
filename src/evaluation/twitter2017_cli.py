@@ -52,6 +52,7 @@ def caption(
     split: Annotated[Literal["train", "validation", "all"], typer.Option()] = "all",
     limit: Annotated[int | None, typer.Option(min=1)] = None,
     smoke: Annotated[bool, typer.Option()] = False,
+    concurrency: Annotated[int, typer.Option(min=1, max=2)] = 1,
     budget_limit_cny: Annotated[float, typer.Option("--budget-limit-cny", min=0.01)] = 80.0,
 ) -> None:
     """Generate resumable objective image descriptions with a CNY hard limit."""
@@ -63,6 +64,7 @@ def caption(
                 split=split,
                 limit=limit,
                 smoke=smoke,
+                concurrency=concurrency,
                 budget_limit_cny=budget_limit_cny,
             )
         )

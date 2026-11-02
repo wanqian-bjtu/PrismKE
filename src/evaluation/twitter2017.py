@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import math
@@ -360,6 +361,17 @@ class CNYBudgetLedger:
                     "existing budget limit is "
                     f"{saved_limit}; refusing implicit change to {limit_cny}"
                 )
+            stale = sum(float(value) for value in self.payload.pop("reservations", {}).values())
+            if stale:
+                self.payload["estimated_cost_cny"] = round(self.cost + stale, 8)
+                self.payload.setdefault("reservation_recoveries", []).append(
+                    {
+                        "conservative_cost_cny": stale,
+                        "reason": "stale in-flight reservation charged on resume",
+                    }
+                )
+            self.payload["reservations"] = {}
+            self.persist()
         else:
             self.payload = {
                 "version": 1,
@@ -369,6 +381,7 @@ class CNYBudgetLedger:
                 "output_tokens": 0,
                 "calls": [],
                 "milestones": [],
+                "reservations": {},
                 "stopped_reason": None,
             }
             self.persist()
@@ -383,13 +396,18 @@ class CNYBudgetLedger:
     def authorize(self, operation_id: str, reserve_cny: float = 0.01) -> None:
         if self.payload.get("stopped_reason"):
             raise BudgetStop(str(self.payload["stopped_reason"]))
-        if self.cost + reserve_cny > self.limit_cny:
+        reservations = self.payload.setdefault("reservations", {})
+        reserved = sum(float(value) for value in reservations.values())
+        if self.cost + reserved + reserve_cny > self.limit_cny:
             reason = f"next request {operation_id} could exceed {self.limit_cny:.2f} CNY"
             self.payload["stopped_reason"] = reason
             self.persist()
             raise BudgetStop(reason)
+        reservations[operation_id] = reserve_cny
+        self.persist()
 
-    def record(self, record: ProviderCallRecord) -> list[float]:
+    def record(self, operation_id: str, record: ProviderCallRecord) -> list[float]:
+        self.payload.setdefault("reservations", {}).pop(operation_id, None)
         if record.total_tokens is None or record.estimated_cost_cny is None:
             self.payload["stopped_reason"] = "provider usage or price accounting unavailable"
             self.persist()
@@ -463,7 +481,7 @@ async def _chat(
                 exc.call_record.model_dump(mode="json"),
             )
         raise
-    return response, ledger.record(record)
+    return response, ledger.record(operation_id, record)
 
 
 def _caption_path(root: Path, case: TwitterCase) -> Path:
@@ -482,6 +500,7 @@ async def generate_captions(
     split: Literal["train", "validation", "all"] = "all",
     limit: int | None = None,
     smoke: bool = False,
+    concurrency: int = 1,
     budget_limit_cny: float = 80.0,
 ) -> dict[str, Any]:
     selected: list[TwitterCase] = []
@@ -496,13 +515,17 @@ async def generate_captions(
     if limit is not None:
         selected = selected[:limit]
     ledger = CNYBudgetLedger(prepared / "budget.json", budget_limit_cny)
+    if concurrency not in {1, 2}:
+        raise ValueError("caption concurrency must be 1 or 2")
     completed = skipped = failed = 0
     milestones: list[float] = []
-    for case in selected:
+    next_index = 0
+    first_error: BaseException | None = None
+
+    async def process(case: TwitterCase) -> Literal["completed", "resumed"]:
         target = _caption_path(prepared, case)
         if target.exists():
-            skipped += 1
-            continue
+            return "resumed"
         if not case.image_valid:
             atomic_json(
                 target,
@@ -513,8 +536,7 @@ async def generate_captions(
                     "reason": case.invalid_image_reason,
                 },
             )
-            completed += 1
-            continue
+            return "completed"
         body = {
             "model": settings.vlm_model,
             "messages": [
@@ -558,16 +580,38 @@ async def generate_captions(
                     "image_sha256": case.image_sha256,
                 },
             )
-            completed += 1
             milestones.extend(crossed)
+            return "completed"
         except (KeyError, IndexError, TypeError, json.JSONDecodeError, ValueError):
-            failed += 1
             raise
+
+    async def worker() -> None:
+        nonlocal next_index, completed, skipped, failed, first_error
+        while first_error is None:
+            if next_index >= len(selected):
+                return
+            case = selected[next_index]
+            next_index += 1
+            try:
+                outcome = await process(case)
+                if outcome == "completed":
+                    completed += 1
+                else:
+                    skipped += 1
+            except BaseException as exc:
+                failed += 1
+                first_error = exc
+                return
+
+    await asyncio.gather(*(worker() for _ in range(concurrency)))
+    if first_error is not None:
+        raise first_error
     return {
         "selected": len(selected),
         "completed": completed,
         "resumed": skipped,
         "failed": failed,
+        "concurrency": concurrency,
         "estimated_cost_cny": ledger.cost,
         "crossed_milestones": milestones,
     }
