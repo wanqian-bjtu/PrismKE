@@ -33,7 +33,11 @@ def _usage(payload: dict[str, Any]) -> tuple[int | None, int | None, int | None]
     return input_tokens, output_tokens, total_tokens
 
 
-def _failure(status: int | None, kind: str) -> tuple[str, str]:
+def _failure(
+    status: int | None, kind: str, provider_error_code: str | None = None
+) -> tuple[str, str]:
+    if provider_error_code == "data_inspection_failed":
+        return "content_filtered", "模型服务因内容安全策略拒绝处理输入"
     if status == 401:
         return "authentication_failed", "模型服务鉴权失败（HTTP 401），请检查 API Key"
     if status == 403:
@@ -170,7 +174,17 @@ async def post_chat_completion(
                 delay *= 2
                 continue
             if response.is_error:
-                code, message = _failure(response.status_code, "http")
+                provider_error_code = None
+                try:
+                    error_payload = response.json()
+                    error = error_payload.get("error", {})
+                    if isinstance(error, dict) and error.get("code") == "data_inspection_failed":
+                        provider_error_code = "data_inspection_failed"
+                except (ValueError, AttributeError):
+                    pass
+                code, message = _failure(
+                    response.status_code, "http", provider_error_code
+                )
                 record = _record(
                     provider=provider,
                     operation_id=operation_id,

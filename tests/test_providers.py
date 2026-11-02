@@ -291,6 +291,39 @@ async def test_provider_errors_are_actionable_and_sanitized(
 
 
 @pytest.mark.asyncio
+async def test_provider_content_filter_is_reported_without_leaking_response() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(
+            400,
+            json={
+                "error": {
+                    "code": "data_inspection_failed",
+                    "message": "unsafe provider detail",
+                }
+            },
+        )
+
+    provider = OpenAICompatibleLLMProvider(
+        "https://example.test/v1",
+        "secret",
+        "qwen3.7-flash",
+        transport=httpx.MockTransport(handler),
+    )
+    document = DocumentIR(
+        id="doc:filtered",
+        source_path="sample.txt",
+        source_hash="a" * 64,
+        media_type="text/plain",
+    )
+    schema = OutputSchema(schema_id="s", version="1", entity_types=[], relations=[])
+    with pytest.raises(ProviderRequestError, match="内容安全") as caught:
+        await provider.extract(ExtractionRequest(document=document, output_schema=schema))
+    assert caught.value.call_record.error_code == "content_filtered"
+    assert "unsafe provider detail" not in str(caught.value)
+
+
+@pytest.mark.asyncio
 async def test_provider_retries_rate_limit_then_records_retry() -> None:
     calls = 0
 

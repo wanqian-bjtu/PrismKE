@@ -33,6 +33,7 @@ DATASET_VERSION = "twitter2017-eval-v1"
 CAPTION_PROMPT_VERSION = "twitter2017-caption-v1"
 NER_PROMPT_VERSIONS = ("twitter2017-ner-v1", "twitter2017-ner-v2", "twitter2017-ner-v3")
 IMAGE_UNAVAILABLE = "IMAGE_UNAVAILABLE:v1"
+IMAGE_UNAVAILABLE_PROVIDER_FILTER = "IMAGE_UNAVAILABLE:provider_content_filter:v1"
 CANONICAL_TYPES = {
     "PER": "Person",
     "ORG": "Organization",
@@ -597,6 +598,22 @@ async def generate_captions(
                     break
                 except ProviderRequestError as exc:
                     record = exc.call_record
+                    if (
+                        isinstance(record, ProviderCallRecord)
+                        and record.error_code == "content_filtered"
+                    ):
+                        atomic_json(
+                            target,
+                            {
+                                "id": case.id,
+                                "description": IMAGE_UNAVAILABLE_PROVIDER_FILTER,
+                                "source": settings.vlm_model,
+                                "prompt_version": CAPTION_PROMPT_VERSION,
+                                "image_sha256": case.image_sha256,
+                                "reason": "provider_content_filter",
+                            },
+                        )
+                        return "completed"
                     retryable = (
                         isinstance(record, ProviderCallRecord)
                         and record.error_code == "request_failed"
@@ -1059,6 +1076,14 @@ def evaluation_status(prepared: Path) -> dict[str, Any]:
     def count(pattern: str) -> int:
         return sum(1 for _ in prepared.glob(pattern))
 
+    def provider_filtered() -> int:
+        total = 0
+        for path in prepared.glob("captions/*/*.json"):
+            payload = load_json(path)
+            if payload.get("description") == IMAGE_UNAVAILABLE_PROVIDER_FILTER:
+                total += 1
+        return total
+
     ledger = load_json(prepared / "budget.json") if (prepared / "budget.json").exists() else None
     vector_status = {}
     for name in ("train", "validation"):
@@ -1076,6 +1101,7 @@ def evaluation_status(prepared: Path) -> dict[str, Any]:
             "train": count("captions/train/*.json"),
             "validation": count("captions/validation/*.json"),
             "test": count("captions/test/*.json"),
+            "provider_content_filtered": provider_filtered(),
         },
         "vectors": vector_status,
         "predictions": {
