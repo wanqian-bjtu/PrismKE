@@ -529,6 +529,13 @@ def _twitter_payload(items: list[twitter.PredictedEntity]) -> list[dict[str, Any
     return [item.model_dump(mode="json") for item in items]
 
 
+def _json_keyed_visual_evidence(
+    evidence: dict[int, dict[str, str | None]],
+) -> dict[str, dict[str, str | None]]:
+    """Convert candidate indexes to JSON object keys before durable storage."""
+    return {str(candidate_id): value for candidate_id, value in evidence.items()}
+
+
 def _record_twitter(
     case: twitter.TwitterCase,
     variant: VariantName,
@@ -652,7 +659,7 @@ async def _twitter_extraction_one(
         final,
         errors,
         text_predicted=_twitter_payload(text_prediction),
-        visual_evidence=visual_evidence,
+        visual_evidence=_json_keyed_visual_evidence(visual_evidence),
         visual_changes_accepted=accepted,
         visual_changes_rejected=rejected,
         span_mutations=int(v4._span_signature(final) != v4._span_signature(text_prediction)),

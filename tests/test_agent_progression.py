@@ -5,6 +5,7 @@ import pytest
 from src.evaluation import mnre_v2 as mnre
 from src.evaluation import twitter2017 as twitter
 from src.evaluation.agent_progression import (
+    _json_keyed_visual_evidence,
     _parse_mnre_governance,
     _parse_mnre_vanilla,
     _parse_twitter_governance,
@@ -20,6 +21,12 @@ from src.evaluation.agent_progression import (
     twitter_governance_prompt,
     twitter_vanilla_prompt,
 )
+
+
+def test_visual_evidence_uses_json_string_keys() -> None:
+    evidence = {0: {"visible": "yes", "suggested_type": "Person"}}
+    converted = _json_keyed_visual_evidence(evidence)
+    assert converted == {"0": {"visible": "yes", "suggested_type": "Person"}}
 
 
 def _twitter_case() -> twitter.TwitterCase:
