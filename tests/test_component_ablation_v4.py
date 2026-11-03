@@ -5,6 +5,7 @@ from src.evaluation import twitter2017 as twitter
 from src.evaluation.component_ablation_v4 import (
     VISUALLY_ELIGIBLE_RELATIONS,
     _parse_mnre_visual,
+    _parse_twitter_prediction_v4,
     _parse_twitter_visual,
     _span_signature,
     apply_twitter_visual_gate,
@@ -104,6 +105,13 @@ def test_v4_twitter_reflection_declares_immutable_spans() -> None:
     prompt = twitter_reflection_prompt({}, case, [candidate], [])
     assert "immutable" in prompt
     assert "Any span change will be rejected" in prompt
+
+
+def test_v4_twitter_empty_shape_is_audited_and_normalized() -> None:
+    for raw in ("{}", "[]"):
+        predicted, errors = _parse_twitter_prediction_v4(_twitter_case(), raw, [])
+        assert predicted == []
+        assert errors == ["empty_shape_repaired"]
 
 
 def test_v4_mnre_text_prompt_does_not_expose_gold_label() -> None:

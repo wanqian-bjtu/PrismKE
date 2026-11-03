@@ -202,6 +202,8 @@ def twitter_text_prompt(
     instruction = (
         "Perform named entity recognition from SOURCE text only. Return JSON only as "
         '{"entities":[{"text":"...","start":0,"end":1,"type":"Person"}]}. '
+        'If SOURCE contains no allowed entity, return exactly {"entities":[]}; never return '
+        "a bare array or an empty object. "
         "Offsets are Unicode character offsets using [start,end). Every text must exactly equal "
         "SOURCE[start:end]. Preserve the complete source-written proper name. Do not translate, "
         "rewrite, normalize, strip, or add @, #, or punctuation. Use only allowed canonical type "
@@ -548,6 +550,26 @@ def _span_signature(items: list[twitter.PredictedEntity]) -> list[tuple[str, int
     return sorted((item.text, item.start, item.end) for item in items)
 
 
+def _parse_twitter_prediction_v4(
+    case: twitter.TwitterCase, raw: str, provider_errors: list[str]
+) -> tuple[list[twitter.PredictedEntity], list[str]]:
+    """Normalize only unambiguous empty NER outputs and keep an explicit audit error."""
+    normalized = raw
+    repaired = False
+    if not provider_errors:
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            payload = None
+        if payload == {} or payload == []:
+            normalized = '{"entities":[]}'
+            repaired = True
+    predicted, errors = v1._parse_twitter_prediction(case, normalized, provider_errors)
+    if repaired:
+        errors.append("empty_shape_repaired")
+    return predicted, errors
+
+
 async def _run_twitter_one(
     output: Path,
     source: Path,
@@ -570,7 +592,7 @@ async def _run_twitter_one(
     raw_text, provider_errors = await v1._provider_json(
         settings, ledger, prompt, f"{prefix}:text", f"ablation-v4-twitter-{variant}-text"
     )
-    text_prediction, text_errors = v1._parse_twitter_prediction(
+    text_prediction, text_errors = _parse_twitter_prediction_v4(
         case, raw_text, provider_errors
     )
     pre_reflection = text_prediction
@@ -615,10 +637,13 @@ async def _run_twitter_one(
             f"{prefix}:reflection",
             "ablation-v4-twitter-bounded-reflection",
         )
-        reflected, reflected_errors = v1._parse_twitter_prediction(
+        reflected, reflected_errors = _parse_twitter_prediction_v4(
             case, raw_reflection, reflection_provider_errors
         )
-        if not reflected_errors and _span_signature(reflected) == _span_signature(final):
+        fatal_reflection_errors = [
+            item for item in reflected_errors if item != "empty_shape_repaired"
+        ]
+        if not fatal_reflection_errors and _span_signature(reflected) == _span_signature(final):
             final = reflected
             errors = [item for item in errors if item.startswith("provider_")]
             reflection_accepted = True
