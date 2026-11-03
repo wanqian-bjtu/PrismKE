@@ -1414,7 +1414,7 @@ def _paired_bootstrap_delta(
         "lower": round(float(lower), 6),
         "upper": round(float(upper), 6),
         "two_sided_p": round(
-            float(2 * min((array <= 0).mean(), (array >= 0).mean())), 6
+            float(min(1.0, 2 * min((array <= 0).mean(), (array >= 0).mean()))), 6
         ),
     }
 

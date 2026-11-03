@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from src.evaluation import component_ablation as v1
 from src.evaluation import component_ablation_v4 as v4
 from src.evaluation import mnre_v2 as mnre
 from src.evaluation import twitter2017 as twitter
@@ -128,3 +129,23 @@ def test_v5_mnre_visual_parser_still_rejects_free_relation_output() -> None:
     )
     assert evidence is None
     assert errors == ["forbidden_relation_field"]
+
+
+def test_paired_bootstrap_caps_identical_predictions_at_probability_one() -> None:
+    records = [
+        {
+            "id": "sample-1",
+            "metrics": {"tp": 1, "fp": 0, "fn": 0},
+        },
+        {
+            "id": "sample-2",
+            "metrics": {"tp": 0, "fp": 1, "fn": 1},
+        },
+    ]
+    result = v1._paired_bootstrap_delta(records, records)
+    assert result == {
+        "mean_delta": 0.0,
+        "lower": 0.0,
+        "upper": 0.0,
+        "two_sided_p": 1.0,
+    }
