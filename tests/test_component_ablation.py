@@ -3,6 +3,7 @@ from __future__ import annotations
 from src.evaluation import mnre_v2 as mnre
 from src.evaluation import twitter2017 as twitter
 from src.evaluation.component_ablation import (
+    _adjacent_variant_pairs,
     _bootstrap_f1,
     _stratified_ids_mnre,
     _stratified_ids_twitter,
@@ -182,3 +183,11 @@ def test_mnre_macro_f1_distinguishes_present_and_all_schema_labels() -> None:
     assert metrics["micro_f1"] == 1.0
     assert metrics["macro_f1"] == 1.0
     assert metrics["macro_f1_all_schema_relations"] < 1.0
+
+
+def test_four_variants_produce_three_adjacent_bootstrap_comparisons() -> None:
+    assert _adjacent_variant_pairs() == (
+        ("vanilla", "schema"),
+        ("schema", "multimodal"),
+        ("multimodal", "full"),
+    )

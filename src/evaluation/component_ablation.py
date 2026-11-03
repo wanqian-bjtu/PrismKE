@@ -1419,6 +1419,10 @@ def _paired_bootstrap_delta(
     }
 
 
+def _adjacent_variant_pairs() -> tuple[tuple[VariantName, VariantName], ...]:
+    return tuple(zip(VARIANTS[:-1], VARIANTS[1:], strict=True))
+
+
 def export_results(output: Path) -> dict[str, Any]:
     if not (output / "main-summary.json").exists():
         raise RuntimeError("main ablation results are unavailable")
@@ -1452,7 +1456,7 @@ def export_results(output: Path) -> dict[str, Any]:
                 row["pre_reflection_f1"] = report["pre_reflection_metrics"]["micro_f1"]
                 row["reflection_accepted"] = report["reflection"]["accepted"]
             rows.append(row)
-        for left, right in zip(VARIANTS, VARIANTS[1:], strict=True):
+        for left, right in _adjacent_variant_pairs():
             paired.append(
                 {
                     "dataset": dataset,
