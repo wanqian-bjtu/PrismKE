@@ -31,6 +31,7 @@ from src.evaluation import (
     evaluate_manifest,
     evaluate_reflection_manifest,
 )
+from src.evaluation.agent_progression_cli import app as agent_progression_app
 from src.evaluation.annotations import export_reviewed_annotations
 from src.evaluation.component_ablation_cli import app as component_ablation_app
 from src.evaluation.component_ablation_v5_cli import app as component_ablation_v5_app
@@ -56,6 +57,7 @@ app.add_typer(twitter2017_app, name="twitter2017")
 app.add_typer(mnre_v2_app, name="mnre-v2")
 app.add_typer(component_ablation_app, name="component-ablation")
 app.add_typer(component_ablation_v5_app, name="component-ablation-v5")
+app.add_typer(agent_progression_app, name="agent-progression")
 console = Console()
 
 
