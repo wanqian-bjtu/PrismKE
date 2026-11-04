@@ -36,6 +36,7 @@ from src.evaluation.annotations import export_reviewed_annotations
 from src.evaluation.component_ablation_cli import app as component_ablation_app
 from src.evaluation.component_ablation_v5_cli import app as component_ablation_v5_app
 from src.evaluation.mnre_v2_cli import app as mnre_v2_app
+from src.evaluation.shared_vanilla_cli import app as shared_vanilla_app
 from src.evaluation.twitter2017_cli import app as twitter2017_app
 from src.governance import rebuild_entity_index
 from src.persistence import FileEvidenceStore, Neo4jGraphStore, migrate_json_graph
@@ -58,6 +59,7 @@ app.add_typer(mnre_v2_app, name="mnre-v2")
 app.add_typer(component_ablation_app, name="component-ablation")
 app.add_typer(component_ablation_v5_app, name="component-ablation-v5")
 app.add_typer(agent_progression_app, name="agent-progression")
+app.add_typer(shared_vanilla_app, name="shared-vanilla")
 console = Console()
 
 
