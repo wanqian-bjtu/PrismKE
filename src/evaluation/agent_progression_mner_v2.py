@@ -856,6 +856,69 @@ def export_results(output: Path) -> dict[str, Any]:
     temporary = csv_path.with_name(f".{csv_path.name}.{os.getpid()}.tmp")
     temporary.write_text("\n".join(lines) + "\n", encoding="utf-8")
     os.replace(temporary, csv_path)
+    prediction_summary = {
+        "experiment_version": EXPERIMENT_VERSION,
+        "dataset": "twitter2017",
+        "test_cases": len(records["extraction"]),
+        "variants": {
+            variant: {
+                "count": len(records[variant]),
+                "prediction_set_hash": _prediction_set_hash(
+                    _prediction_directory(_source_root(output), "main", "extraction")
+                    if variant == "extraction"
+                    else _prediction_directory(output, "main", variant)
+                ),
+                "metrics": _main_report(output, variant)["metrics"],
+            }
+            for variant in VARIANTS
+        },
+        "governance": {
+            key: payload["governance_audit"].get(key)
+            for key in (
+                "accepted_high_rejects",
+                "blocked_type_changes",
+                "blocked_low_confidence_rejects",
+                "changed_samples",
+                "correct_rejections",
+                "incorrect_rejections",
+                "retained_span_mutations",
+                "final_output_invalid_count",
+            )
+        },
+        "fusion": {
+            key: payload["fusion_audit"].get(key)
+            for key in (
+                "cache_reused_count",
+                "rerun_count",
+                "input_hash_mismatches",
+                "final_output_invalid_count",
+            )
+        },
+    }
+    v1.atomic_json(output / "prediction-summary.json", prediction_summary)
+    deliverables = [
+        "manifest.json",
+        "frozen-config.json",
+        "validation-summary.json",
+        "test-summary.json",
+        "results.json",
+        "results.csv",
+        "prediction-summary.json",
+        "budget.json",
+    ]
+    artifact_manifest = {
+        "experiment_version": EXPERIMENT_VERSION,
+        "code_commit": v1._git_commit(),
+        "files": {
+            name: {"sha256": file_sha256(output / name), "bytes": (output / name).stat().st_size}
+            for name in deliverables
+        },
+        "prediction_sets": {
+            variant: prediction_summary["variants"][variant]["prediction_set_hash"]
+            for variant in VARIANTS
+        },
+    }
+    v1.atomic_json(output / "artifact-manifest.json", artifact_manifest)
     return payload
 
 
