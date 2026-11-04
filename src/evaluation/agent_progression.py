@@ -543,7 +543,6 @@ def _twitter_final_output_invalid(
     """Return whether the durable final MNER output violates its strict contract."""
     if not isinstance(predicted, list):
         return True
-    spans: list[tuple[int, int]] = []
     for value in predicted:
         if not isinstance(value, dict):
             return True
@@ -562,9 +561,21 @@ def _twitter_final_output_invalid(
             or case.text[start:end] != text
         ):
             return True
-        spans.append((start, end))
-    spans.sort()
-    return any(
+    return False
+
+
+def _twitter_overlap_conflict_count(predicted: object) -> int:
+    """Count overlapping exact spans as task errors without calling them malformed JSON."""
+    if not isinstance(predicted, list):
+        return 0
+    spans = sorted(
+        (int(value["start"]), int(value["end"]))
+        for value in predicted
+        if isinstance(value, dict)
+        and type(value.get("start")) is int
+        and type(value.get("end")) is int
+    )
+    return sum(
         current[0] < previous[1]
         for previous, current in zip(spans, spans[1:], strict=False)
     )
@@ -1390,12 +1401,17 @@ async def run_cell(
             )
             for item in results
         )
+        overlap_conflict_count = sum(
+            _twitter_overlap_conflict_count(item.get("predicted"))
+            for item in results
+        )
     else:
         final_output_invalid_count = sum(
             not isinstance(item.get("predicted"), str)
             or item.get("predicted") not in mnre.CANONICAL_TO_DATASET
             for item in results
         )
+        overlap_conflict_count = 0
     intermediate_error_counts = Counter(
         str(error).split(":", 1)[0]
         for item in results
@@ -1426,6 +1442,7 @@ async def run_cell(
         "input_hashes_present": sum("input_prediction_hash" in item for item in results),
         "input_hash_mismatches": input_hash_mismatches,
         "final_output_invalid_count": final_output_invalid_count,
+        "overlap_conflict_count": overlap_conflict_count,
         "intermediate_error_counts": dict(sorted(intermediate_error_counts.items())),
         "retained_span_mutations": retained_span_mutations,
         "governance_rejections": governance_rejections,

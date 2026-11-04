@@ -18,6 +18,7 @@ from src.evaluation.agent_progression import (
     _select_prompt,
     _structural_gate,
     _twitter_final_output_invalid,
+    _twitter_overlap_conflict_count,
     apply_mnre_governance,
     apply_twitter_governance,
     mnre_fusion_prompt,
@@ -158,17 +159,16 @@ def test_governance_reject_and_dedup_are_not_span_mutations() -> None:
     assert _governance_audit(source, moved, {})["retained_span_mutations"] == 1
 
 
-def test_final_twitter_output_requires_exact_non_overlapping_source_spans() -> None:
+def test_final_twitter_output_requires_exact_source_spans_and_reports_overlap() -> None:
     case = _twitter_case()
     valid = [{"text": "Maya Chen", "start": 0, "end": 9, "type": "Person"}]
     assert not _twitter_final_output_invalid(case, valid)
-    assert _twitter_final_output_invalid(
-        case,
-        [
-            *valid,
-            {"text": "Maya", "start": 0, "end": 4, "type": "Person"},
-        ],
-    )
+    overlapping = [
+        *valid,
+        {"text": "Maya", "start": 0, "end": 4, "type": "Person"},
+    ]
+    assert not _twitter_final_output_invalid(case, overlapping)
+    assert _twitter_overlap_conflict_count(overlapping) == 1
     assert _twitter_final_output_invalid(
         case, [{"text": "Maya", "start": 1, "end": 5, "type": "Person"}]
     )
