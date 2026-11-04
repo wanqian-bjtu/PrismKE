@@ -8,8 +8,8 @@ from src.core.ids import canonical_hash
 from src.evaluation import mnre_v2 as mnre
 from src.evaluation import twitter2017 as twitter
 from src.evaluation.agent_progression import (
-    _governance_audit,
     _freeze_selection,
+    _governance_audit,
     _json_keyed_visual_evidence,
     _parse_mnre_governance,
     _parse_mnre_vanilla,

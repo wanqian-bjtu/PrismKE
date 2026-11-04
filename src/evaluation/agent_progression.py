@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from collections import Counter
 import json
 import os
+from collections import Counter
 from pathlib import Path
 from statistics import mean
 from typing import Any, Literal, cast
@@ -564,7 +564,10 @@ def _twitter_final_output_invalid(
             return True
         spans.append((start, end))
     spans.sort()
-    return any(current[0] < previous[1] for previous, current in zip(spans, spans[1:]))
+    return any(
+        current[0] < previous[1]
+        for previous, current in zip(spans, spans[1:], strict=False)
+    )
 
 
 def _governance_audit(
@@ -1569,7 +1572,10 @@ def _cached_validation_complete(output: Path, dataset: DatasetName) -> bool:
             cast(PromptVersion, selection["fusion_review_prompt_version"]),
         ),
     ]
-    return all(len(list((directory / "predictions").glob("*.json"))) == expected for directory in directories)
+    return all(
+        len(list((directory / "predictions").glob("*.json"))) == expected
+        for directory in directories
+    )
 
 
 def _begin_protocol_amendment(
