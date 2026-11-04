@@ -856,22 +856,23 @@ def export_results(output: Path) -> dict[str, Any]:
     temporary = csv_path.with_name(f".{csv_path.name}.{os.getpid()}.tmp")
     temporary.write_text("\n".join(lines) + "\n", encoding="utf-8")
     os.replace(temporary, csv_path)
-    prediction_summary = {
+    variant_summaries: dict[str, dict[str, Any]] = {
+        variant: {
+            "count": len(records[variant]),
+            "prediction_set_hash": _prediction_set_hash(
+                _prediction_directory(_source_root(output), "main", "extraction")
+                if variant == "extraction"
+                else _prediction_directory(output, "main", variant)
+            ),
+            "metrics": _main_report(output, variant)["metrics"],
+        }
+        for variant in VARIANTS
+    }
+    prediction_summary: dict[str, Any] = {
         "experiment_version": EXPERIMENT_VERSION,
         "dataset": "twitter2017",
         "test_cases": len(records["extraction"]),
-        "variants": {
-            variant: {
-                "count": len(records[variant]),
-                "prediction_set_hash": _prediction_set_hash(
-                    _prediction_directory(_source_root(output), "main", "extraction")
-                    if variant == "extraction"
-                    else _prediction_directory(output, "main", variant)
-                ),
-                "metrics": _main_report(output, variant)["metrics"],
-            }
-            for variant in VARIANTS
-        },
+        "variants": variant_summaries,
         "governance": {
             key: payload["governance_audit"].get(key)
             for key in (
@@ -914,8 +915,7 @@ def export_results(output: Path) -> dict[str, Any]:
             for name in deliverables
         },
         "prediction_sets": {
-            variant: prediction_summary["variants"][variant]["prediction_set_hash"]
-            for variant in VARIANTS
+            variant: variant_summaries[variant]["prediction_set_hash"] for variant in VARIANTS
         },
     }
     v1.atomic_json(output / "artifact-manifest.json", artifact_manifest)
