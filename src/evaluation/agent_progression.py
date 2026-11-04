@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 import json
-import math
 import os
 from pathlib import Path
 from statistics import mean
@@ -26,6 +26,7 @@ PromptVersion = Literal["v1", "v2", "v3"]
 
 EXPERIMENT_VERSION = "agent-progression-v1"
 SCORING_VERSION = "agent-progression-scoring-v1"
+GATE_POLICY_VERSION = "agent-progression-gate-v2"
 SEED = 2027
 BOOTSTRAP_SAMPLES = 10_000
 TWITTER_TOP_K = 3
@@ -536,6 +537,81 @@ def _json_keyed_visual_evidence(
     return {str(candidate_id): value for candidate_id, value in evidence.items()}
 
 
+def _twitter_final_output_invalid(
+    case: twitter.TwitterCase, predicted: object
+) -> bool:
+    """Return whether the durable final MNER output violates its strict contract."""
+    if not isinstance(predicted, list):
+        return True
+    spans: list[tuple[int, int]] = []
+    for value in predicted:
+        if not isinstance(value, dict):
+            return True
+        text = value.get("text")
+        start = value.get("start")
+        end = value.get("end")
+        entity_type = value.get("type")
+        if (
+            not isinstance(text, str)
+            or type(start) is not int
+            or type(end) is not int
+            or entity_type not in twitter.DATASET_LABELS
+            or start < 0
+            or end <= start
+            or end > len(case.text)
+            or case.text[start:end] != text
+        ):
+            return True
+        spans.append((start, end))
+    spans.sort()
+    return any(current[0] < previous[1] for previous, current in zip(spans, spans[1:]))
+
+
+def _governance_audit(
+    source: list[twitter.PredictedEntity],
+    final: list[twitter.PredictedEntity],
+    decisions: dict[int, dict[str, Any]],
+) -> dict[str, int]:
+    """Separate immutable-span violations from permitted reject/dedup removals."""
+    source_spans = Counter((item.text, item.start, item.end) for item in source)
+    retained_span_mutations = 0
+    remaining = source_spans.copy()
+    for item in final:
+        span = (item.text, item.start, item.end)
+        if remaining[span] <= 0:
+            retained_span_mutations += 1
+        else:
+            remaining[span] -= 1
+
+    governance_rejections = sum(
+        decision.get("action") == "reject" and decision.get("confidence") == "high"
+        for decision in decisions.values()
+    )
+    provisional: list[twitter.PredictedEntity] = []
+    for index, candidate in enumerate(source):
+        decision = decisions.get(index)
+        if (
+            decision
+            and decision.get("confidence") == "high"
+            and decision.get("action") == "reject"
+        ):
+            continue
+        if (
+            decision
+            and decision.get("confidence") == "high"
+            and decision.get("action") == "change_type"
+            and decision.get("type") in twitter.DATASET_LABELS
+        ):
+            candidate = candidate.model_copy(update={"type": decision["type"]})
+        provisional.append(candidate)
+    unique_keys = {(item.text, item.start, item.end, item.type) for item in provisional}
+    return {
+        "retained_span_mutations": retained_span_mutations,
+        "governance_rejections": governance_rejections,
+        "governance_deduplications": len(provisional) - len(unique_keys),
+    }
+
+
 def _record_twitter(
     case: twitter.TwitterCase,
     variant: VariantName,
@@ -809,6 +885,7 @@ async def _twitter_governance_one(
         raw, provider_errors, len(source_entities)
     )
     final, accepted, rejected = apply_twitter_governance(source_entities, decisions)
+    audit = _governance_audit(source_entities, final, decisions)
     input_hash = _prediction_hash(input_record["predicted"])
     result = _record_twitter(
         case,
@@ -821,7 +898,8 @@ async def _twitter_governance_one(
         input_prediction_hash=input_hash,
         modifications_accepted=accepted,
         modifications_rejected=rejected,
-        span_mutations=int(v4._span_signature(final) != v4._span_signature(source_entities)),
+        span_mutations=audit["retained_span_mutations"],
+        **audit,
         prompt_hash=canonical_hash(prompt),
         raw=raw,
     )
@@ -1261,6 +1339,9 @@ async def run_cell(
         else v1.aggregate_mnre(results)
     )
     input_hash_mismatches = 0
+    retained_span_mutations = 0
+    governance_rejections = 0
+    governance_deduplications = 0
     if variant in {"governance", "fusion_review"}:
         upstream_variant: VariantName = (
             "extraction" if variant == "governance" else "governance"
@@ -1279,6 +1360,45 @@ async def run_cell(
                 item.get("input_prediction_hash")
                 != _prediction_hash(upstream["predicted"])
             )
+            if dataset == "twitter2017" and variant == "governance":
+                source_entities = [
+                    twitter.PredictedEntity.model_validate(value)
+                    for value in upstream["predicted"]
+                ]
+                final_entities = [
+                    twitter.PredictedEntity.model_validate(value)
+                    for value in item["predicted"]
+                ]
+                decisions, _ = _parse_twitter_governance(
+                    str(item.get("raw") or ""), [], len(source_entities)
+                )
+                audit = _governance_audit(
+                    source_entities, final_entities, decisions
+                )
+                retained_span_mutations += audit["retained_span_mutations"]
+                governance_rejections += audit["governance_rejections"]
+                governance_deduplications += audit["governance_deduplications"]
+    case_by_id = {case.id: case for case in cases}
+    if dataset == "twitter2017":
+        final_output_invalid_count = sum(
+            _twitter_final_output_invalid(
+                cast(twitter.TwitterCase, case_by_id[str(item["id"])]),
+                item.get("predicted"),
+            )
+            for item in results
+        )
+    else:
+        final_output_invalid_count = sum(
+            not isinstance(item.get("predicted"), str)
+            or item.get("predicted") not in mnre.CANONICAL_TO_DATASET
+            for item in results
+        )
+    intermediate_error_counts = Counter(
+        str(error).split(":", 1)[0]
+        for item in results
+        for error in item.get("errors", [])
+        if str(error).split(":", 1)[0].startswith("invalid_visual")
+    )
     report = {
         "dataset": dataset,
         "variant": variant,
@@ -1293,13 +1413,21 @@ async def run_cell(
             "schema_hash": manifest["schemas"][dataset]["hash"],
             "settings_hash": manifest["settings_hash"],
             "code_commit": manifest["code_commit"],
+            "prediction_protocol_commit": manifest["code_commit"],
+            "runtime_code_commit": v1._git_commit(),
+            "gate_policy_version": GATE_POLICY_VERSION,
         },
         "metrics": metrics,
         "secondary_metrics": _secondary_metrics(dataset, results),
         "usage": _usage_for(ledger, dataset, stage, variant, prompt_version),
         "input_hashes_present": sum("input_prediction_hash" in item for item in results),
         "input_hash_mismatches": input_hash_mismatches,
-        "span_mutations": sum(int(item.get("span_mutations", 0)) for item in results),
+        "final_output_invalid_count": final_output_invalid_count,
+        "intermediate_error_counts": dict(sorted(intermediate_error_counts.items())),
+        "retained_span_mutations": retained_span_mutations,
+        "governance_rejections": governance_rejections,
+        "governance_deduplications": governance_deduplications,
+        "span_mutations": retained_span_mutations,
         "endpoint_swaps": sum(int(item.get("endpoint_swaps", 0)) for item in results),
     }
     v1.atomic_json(directory / "report.json", report)
@@ -1343,8 +1471,13 @@ def _freeze_selection(
         "dev_report_hash": canonical_hash(dev_reports),
     }
     existing = payload["datasets"].get(dataset)
-    if existing is not None and existing != selection:
-        raise RuntimeError(f"{dataset} prompt selection is already frozen")
+    if existing is not None:
+        if (
+            existing.get("governance_prompt_version") != governance_version
+            or existing.get("fusion_review_prompt_version") != fusion_version
+        ):
+            raise RuntimeError(f"{dataset} prompt selection is already frozen")
+        return cast(dict[str, Any], existing)
     payload["datasets"][dataset] = selection
     payload["prompt_policy_hash"] = canonical_hash(
         {
@@ -1370,16 +1503,13 @@ def _frozen_selection(output: Path, dataset: DatasetName) -> dict[str, Any]:
 
 def _structural_gate(report: dict[str, Any]) -> None:
     cases = int(report["metrics"]["cases"])
-    invalid = sum(
-        int(value)
-        for key, value in dict(report["metrics"]["errors"]).items()
-        if key.startswith("invalid_")
-    )
-    if invalid > math.ceil(cases * 0.01):
+    if int(report.get("final_output_invalid_count", 0)):
         raise RuntimeError(
-            f"{report['dataset']}/{report['variant']} structural error rate exceeds 1%"
+            f"{report['dataset']}/{report['variant']} has invalid final outputs"
         )
-    if report["variant"] == "governance" and int(report["span_mutations"]):
+    if report["variant"] == "governance" and int(
+        report.get("retained_span_mutations", report.get("span_mutations", 0))
+    ):
         raise RuntimeError("MNER governance mutated an existing entity span")
     if report["dataset"] == "mnre-v2" and int(report["endpoint_swaps"]):
         raise RuntimeError("MRE stage exchanged ordered endpoints")
@@ -1391,6 +1521,104 @@ def _structural_gate(report: dict[str, Any]) -> None:
         raise RuntimeError("downstream stage input hash does not match upstream output")
 
 
+def _prediction_snapshot_hash(output: Path, dataset: DatasetName) -> str:
+    files = sorted(
+        path
+        for stage in ("dev", "holdout")
+        for path in (output / stage / dataset).glob("**/predictions/*.json")
+    )
+    return canonical_hash(
+        [
+            {
+                "path": path.relative_to(output).as_posix(),
+                "sha256": file_sha256(path),
+            }
+            for path in files
+        ]
+    )
+
+
+def _budget_cost(output: Path) -> float:
+    path = output / "budget.json"
+    if not path.exists():
+        return 0.0
+    return float(v1.load_json(path).get("estimated_cost_cny") or 0.0)
+
+
+def _cached_validation_complete(output: Path, dataset: DatasetName) -> bool:
+    try:
+        selection = _frozen_selection(output, dataset)
+    except (FileNotFoundError, RuntimeError):
+        return False
+    expected = _expected_count(dataset, "holdout")
+    directories = [
+        _cell_directory(output, "holdout", dataset, "vanilla"),
+        _cell_directory(output, "holdout", dataset, "extraction"),
+        _cell_directory(
+            output,
+            "holdout",
+            dataset,
+            "governance",
+            cast(PromptVersion, selection["governance_prompt_version"]),
+        ),
+        _cell_directory(
+            output,
+            "holdout",
+            dataset,
+            "fusion_review",
+            cast(PromptVersion, selection["fusion_review_prompt_version"]),
+        ),
+    ]
+    return all(len(list((directory / "predictions").glob("*.json"))) == expected for directory in directories)
+
+
+def _begin_protocol_amendment(
+    output: Path, dataset: DatasetName
+) -> dict[str, Any] | None:
+    if not _cached_validation_complete(output, dataset):
+        return None
+    manifest = dict(v1.load_json(output / "manifest.json"))
+    payload = {
+        "experiment_version": EXPERIMENT_VERSION,
+        "dataset": dataset,
+        "prediction_protocol_commit": manifest["code_commit"],
+        "runtime_code_commit": v1._git_commit(),
+        "gate_policy_version": GATE_POLICY_VERSION,
+        "frozen_config_hash": file_sha256(output / "frozen-config.json"),
+        "prediction_snapshot_hash_before": _prediction_snapshot_hash(output, dataset),
+        "budget_cost_before_cny": _budget_cost(output),
+        "changes": [
+            "gate only on deterministic final-output validity",
+            "record intermediate visual parse failures as diagnostics",
+            "separate retained span mutations from reject and dedup removals",
+        ],
+    }
+    v1.atomic_json(output / "protocol-amendment.json", payload)
+    return payload
+
+
+def _finish_protocol_amendment(
+    output: Path, dataset: DatasetName, payload: dict[str, Any] | None
+) -> None:
+    if payload is None:
+        return
+    after_hash = _prediction_snapshot_hash(output, dataset)
+    after_cost = _budget_cost(output)
+    payload["prediction_snapshot_hash_after"] = after_hash
+    payload["budget_cost_after_cny"] = after_cost
+    payload["prediction_files_unchanged"] = (
+        after_hash == payload["prediction_snapshot_hash_before"]
+    )
+    payload["no_paid_calls_during_reaggregation"] = (
+        after_cost == payload["budget_cost_before_cny"]
+    )
+    if not payload["prediction_files_unchanged"]:
+        raise RuntimeError("cached validation prediction files changed during reaggregation")
+    if not payload["no_paid_calls_during_reaggregation"]:
+        raise RuntimeError("cached validation reaggregation unexpectedly used paid calls")
+    v1.atomic_json(output / "protocol-amendment.json", payload)
+
+
 async def run_validation(
     output: Path,
     dataset: DatasetName,
@@ -1399,6 +1627,7 @@ async def run_validation(
     concurrency: int = 2,
     budget_limit_cny: float = 20.0,
 ) -> dict[str, Any]:
+    protocol_amendment = _begin_protocol_amendment(output, dataset)
     dev_reports: list[dict[str, Any]] = []
     for variant in BASE_VARIANTS:
         dev_reports.append(
@@ -1492,9 +1721,12 @@ async def run_validation(
         "selection": selection,
         "dev_reports": dev_reports,
         "holdout_reports": holdout_reports,
+        "recomputed_dev_report_hash": canonical_hash(dev_reports),
+        "gate_policy_version": GATE_POLICY_VERSION,
         "passed": True,
     }
     v1.atomic_json(output / f"{dataset}-validation-summary.json", summary)
+    _finish_protocol_amendment(output, dataset, protocol_amendment)
     return summary
 
 

@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
+from src.core.ids import canonical_hash
 from src.evaluation import mnre_v2 as mnre
 from src.evaluation import twitter2017 as twitter
 from src.evaluation.agent_progression import (
+    _governance_audit,
+    _freeze_selection,
     _json_keyed_visual_evidence,
     _parse_mnre_governance,
     _parse_mnre_vanilla,
@@ -12,6 +17,7 @@ from src.evaluation.agent_progression import (
     _parse_twitter_vanilla,
     _select_prompt,
     _structural_gate,
+    _twitter_final_output_invalid,
     apply_mnre_governance,
     apply_twitter_governance,
     mnre_fusion_prompt,
@@ -27,6 +33,22 @@ def test_visual_evidence_uses_json_string_keys() -> None:
     evidence = {0: {"visible": "yes", "suggested_type": "Person"}}
     converted = _json_keyed_visual_evidence(evidence)
     assert converted == {"0": {"visible": "yes", "suggested_type": "Person"}}
+
+
+def test_final_output_gate_ignores_intermediate_visual_errors() -> None:
+    report = {
+        "dataset": "twitter2017",
+        "variant": "extraction",
+        "metrics": {"cases": 100, "errors": {"invalid_visual_shape": 20}},
+        "final_output_invalid_count": 0,
+        "span_mutations": 0,
+        "endpoint_swaps": 0,
+        "input_hashes_present": 0,
+        "input_hash_mismatches": 0,
+    }
+    _structural_gate(report)
+    with pytest.raises(RuntimeError, match="invalid final outputs"):
+        _structural_gate({**report, "final_output_invalid_count": 1})
 
 
 def _twitter_case() -> twitter.TwitterCase:
@@ -116,6 +138,42 @@ def test_twitter_governance_has_no_cases_and_preserves_spans() -> None:
     )
 
 
+def test_governance_reject_and_dedup_are_not_span_mutations() -> None:
+    source = [
+        twitter.PredictedEntity(text="Maya Chen", start=0, end=9, type="Person"),
+        twitter.PredictedEntity(text="Maya Chen", start=0, end=9, type="Person"),
+        twitter.PredictedEntity(text="AtlasVision", start=17, end=28, type="Organization"),
+    ]
+    decisions = {
+        2: {"action": "reject", "type": None, "confidence": "high"},
+    }
+    final, _, _ = apply_twitter_governance(source, decisions)
+    audit = _governance_audit(source, final, decisions)
+    assert audit == {
+        "retained_span_mutations": 0,
+        "governance_rejections": 1,
+        "governance_deduplications": 1,
+    }
+    moved = [twitter.PredictedEntity(text="Maya", start=0, end=4, type="Person")]
+    assert _governance_audit(source, moved, {})["retained_span_mutations"] == 1
+
+
+def test_final_twitter_output_requires_exact_non_overlapping_source_spans() -> None:
+    case = _twitter_case()
+    valid = [{"text": "Maya Chen", "start": 0, "end": 9, "type": "Person"}]
+    assert not _twitter_final_output_invalid(case, valid)
+    assert _twitter_final_output_invalid(
+        case,
+        [
+            *valid,
+            {"text": "Maya", "start": 0, "end": 4, "type": "Person"},
+        ],
+    )
+    assert _twitter_final_output_invalid(
+        case, [{"text": "Maya", "start": 1, "end": 5, "type": "Person"}]
+    )
+
+
 def test_twitter_fusion_is_the_only_stage_with_cases() -> None:
     prompt = twitter_fusion_prompt(
         "v1",
@@ -165,6 +223,28 @@ def test_prompt_selection_uses_micro_f1_then_earliest_version() -> None:
         {"prompt_version": "v3", "metrics": {"micro_f1": 0.6}},
     ]
     assert _select_prompt(reports) == "v2"
+
+
+def test_existing_prompt_freeze_survives_report_schema_upgrade(tmp_path) -> None:
+    manifest = {"experiment": "agent-progression-v1"}
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    frozen = {
+        "experiment_version": "agent-progression-v1",
+        "manifest_hash": canonical_hash(manifest),
+        "datasets": {
+            "twitter2017": {
+                "governance_prompt_version": "v1",
+                "fusion_review_prompt_version": "v3",
+                "dev_report_hash": "original-report-schema-hash",
+            }
+        },
+    }
+    frozen_path = tmp_path / "frozen-config.json"
+    frozen_path.write_text(json.dumps(frozen), encoding="utf-8")
+    before = frozen_path.read_bytes()
+    selection = _freeze_selection(tmp_path, "twitter2017", "v1", "v3", [])
+    assert selection["dev_report_hash"] == "original-report-schema-hash"
+    assert frozen_path.read_bytes() == before
 
 
 def test_structural_gate_rejects_hash_mismatch_and_span_mutation() -> None:
