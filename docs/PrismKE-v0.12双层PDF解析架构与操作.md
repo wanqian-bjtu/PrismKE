@@ -110,7 +110,7 @@ bash scripts/stop_mineru.sh
 `PRISMKE_MINERU_MAX_INSTALL_GIB`、`PRISMKE_MINERU_MIN_FREE_GIB` 调整，安装前空间门槛可通过
 `PRISMKE_MINERU_MIN_INITIAL_FREE_GIB` 调整，但仍必须通过空间与模型完整性检查。
 
-脚本从自身位置推导项目根目录，不硬编码 AutoDL 路径。服务只能监听 `127.0.0.1`，默认端口 `18020`，并关闭遥测。安装前至少需要 10 GiB 可用空间，安装后默认至少保留 2 GiB。
+脚本从自身位置推导项目根目录，不硬编码平台或机器路径。服务只能监听 `127.0.0.1`，默认端口 `18020`，并关闭遥测。安装前至少需要 10 GiB 可用空间，安装后默认至少保留 2 GiB。
 
 ## 7. 兼容性
 
@@ -118,4 +118,4 @@ bash scripts/stop_mineru.sh
 - 普通文本型 PDF 的 PyMuPDF、OCR、VLM 和证据行为保持兼容；
 - 两种解析器都不能绕过 Schema、证据和图提交硬校验；
 - Windows 与 CI 不强制安装 MinerU，使用固定 MiddleJson 和 Mock V1 服务验收；
-- 当前 v0.9.2 生产服务和生产图谱不替换、不迁移。
+- 验证和迁移必须使用隔离运行目录，不替换共享服务或生产图谱。

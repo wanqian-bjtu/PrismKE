@@ -52,12 +52,12 @@ prismke rebuild-entity-index --backend neo4j
 prismke evaluate-entities examples/entity_resolution_v0_4/manifest.json \
   --embedding-provider bge-m3 \
   --output runtime/evaluation/entity-resolution-v0.4.json
-bash scripts/prismke_autodl.sh restart
+bash scripts/prismke.sh restart
 ```
 
-自动测试使用 Mock Embedding，不下载模型，也不调用百炼 API。真实 BGE-M3 验收只在 AutoDL GPU 服务器执行。
+自动测试使用 Mock Embedding，不下载模型，也不调用外部模型 API。真实 BGE-M3 验证应在具备兼容 CUDA 环境的 Linux GPU 主机上执行。
 
-## AutoDL 验证记录（2026-09-16）
+## 参考验证记录（2026-09-16）
 
 服务器使用 Python 3.11、RTX 4090D 24 GB、PyTorch `2.6.0+cu124`。BGE-M3 模型已显式下载到数据盘，并完成真实 FP16 Dense 编码。固定 CUDA 12.4 构建是为了适配当前服务器驱动，避免安装不兼容的最新 CUDA 构建。
 
@@ -80,6 +80,6 @@ Top-1 指标包含待审核任务的首位候选，不代表所有提及均被�
 
 Neo4j 真实索引状态为 `ONLINE`。首次重建写入 13 个已有活跃实体，重复重建写入 0 个。对同一批实体、向量和查询，JSON 与 Neo4j 的候选及原始余弦分数一致；Neo4j ANN 在更大图谱上仍需单独测试召回率，不承诺与穷举检索永远相同。合并、拆分、补偿回滚已在真实 Neo4j 集成测试中执行。
 
-完整结果保存在服务器 `runtime/evaluation/entity-resolution-v0.4-bge-m3-final.json`，不提交运行产物、模型或密钥。实体评测和治理测试未调用百炼 API。
+完整结果保存在运行目录 `runtime/evaluation/entity-resolution-v0.4-bge-m3-final.json`，不提交运行产物、模型或密钥。实体评测和治理测试未调用外部模型 API。
 
 发布回归通过 Ruff、Mypy 与 107 项测试（包含真实 Neo4j 测试）。浏览器验证了实体候选检索与治理历史查询，1366×900 桌面及 390×844 手机视口无横向溢出。原生 Neo4j 与 Web 服务重启后健康，7474、7687、8000 只监听回环地址。Docker Compose 本轮未重新进行实机启动验证。

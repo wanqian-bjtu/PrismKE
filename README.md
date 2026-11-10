@@ -23,10 +23,9 @@ heterogeneous documents. It combines schema-guided extraction, traceable evidenc
 human review, entity governance, conflict detection, and versioned graph commits in one
 auditable workflow.
 
-The latest development version is **0.14.0.dev0** on `dev/v0.14`; the latest stable
-release remains **v0.13.1** on `main` in the upstream repository. The workflow protocol
-remains `0.13.0`. Runs created by older protocol versions should be resumed with their
-corresponding release.
+The current public version is **0.14.0.dev0** on this repository's `main` branch. The
+workflow protocol remains `0.13.0`. Runs created by older protocol versions should be
+resumed with their corresponding release.
 
 ## Table of Contents
 
@@ -44,6 +43,7 @@ corresponding release.
   - [High-Fidelity PDF Parsing](#high-fidelity-pdf-parsing)
   - [Entity Linking and Governance](#entity-linking-and-governance)
   - [Neo4j and the Web Workspace](#neo4j-and-the-web-workspace)
+- [Repository Contents and Reproducibility](#repository-contents-and-reproducibility)
 - [Project Layout](#project-layout)
 - [Development](#development)
 - [Documentation](#documentation)
@@ -275,8 +275,13 @@ SHA-256 manifests.
 
 ```bash
 # Rebuild and verify the committed synthetic dataset
-uv run python data/tools/generate_synthetic.py
-uv run python data/tools/verify_dataset.py --strict
+uv run python -m data.tools.generate_synthetic
+uv run python -m data.tools.verify_dataset
+
+# Optional: accept the recorded licenses, prepare public fixtures, and verify everything
+uv run python -m data.tools.fetch_public --accept-licenses
+uv run python -m data.tools.sanitize_public --level research-safe
+uv run python -m data.tools.verify_dataset --strict
 
 # Inspect the benchmark and study CLIs
 uv run prismke twitter2017 --help
@@ -456,6 +461,41 @@ uv run prismke migrate-graph \
   --to neo4j
 ```
 
+## Repository Contents and Reproducibility
+
+The source repository intentionally contains more than the installable Python wheel.
+These paths have distinct roles:
+
+| Path | Role | Included in wheel |
+| --- | --- | :---: |
+| `src/` | Python package, workflow, providers, governance, CLI, and API | Yes |
+| `frontend/` | Gradio research workspace | Yes |
+| `assets/branding/` | Packaged PrismKE logo | Yes |
+| `configs/` | Example schemas and service configuration | No |
+| `data/` | Dataset manifests, public/synthetic assets, and verification tools | No |
+| `examples/` | Minimal walkthrough plus entity, multimodal, and Reflection test fixtures | No |
+| `scripts/` | Service management, data generation, and live-service validation | No |
+| `tests/` | Unit, integration, browser, and compatibility regression tests | No |
+| `docs/` | Current architecture and operations guides | No |
+
+`data/`, `examples/`, and `tests/` are not production runtime dependencies, but they are
+kept because they make the v0.14 source checkout independently verifiable. Version
+suffixes in fixture or validation names indicate the feature's introduction version;
+the retained files still test the current implementation.
+
+Operational and live-service helpers are grouped under `scripts/`:
+
+| Scripts | Purpose |
+| --- | --- |
+| `prismke.sh`, `service_profile.sh`, `start_web.sh` | Manage a generic Linux/WSL Web deployment |
+| `install_neo4j.sh`, `start_neo4j.sh`, `test_review_neo4j.sh` | Install, start, and validate an isolated Neo4j service |
+| `install_mineru.sh`, `start_mineru.sh`, `status_mineru.sh`, `stop_mineru.sh` | Manage the optional local MinerU service |
+| `generate_entity_eval_v04.py`, `generate_reflection_eval.py` | Regenerate committed evaluation fixtures |
+| `validate_mineru_v012.py`, `validate_media_v013.py`, `validate_three_agents.py` | Run explicit validations against configured external services |
+
+The live-service validation scripts can incur model usage or require local services.
+Inspect their `--help` output and use isolated credentials and runtime directories.
+
 ## Project Layout
 
 ```text
@@ -463,8 +503,8 @@ PrismKE/
 ├── assets/          # Branding and packaged assets
 ├── configs/         # Example schemas and service configuration
 ├── data/            # Synthetic/public data tooling, manifests, and benchmark metadata
-├── docs/            # Architecture, operations, and acceptance documentation
-├── examples/        # Reproducible inputs and evaluation manifests
+├── docs/            # Current architecture and operations documentation
+├── examples/        # Walkthrough input and reproducible test fixtures
 ├── frontend/        # Gradio research workspace
 ├── scripts/         # Service, installation, and validation helpers
 ├── src/             # Core package, workflow, providers, governance, and API
@@ -493,6 +533,11 @@ runtime/
 uv sync --extra dev --extra web --extra neo4j --extra evaluation
 uv run ruff check .
 uv run mypy src
+uv run python -m data.tools.verify_dataset
+uv run prismke validate-schema configs/schemas/example.yaml
+uv run prismke run examples/sample.md \
+  --schema configs/schemas/example.yaml \
+  --provider mock
 uv run pytest -m "not browser"
 ```
 
@@ -504,7 +549,9 @@ uv run pytest -m browser
 ```
 
 Other test groups may require LibreOffice or a dedicated live Neo4j instance. Pytest
-markers identify these external requirements.
+markers identify these external requirements. The scripts listed in
+[Repository Contents and Reproducibility](#repository-contents-and-reproducibility)
+provide opt-in checks for real MinerU, VLM/LLM, Agent, and Neo4j integrations.
 
 ## Documentation
 
@@ -514,7 +561,7 @@ markers identify these external requirements.
 - [v0.13 visual review operations](docs/PrismKE-v0.13视觉审核操作说明.md)
 - [v0.13 media API and error codes](docs/PrismKE-v0.13媒体API与错误代码.md)
 - [v0.12 two-tier PDF parsing](docs/PrismKE-v0.12双层PDF解析架构与操作.md)
-- [Deployment and operations](docs/PrismKE-v0.3-部署与操作.md)
+- [Deployment and operations](docs/deployment.md)
 - [Full changelog](CHANGELOG.md)
 
 ## Current Boundaries

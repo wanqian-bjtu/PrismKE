@@ -21,9 +21,8 @@
 PrismKE 是一个面向异构文档的研究型多模态知识图谱构建框架。它把模式引导抽取、
 可追溯证据、人工审核、实体治理、冲突检测和版本化图提交组织在同一条可审计流程中。
 
-最新开发版本为 `dev/v0.14` 分支上的 **0.14.0.dev0**；旧仓库 `main` 上的最新
-稳定版本仍为 **v0.13.1**。工作流协议版本仍为 `0.13.0`。由旧协议创建的运行应
-继续使用对应发布版本恢复。
+当前公开版本为本仓库 `main` 分支上的 **0.14.0.dev0**。工作流协议版本仍为
+`0.13.0`。由旧协议创建的运行应继续使用对应发布版本恢复。
 
 ## 目录
 
@@ -41,6 +40,7 @@ PrismKE 是一个面向异构文档的研究型多模态知识图谱构建框架
   - [高精度 PDF 解析](#高精度-pdf-解析)
   - [实体链接与治理](#实体链接与治理)
   - [Neo4j 与 Web 工作台](#neo4j-与-web-工作台)
+- [仓库内容与复现边界](#仓库内容与复现边界)
 - [项目结构](#项目结构)
 - [开发检查](#开发检查)
 - [项目文档](#项目文档)
@@ -258,8 +258,13 @@ v0.14 开发线新增可复现的数据和评测工具。合成多模态文档�
 
 ```bash
 # 重新生成并校验仓库内的合成数据
-uv run python data/tools/generate_synthetic.py
-uv run python data/tools/verify_dataset.py --strict
+uv run python -m data.tools.generate_synthetic
+uv run python -m data.tools.verify_dataset
+
+# 可选：接受已记录许可、准备公开测试夹具并执行完整严格校验
+uv run python -m data.tools.fetch_public --accept-licenses
+uv run python -m data.tools.sanitize_public --level research-safe
+uv run python -m data.tools.verify_dataset --strict
 
 # 查看基准与研究实验命令
 uv run prismke twitter2017 --help
@@ -432,6 +437,39 @@ uv run prismke migrate-graph \
   --to neo4j
 ```
 
+## 仓库内容与复现边界
+
+源码仓库有意保留了比可安装 Python wheel 更多的内容，各目录分工如下：
+
+| 路径 | 用途 | 进入 wheel |
+| --- | --- | :---: |
+| `src/` | Python 包、工作流、Provider、治理、CLI 与 API | 是 |
+| `frontend/` | Gradio 研究工作台 | 是 |
+| `assets/branding/` | 随包分发的 PrismKE 标志 | 是 |
+| `configs/` | 示例 Schema 与服务配置 | 否 |
+| `data/` | 数据清单、公开/合成资产与校验工具 | 否 |
+| `examples/` | 最小示例，以及实体、多模态和 Reflection 测试夹具 | 否 |
+| `scripts/` | 服务管理、数据生成和真实服务验证 | 否 |
+| `tests/` | 单元、集成、浏览器和兼容性回归测试 | 否 |
+| `docs/` | 当前架构与运维文档 | 否 |
+
+`data/`、`examples/` 和 `tests/` 不是生产运行依赖，但它们让 v0.14 源码检出可以被
+独立验证，因此予以保留。夹具或验证脚本名称中的版本后缀表示功能首次引入的版本；这些
+文件仍在验证当前实现。
+
+`scripts/` 中保留的运维与真实服务工具如下：
+
+| 脚本 | 用途 |
+| --- | --- |
+| `prismke.sh`、`service_profile.sh`、`start_web.sh` | 管理通用 Linux/WSL Web 部署 |
+| `install_neo4j.sh`、`start_neo4j.sh`、`test_review_neo4j.sh` | 安装、启动并验证隔离 Neo4j 服务 |
+| `install_mineru.sh`、`start_mineru.sh`、`status_mineru.sh`、`stop_mineru.sh` | 管理可选的本机 MinerU 服务 |
+| `generate_entity_eval_v04.py`、`generate_reflection_eval.py` | 重新生成仓库内评测夹具 |
+| `validate_mineru_v012.py`、`validate_media_v013.py`、`validate_three_agents.py` | 对已配置外部服务执行显式验证 |
+
+真实服务验证脚本可能产生模型调用费用或依赖本机服务。运行前请先查看 `--help`，并使用
+隔离的凭据和运行目录。
+
 ## 项目结构
 
 ```text
@@ -439,8 +477,8 @@ PrismKE/
 ├── assets/          # 品牌与打包资源
 ├── configs/         # 示例 Schema 与服务配置
 ├── data/            # 合成/公开数据工具、清单与基准元数据
-├── docs/            # 架构、运维和验收文档
-├── examples/        # 可复现输入与评测清单
+├── docs/            # 当前架构与运维文档
+├── examples/        # 快速示例与可复现测试夹具
 ├── frontend/        # Gradio 研究工作台
 ├── scripts/         # 服务、安装和验证脚本
 ├── src/             # 核心包、工作流、Provider、治理和 API
@@ -469,6 +507,11 @@ runtime/
 uv sync --extra dev --extra web --extra neo4j --extra evaluation
 uv run ruff check .
 uv run mypy src
+uv run python -m data.tools.verify_dataset
+uv run prismke validate-schema configs/schemas/example.yaml
+uv run prismke run examples/sample.md \
+  --schema configs/schemas/example.yaml \
+  --provider mock
 uv run pytest -m "not browser"
 ```
 
@@ -480,7 +523,8 @@ uv run pytest -m browser
 ```
 
 其他测试组可能需要 LibreOffice 或独立的真实 Neo4j 实例。Pytest marker 会标记
-这些外部环境要求。
+这些外部环境要求。[仓库内容与复现边界](#仓库内容与复现边界)中列出的脚本还提供
+真实 MinerU、VLM/LLM、Agent 与 Neo4j 集成的按需验证入口。
 
 ## 项目文档
 
@@ -490,7 +534,7 @@ uv run pytest -m browser
 - [v0.13 视觉审核操作](docs/PrismKE-v0.13视觉审核操作说明.md)
 - [v0.13 媒体 API 与错误代码](docs/PrismKE-v0.13媒体API与错误代码.md)
 - [v0.12 双层 PDF 解析](docs/PrismKE-v0.12双层PDF解析架构与操作.md)
-- [部署与操作](docs/PrismKE-v0.3-部署与操作.md)
+- [部署与操作](docs/deployment.md)
 - [完整更新日志](CHANGELOG.md)
 
 ## 当前边界

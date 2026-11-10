@@ -13,10 +13,10 @@
 在项目根目录执行：
 
 ```powershell
-uv run python data/tools/generate_synthetic.py
-uv run python data/tools/fetch_public.py --accept-licenses
-uv run python data/tools/sanitize_public.py --level research-safe
-uv run python data/tools/verify_dataset.py --strict
+uv run python -m data.tools.generate_synthetic
+uv run python -m data.tools.fetch_public --accept-licenses
+uv run python -m data.tools.sanitize_public --level research-safe
+uv run python -m data.tools.verify_dataset --strict
 ```
 
 数据准备本身不需要 GPU。只有使用真实 MinerU 或 VLM 执行解析和抽取时才建议使用 GPU 服务器。
@@ -50,7 +50,7 @@ SHA-256。上游文件变化时下载器会停止，必须人工复核后才能�
 并生成移除脚本、广告、追踪器、表单、远程图片和页面状态的文本型安全副本：
 
 ```powershell
-uv run python data/tools/import_local_html.py "C:\path\article.html" `
+uv run python -m data.tools.import_local_html "C:\path\article.html" `
   --id example-news --private-research-use --include-images
 ```
 
