@@ -15,10 +15,10 @@ BEIJING = ZoneInfo("Asia/Shanghai")
 TASK_MODE_LABELS = {
     TaskMode.ENTITY_EXTRACTION.value: "实体抽取",
     TaskMode.RELATION_EXTRACTION.value: "关系抽取",
-    TaskMode.SCHEMA_INFORMATION_EXTRACTION.value: "Schema 信息抽取",
-    TaskMode.JOINT_ENTITY_RELATION_EXTRACTION.value: "端到端实体关系抽取",
-    TaskMode.JOINT_ENTITY_RELATION_DISAMBIGUATION.value: "实体关系抽取与消歧",
-    TaskMode.KNOWLEDGE_GRAPH_CONSTRUCTION.value: "完整知识构建",
+    TaskMode.SCHEMA_INFORMATION_EXTRACTION.value: "信息抽取",
+    TaskMode.JOINT_ENTITY_RELATION_EXTRACTION.value: "实体与关系联合抽取",
+    TaskMode.JOINT_ENTITY_RELATION_DISAMBIGUATION.value: "联合抽取与消歧",
+    TaskMode.KNOWLEDGE_GRAPH_CONSTRUCTION.value: "知识图谱构建",
 }
 
 BRANCH_LABELS = {

@@ -276,8 +276,8 @@ def _run_insight_markdown(
                 tr("实体抽取只返回实体提及，不返回关系、属性、事件或正式图谱。", locale),
                 (
                     tr(
-                        "需要属性、数值和事件时请选择 Schema 信息抽取；需要实体关系及同名"
-                        "消歧时请选择联合实体关系消歧；需要写入正式图谱时请选择完整知识构建。",
+                        "需要属性、数值和事件时请选择信息抽取；需要实体关系及同名"
+                        "消歧时请选择联合抽取与消歧；需要写入正式图谱时请选择知识图谱构建。",
                         locale,
                     )
                 ),
@@ -1622,13 +1622,13 @@ def mount_gradio(app: Any, service: PrismKEService) -> Any:
                     [
                         ("实体抽取", "entity_extraction"),
                         ("关系抽取", "relation_extraction"),
-                        ("Schema 信息抽取", "schema_information_extraction"),
-                        ("端到端实体关系抽取", "joint_entity_relation_extraction"),
+                        ("信息抽取", "schema_information_extraction"),
+                        ("实体与关系联合抽取", "joint_entity_relation_extraction"),
                         (
-                            "实体关系抽取与消歧",
+                            "联合抽取与消歧",
                             "joint_entity_relation_disambiguation",
                         ),
-                        ("完整知识构建", "knowledge_graph_construction"),
+                        ("知识图谱构建", "knowledge_graph_construction"),
                     ],
                     value="knowledge_graph_construction",
                     label="任务模式",

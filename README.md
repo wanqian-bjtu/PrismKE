@@ -233,14 +233,14 @@ Open:
 
 PrismKE exposes six task modes through the CLI, API, and web workspace:
 
-| Task mode | Purpose | Graph commit |
-| --- | --- | :---: |
-| `entity_extraction` | Extract typed entity mentions | No |
-| `relation_extraction` | Extract relations using provided or automatically detected entities | No |
-| `schema_information_extraction` | Extract schema-defined attributes and events | No |
-| `joint_entity_relation_extraction` | Extract entities and relations together | No |
-| `joint_entity_relation_disambiguation` | Extract and resolve canonical entities | No |
-| `knowledge_graph_construction` | Run the complete governed workflow and prepare a graph revision | Yes |
+| Task mode | Display name | Purpose | Graph commit |
+| --- | --- | --- | :---: |
+| `entity_extraction` | Entity extraction | Extract typed entity mentions | No |
+| `relation_extraction` | Relation extraction | Extract relations using provided or automatically detected entities | No |
+| `schema_information_extraction` | Information extraction | Extract schema-defined attributes and events | No |
+| `joint_entity_relation_extraction` | Joint entity and relation extraction | Extract entities and relations together | No |
+| `joint_entity_relation_disambiguation` | Joint extraction and disambiguation | Extract and resolve canonical entities | No |
+| `knowledge_graph_construction` | Knowledge graph construction | Run the complete governed workflow and prepare a graph revision | Yes |
 
 Example:
 

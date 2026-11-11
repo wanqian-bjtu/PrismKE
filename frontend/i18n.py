@@ -42,7 +42,7 @@ EN_BY_ZH: dict[str, str] = {
     "Reflection 摘要": "Reflection summary",
     "Reflection 详情": "Reflection Details",
     "Run ID（链接审核时填写）": "Run ID (fill in during link review)",
-    "Schema 信息抽取": "Schema-guided information extraction",
+    "信息抽取": "Information extraction",
     "Schema 文件": "Schema file",
     "Schema 文本（JSON/YAML）": "Schema text (JSON/YAML)",
     "Schema 来源": "Schema source",
@@ -164,12 +164,12 @@ EN_BY_ZH: dict[str, str] = {
     "安全取消": "Safe cancellation",
     "完整差异": "Full diff",
     "完整执行状态": "complete execution status",
-    "完整知识构建": "Knowledge graph construction",
+    "知识图谱构建": "Knowledge graph construction",
     "完整运行状态": "Full run state",
     "实体 Entity ID": "Entity Entity ID",
     "实体 Revision 历史": "Entity Revision History",
     "实体 · ": "Entity · ",
-    "实体关系抽取与消歧": "Joint extraction and disambiguation",
+    "联合抽取与消歧": "Joint extraction and disambiguation",
     "实体关联图片": "Entity association image",
     "实体名称或别名": "Entity name or alias",
     "实体审核": "Entity review",
@@ -387,7 +387,7 @@ EN_BY_ZH: dict[str, str] = {
     "确认排除此候选，保留原始问题及审计": "Confirm to eliminate this candidate and keep the original question and review",
     "确认未发送": "Confirm not sent",
     "确认未计费": "Confirm no billing",
-    "端到端实体关系抽取": "Joint entity and relation extraction",
+    "实体与关系联合抽取": "Joint entity and relation extraction",
     "管理员": "Administrator",
     "密钥状态": "Key status",
     "类型": "type",
@@ -479,7 +479,7 @@ EN_BY_ZH: dict[str, str] = {
     "视觉模型已处理媒体资产，具体对象和证据见下表。": "The vision model processed media assets. See the table below for objects and evidence.",
     "本次运行未调用视觉模型。PDF 中含有图片不代表已经完成视觉抽取。": "The vision model was not called in this run. Images inside a PDF do not mean visual extraction was performed.",
     "实体抽取只返回实体提及，不返回关系、属性、事件或正式图谱。": "Entity extraction returns entity mentions only; it does not return relations, attributes, events, or a formal graph.",
-    "需要属性、数值和事件时请选择 Schema 信息抽取；需要实体关系及同名消歧时请选择联合实体关系消歧；需要写入正式图谱时请选择完整知识构建。": "Use schema-guided information extraction for attributes, values, and events; joint entity-relation disambiguation for relations and same-name disambiguation; and knowledge graph construction for formal graph writes.",
+    "需要属性、数值和事件时请选择信息抽取；需要实体关系及同名消歧时请选择联合抽取与消歧；需要写入正式图谱时请选择知识图谱构建。": "Use information extraction for attributes, values, and events; joint extraction and disambiguation for relations and same-name disambiguation; and knowledge graph construction for formal graph writes.",
     "下载完整结果": "Download complete results",
     "准备完整结果 ZIP": "Prepare complete results ZIP",
     "在 ZIP 中包含原始文件和已验证派生媒体": "Include source files and verified derived media in the ZIP",
@@ -718,10 +718,10 @@ EN_BY_ZH.update(
         "未命名文件": "Unnamed file",
         "实体抽取": "Entity extraction",
         "关系抽取": "Relation extraction",
-        "Schema 信息抽取": "Schema-guided information extraction",
-        "端到端实体关系抽取": "Joint entity and relation extraction",
-        "实体关系抽取与消歧": "Joint extraction and disambiguation",
-        "完整知识构建": "Knowledge graph construction",
+        "信息抽取": "Information extraction",
+        "实体与关系联合抽取": "Joint entity and relation extraction",
+        "联合抽取与消歧": "Joint extraction and disambiguation",
+        "知识图谱构建": "Knowledge graph construction",
         "所选 OCR GPU 不可用。请安装兼容的 GPU 版 Paddle，或选择自动/CPU。": "The selected OCR GPU is unavailable. Install a compatible GPU build of Paddle or select Automatic/CPU.",
     }
 )
@@ -946,10 +946,10 @@ def browser_i18n_bootstrap_js() -> str:
             .replace(/^运行 (\d+) · 执行中 (\d+) · 待审核 (\d+) · 阻断问题 (\d+) · 工作器 (.+)$/, 'Runs $1 · Running $2 · Pending review $3 · Blocking issues $4 · Worker $5')
             .replace(/^实体抽取 ·/, 'Entity extraction ·')
             .replace(/^关系抽取 ·/, 'Relation extraction ·')
-            .replace(/^Schema 信息抽取 ·/, 'Schema-guided information extraction ·')
-            .replace(/^端到端实体关系抽取 ·/, 'Joint entity and relation extraction ·')
-            .replace(/^实体关系抽取与消歧 ·/, 'Joint extraction and disambiguation ·')
-            .replace(/^完整知识构建 ·/, 'Knowledge graph construction ·')
+            .replace(/^信息抽取 ·/, 'Information extraction ·')
+            .replace(/^实体与关系联合抽取 ·/, 'Joint entity and relation extraction ·')
+            .replace(/^联合抽取与消歧 ·/, 'Joint extraction and disambiguation ·')
+            .replace(/^知识图谱构建 ·/, 'Knowledge graph construction ·')
             .replace(/ · (\d+)个文件 · /, (_, count) => ` · ${{count}} ${{count === '1' ? 'file' : 'files'}} · `)
             .replace(/^输入 (\d+) · 输出 (\d+) · 总计 (\d+)$/, 'Input $1 · Output $2 · Total $3')
             .replace(/· 健康 ·/g, '· Healthy ·');
@@ -963,10 +963,10 @@ def browser_i18n_bootstrap_js() -> str:
         .replace(/^Settings saved · Graph store (.+?) · LLM (.+?)( · Service restart required)?$/, (_, store, model, restart) => `设置已保存 · 图存储 ${{store}} · LLM ${{model}}${{restart ? ' · 需要重启服务' : ''}}`)
         .replace(/^Entity extraction ·/, '实体抽取 ·')
         .replace(/^Relation extraction ·/, '关系抽取 ·')
-        .replace(/^Schema-guided information extraction ·/, 'Schema 信息抽取 ·')
-        .replace(/^Joint entity and relation extraction ·/, '端到端实体关系抽取 ·')
-        .replace(/^Joint extraction and disambiguation ·/, '实体关系抽取与消歧 ·')
-        .replace(/^Knowledge graph construction ·/, '完整知识构建 ·')
+        .replace(/^Information extraction ·/, '信息抽取 ·')
+        .replace(/^Joint entity and relation extraction ·/, '实体与关系联合抽取 ·')
+        .replace(/^Joint extraction and disambiguation ·/, '联合抽取与消歧 ·')
+        .replace(/^Knowledge graph construction ·/, '知识图谱构建 ·')
         .replace(/ · (\d+) files? · /, ' · $1个文件 · ')
         .replace(/^Input (\d+) · Output (\d+) · Total (\d+)$/, '输入 $1 · 输出 $2 · 总计 $3')
         .replace(/^✓ Valid · Schema (.+?) · Version (.+?) · Entity types (\d+) · Relations (\d+) · Hash ([a-f0-9]+)$/i, '✓ 有效 · Schema $1 · 版本 $2 · 实体类型 $3 · 关系 $4 · 哈希 $5');

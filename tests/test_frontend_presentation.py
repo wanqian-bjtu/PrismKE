@@ -15,6 +15,7 @@ from frontend.run_presentation import (
     local_time,
     node_label,
     provider_usage_label,
+    task_mode_label,
 )
 
 
@@ -45,6 +46,30 @@ def test_user_facing_enum_labels_keep_internal_values_separate() -> None:
     assert presentation.status_label("completed", "zh-CN") == "已完成"
 
 
+@pytest.mark.parametrize(
+    ("mode", "zh_label", "en_label"),
+    [
+        ("entity_extraction", "实体抽取", "Entity extraction"),
+        ("relation_extraction", "关系抽取", "Relation extraction"),
+        ("schema_information_extraction", "信息抽取", "Information extraction"),
+        (
+            "joint_entity_relation_extraction",
+            "实体与关系联合抽取",
+            "Joint entity and relation extraction",
+        ),
+        (
+            "joint_entity_relation_disambiguation",
+            "联合抽取与消歧",
+            "Joint extraction and disambiguation",
+        ),
+        ("knowledge_graph_construction", "知识图谱构建", "Knowledge graph construction"),
+    ],
+)
+def test_task_mode_labels_match_both_locales(mode: str, zh_label: str, en_label: str) -> None:
+    assert task_mode_label(mode, "zh-CN") == zh_label
+    assert task_mode_label(mode, "en") == en_label
+
+
 def test_friendly_run_label_uses_task_file_count_and_beijing_time() -> None:
     batch = SimpleNamespace(
         items=[SimpleNamespace(filename="report.pdf"), SimpleNamespace(filename="photo.png")],
@@ -62,7 +87,7 @@ def test_friendly_run_label_uses_task_file_count_and_beijing_time() -> None:
         document=None,
     )
     assert friendly_run_label(service, state, "zh-CN") == (
-        "完整知识构建 · report.pdf · 2个文件 · 2026-10-27 20:17"
+        "知识图谱构建 · report.pdf · 2个文件 · 2026-10-27 20:17"
     )
     assert friendly_run_label(service, state, "en") == (
         "Knowledge graph construction · report.pdf · 2 files · 2026-10-27 20:17"
