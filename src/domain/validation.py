@@ -10,6 +10,7 @@ from src.domain.schema import OutputSchema
 VALIDATION_POLICY_VERSION = "validation-v2"
 
 ValidationAction = Literal[
+    "approve",
     "swap_endpoints",
     "replace_relation",
     "replace_entity_type",
@@ -49,7 +50,7 @@ class ValidationIssue(BaseModel):
     candidate_version: int = Field(default=0, ge=0)
     allowed_actions: list[ValidationAction] = Field(default_factory=default_validation_actions)
     candidate_summary: dict[str, Any] = Field(default_factory=dict)
-    status: Literal["open", "excluded", "repaired", "deferred"] = "open"
+    status: Literal["open", "excluded", "repaired", "deferred", "approved"] = "open"
 
 
 class ValidationReviewDecision(BaseModel):

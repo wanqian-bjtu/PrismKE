@@ -45,7 +45,6 @@ from src.domain import (
     TaskMode,
     ValidationAction,
     ValidationCorrectionEvent,
-    ValidationIssue,
     ValidationResult,
     ValidationReviewDecision,
     WorkflowState,
@@ -58,6 +57,7 @@ from src.governance import (
 )
 from src.governance.entity_resolution import ENTITY_RESOLUTION_POLICY_VERSION
 from src.governance.validation import ValidationService
+from src.governance.validation.actions import APPROVAL_REQUIRED, candidate_actions
 from src.parsing import ParserRegistry
 from src.parsing.mineru import MinerUV1Client
 from src.persistence import (
@@ -370,12 +370,20 @@ class PrismKEService:
             )
             issue.allowed_actions = []
             issues.append(issue)
-        return ValidationService.merge(
+        report = ValidationService.merge(
             state.validation,
             issues,
             canonical_hash(state.document.model_dump(mode="json")),
             len(state.claims),
         )
+        for candidate in state.candidates:
+            current = [
+                item for item in report.issues
+                if item.target_id == candidate.id and item.status in {"open", "deferred"}
+            ]
+            for item in current:
+                item.allowed_actions = candidate_actions(candidate, current)
+        return report
 
     def _validation_target(
         self, state: WorkflowState, issue_ids: list[str]
@@ -411,24 +419,21 @@ class PrismKEService:
             raise ValueError("stale validation candidate version")
         candidate, issues = self._validation_target(state, issue_ids)
 
-        def effective_actions(issue: ValidationIssue) -> set[ValidationAction]:
-            # validation-v1 checkpoints only persisted ``exclude``. The stable
-            # issue code lets validation-v2 reconstruct the safe action set
-            # without rewriting the historical checkpoint.
-            if issue.code == "SCHEMA_DOMAIN_RANGE" and issue.target_type == "candidate":
-                return {
-                    "swap_endpoints",
-                    "replace_relation",
-                    "replace_entity_type",
-                    "replace_entity_link",
-                    "exclude",
-                    "defer",
-                }
-            return set(issue.allowed_actions)
-
-        if any(action not in effective_actions(item) for item in issues):
+        all_issues = [
+            item for item in state.validation.issues
+            if item.target_id == candidate.id and item.status in {"open", "deferred"}
+        ]
+        if action not in candidate_actions(candidate, all_issues):
             raise ValueError("validation action is not allowed for this issue")
         patch = dict(replacement or {})
+        if action == "approve" and patch:
+            raise ValueError("approval cannot change the candidate")
+        if (
+            action in {"replace_entity_type", "replace_entity_link"}
+            and patch.get("endpoint") == "object"
+            and not isinstance(candidate.object, type(candidate.subject))
+        ):
+            raise ValueError("literal object has no entity type or entity link")
         projected = corrected_candidate(candidate, action, patch)
         link_override: dict[str, str | None] = {}
         if action == "replace_relation" and state.output_schema is not None:
@@ -478,18 +483,24 @@ class PrismKEService:
                 SchemaIndex(state.output_schema),
                 state.document,
                 self.evidence_store,
+                ({e.id: e for e in state.entities} if state.entities else None)
+                if action == "approve" else None,
+                (state.mention_to_entity if state.entities else None)
+                if action == "approve" else None,
             )
         return {
             "run_id": run_id,
             "target_id": candidate.id,
-            "issue_ids": [item.id for item in issues],
+            "issue_ids": [item.id for item in all_issues],
             "action": action,
             "replacement": patch,
             "before": candidate.model_dump(mode="json"),
             "after": projected.model_dump(mode="json") if projected is not None else None,
             "remaining_issues": [item.model_dump(mode="json") for item in remaining],
             "remaining_issue_count": len(remaining),
-            "can_apply": action in {"exclude", "defer"} or not remaining,
+            "can_apply": action in {"exclude", "defer"} or not any(
+                item.severity == "blocking" for item in remaining
+            ),
             "validation_version": state.validation_version,
             "link_override": link_override,
         }
@@ -530,13 +541,20 @@ class PrismKEService:
             if not preview["can_apply"]:
                 raise ValueError("corrected candidate still violates validation constraints")
             candidate, issues = self._validation_target(state, issue_ids)
+            issues = [
+                item for item in state.validation.issues
+                if item.target_id == candidate.id and item.status in {"open", "deferred"}
+            ]
             event_id = stable_id("validation-correction", run_id, rid)
             projected = (
                 CandidateClaim.model_validate(preview["after"])
                 if preview["after"] is not None
                 else None
             )
-            if action == "exclude":
+            if action == "approve":
+                for item in issues:
+                    item.status = "approved"
+            elif action == "exclude":
                 for item in state.validation.issues:
                     if item.target_id == candidate.id and item.status in {"open", "deferred"}:
                         item.status = "excluded"
@@ -574,6 +592,23 @@ class PrismKEService:
                     self.evidence_store,
                 )
                 state.validation = ValidationService.merge(state.validation, fresh)
+                pending = ValidationService.issue(
+                    APPROVAL_REQUIRED, "schema", "candidate", projected.id,
+                    "approval", "待确认通过：请核对修正结果后选择审核通过。",
+                    projected.evidence_ids,
+                    {
+                        "subject": projected.subject.model_dump(mode="json"),
+                        "relation": projected.relation,
+                        "object": (
+                            projected.object.model_dump(mode="json")
+                            if isinstance(projected.object, type(projected.subject))
+                            else {"literal": projected.object}
+                        ),
+                    },
+                    allowed_actions=["approve", "exclude", "defer"],
+                    candidate_version=state.validation_version + 1,
+                )
+                state.validation = ValidationService.merge(state.validation, [pending])
                 state.entities = []
                 state.mention_to_entity = {}
                 state.entity_resolution_decisions = []
@@ -586,7 +621,7 @@ class PrismKEService:
                 id=event_id,
                 run_id=run_id,
                 target_id=candidate.id,
-                issue_ids=[item.id for item in issues],
+                issue_ids=list(issue_ids),
                 action=action,
                 replacement=preview["replacement"],
                 before=preview["before"],

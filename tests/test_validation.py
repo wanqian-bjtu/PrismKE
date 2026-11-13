@@ -276,6 +276,17 @@ def test_validation_correction_api_previews_and_applies_swap(
         assert applied.json()["validation_version"] == 1
         stale = client.post(f"{base}/preview", json=payload)
         assert stale.status_code == 409
+        pending = [item for item in applied.json()["validation"]["issues"]
+                   if item["status"] == "open"]
+        assert len(pending) == 1 and pending[0]["code"] == "VALIDATION_APPROVAL_REQUIRED"
+        approval = {
+            "issue_ids": [pending[0]["id"]], "action": "approve", "replacement": {},
+            "expected_version": 1, "reviewer": "tester", "reason": "verified direction",
+            "request_id": "api-approve-1",
+        }
+        assert client.post(f"{base}/preview", json=approval).json()["can_apply"] is True
+        assert client.post(f"{base}/apply", json=approval).status_code == 200
+        assert client.post(f"{base}/apply", json=approval).status_code == 200
     corrected = service.show_run(state.run_id)
     stale_reference = ValidationService.issue(
         "MISSING_ENTITY_REFERENCE",

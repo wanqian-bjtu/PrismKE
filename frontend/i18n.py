@@ -11,6 +11,12 @@ DEFAULT_LOCALE: LocaleCode = "en"
 LOCALE_STORAGE_KEY = "prismke.ui.locale.v1"
 
 EN_BY_ZH: dict[str, str] = {
+    "审核通过": "Approve validation",
+    "待确认通过": "Awaiting validation approval",
+    "待确认通过：请核对修正结果后选择审核通过。": "Awaiting approval: review the correction, then select Approve validation.",
+    "人工核对且校验合格后确认候选进入后续处理，保留审核记录；仍有阻断问题时请先修正。": "Confirm a manually reviewed, valid candidate for downstream processing and retain an audit record. Resolve blocking issues first.",
+    "人工核对且校验合格": "Manually reviewed and validation passed",
+    "确认候选进入后续处理，保留审核记录": "Confirm candidate for downstream processing; retain audit record",
     "### 合并与拆分审核": "### Merge and split review",
     "### 实体合并建议": "### Entity Merger Suggestions",
     "### 实体拆分建议": "### Entity splitting suggestions",
@@ -802,6 +808,7 @@ EN_BY_ZH.update(
         """
 | 修正动作 | 适用情况 | 结果 |
 |---|---|---|
+| 审核通过 | 人工核对且校验合格 | 确认候选进入后续处理，保留审核记录 |
 | 交换主语与宾语 | 关系方向反了 | 交换两端并重新校验 |
 | 改选关系 | 主宾正确、关系错误 | 仅可选择当前 Schema 关系 |
 | 修正实体类型 | 实体正确、类型错误 | 修改指定端点类型并重新校验 |
@@ -811,6 +818,7 @@ EN_BY_ZH.update(
 """: """
 | Correction | When to use | Result |
 |---|---|---|
+| Approve validation | Manually reviewed and validation passed | Confirm candidate for downstream processing; retain audit record |
 | Swap subject and object | The relation direction is reversed | Swap both endpoints and revalidate |
 | Replace relation | The endpoints are correct but the relation is wrong | Only current Schema relations are allowed |
 | Correct entity type | The entity is correct but its type is wrong | Change the selected endpoint type and revalidate |

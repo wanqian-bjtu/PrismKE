@@ -600,6 +600,24 @@ relations:
         ).check()
         page.get_by_role("button", name="Apply correction", exact=True).click()
 
+        expect(page.get_by_text("Awaiting validation approval", exact=True).last).to_be_visible(
+            timeout=15_000
+        )
+        # Corrected candidates stay in this queue until explicitly approved.
+        expect(page.locator(".workspace-page-header:visible h1")).not_to_have_text(
+            "New extraction and construction"
+        )
+        action.click()
+        page.get_by_role("option", name="Approve validation", exact=True).last.click()
+        page.get_by_role("button", name="Preview correction", exact=True).click()
+        expect(page.get_by_role("button", name="Apply correction", exact=True)).to_be_enabled(
+            timeout=15_000
+        )
+        page.get_by_label("Validation reviewer").fill("browser-tester")
+        page.get_by_label("Correction reason").fill("Verified corrected candidate")
+        page.get_by_label("I reviewed the preview and confirm this correction").check()
+        page.get_by_role("button", name="Apply correction", exact=True).click()
+
         expect(page.locator(".workspace-page-header:visible h1")).to_have_text(
             "New extraction and construction", timeout=20_000
         )
