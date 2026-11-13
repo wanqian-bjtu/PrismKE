@@ -37,7 +37,7 @@ class OpenAICompatibleLLMProvider:
         base_url: str,
         api_key: str,
         model: str,
-        timeout: float = 60.0,
+        timeout: float = 600.0,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")

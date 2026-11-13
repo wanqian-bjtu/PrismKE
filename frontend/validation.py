@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from html import escape
+from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
@@ -18,10 +19,12 @@ from frontend.presentation import (
 )
 from frontend.review import ReviewController
 from src.domain import ValidationAction
+from src.governance.validation.actions import APPROVAL_REQUIRED, candidate_actions
 from src.persistence.execution import ExecutionConflict
 from src.workflow import PrismKEService
 
 ACTION_CHOICES = [
+    ("审核通过", "approve"),
     ("交换主语与宾语", "swap_endpoints"),
     ("改选关系", "replace_relation"),
     ("修正实体类型", "replace_entity_type"),
@@ -31,6 +34,10 @@ ACTION_CHOICES = [
 ]
 
 ACTION_HELP = {
+    "approve": (
+        "审核通过",
+        "人工核对且校验合格后确认候选进入后续处理，保留审核记录；仍有阻断问题时请先修正。",
+    ),
     "swap_endpoints": (
         "交换主语与宾语",
         "关系语义正确但方向相反时使用；系统交换两端并重新执行确定性校验。",
@@ -179,13 +186,18 @@ def _preview_comparison(payload: dict[str, Any], locale: object) -> str:
     can_apply = bool(payload.get("can_apply"))
     issue_count = int(payload.get("remaining_issue_count") or 0)
     status = tr("可以应用", locale) if can_apply else tr("仍有阻断问题", locale)
+    errors = "".join(
+        f"<li>{escape(str(item.get('code', '')))}: "
+        f"{escape(_issue_message(SimpleNamespace(**item), locale))}</li>"
+        for item in payload.get("remaining_issues", [])
+    )
     return (
         '<div class="correction-preview-comparison">'
         f'{card("修正前", before, after)}<div class="correction-preview-arrow" '
         f'aria-hidden="true">→</div>{after_card}</div>'
         '<div class="correction-preview-status">'
         f"<strong>{escape(status)}</strong> · "
-        f"{escape(tr('剩余问题', locale))} {issue_count}</div>"
+        f"{escape(tr('剩余问题', locale))} {issue_count}</div><ul>{errors}</ul>"
     )
 
 
@@ -213,6 +225,8 @@ def _candidate_label(
 
 
 def _issue_message(item: Any, locale: object = "zh-CN") -> str:
+    if item.code == APPROVAL_REQUIRED:
+        return tr("待确认通过：请核对修正结果后选择审核通过。", locale)
     if item.code == "SCHEMA_DOMAIN_RANGE" and item.field_path == "subject.entity_type":
         return tr("主语类型不满足关系 domain 约束", locale)
     if item.code == "SCHEMA_DOMAIN_RANGE" and item.field_path == "object.entity_type":
@@ -249,11 +263,12 @@ def _candidate_detail(
     )
     subject_row = (
         f"| **{tr('主语', locale)}** | {_safe(subject.get('name'))} | "
-        f"{_safe(subject.get('type'))} | {_safe(domain)} |"
+        f"{_safe(subject.get('type', subject.get('entity_type')))} | {_safe(domain)} |"
     )
     object_name = object_value.get("name", object_value.get("literal"))
     object_row = (
-        f"| **{tr('宾语', locale)}** | {_safe(object_name)} | {_safe(object_value.get('type'))} | "
+        f"| **{tr('宾语', locale)}** | {_safe(object_name)} | "
+        f"{_safe(object_value.get('type', object_value.get('entity_type')))} | "
         f"{_safe(range_value)} |"
     )
     lines = [
@@ -312,7 +327,7 @@ def build_validation_tab(
             )
             status = gr.Dropdown(
                 label="问题状态",
-                choices=["open", "deferred", "excluded", "repaired", "全部"],
+                choices=["open", "deferred", "excluded", "repaired", "approved", "全部"],
                 value="open",
             )
         refresh = gr.Button("刷新校验问题")
@@ -346,6 +361,7 @@ def build_validation_tab(
                     """
 | 修正动作 | 适用情况 | 结果 |
 |---|---|---|
+| 审核通过 | 人工核对且校验合格 | 确认候选进入后续处理，保留审核记录 |
 | 交换主语与宾语 | 关系方向反了 | 交换两端并重新校验 |
 | 改选关系 | 主宾正确、关系错误 | 仅可选择当前 Schema 关系 |
 | 修正实体类型 | 实体正确、类型错误 | 修改指定端点类型并重新校验 |
@@ -363,7 +379,7 @@ def build_validation_tab(
                 reason = gr.Textbox(label="修正原因")
                 request_id = gr.Textbox(label="请求编号", value=uuid4().hex)
             confirm = gr.Checkbox(label="我已核对预览结果并确认应用")
-            apply_button = gr.Button("确认应用修正", variant="primary")
+            apply_button = gr.Button("确认应用修正", variant="primary", interactive=False)
         evidence = gr.Dropdown(label="问题证据", **empty_dropdown_kwargs("暂无证据"))
         evidence_text = gr.Textbox(label="校验证据文本", interactive=False)
         evidence_image = gr.Image(label="校验证据区域", interactive=False, visible=False)
@@ -416,7 +432,9 @@ def build_validation_tab(
                         item.candidate_summary.get("relation", ""),
                         object_name,
                         len(values),
-                        status_label(item.status, locale),
+                        tr("待确认通过", locale) if item.code == APPROVAL_REQUIRED
+                        and item.status in {"open", "deferred"}
+                        else status_label(item.status, locale),
                     ]
                 )
                 choices.append(
@@ -478,7 +496,10 @@ def build_validation_tab(
                     gr.update(choices=[]),
                     gr.update(choices=[]),
                 )
-            allowed = sorted({value for item in issues for value in item.allowed_actions})
+            selected_candidate = next(
+                (item for item in state.candidates if item.id == target_id), None
+            )
+            allowed = candidate_actions(selected_candidate, issues) if selected_candidate else []
             actions = [item for item in ACTION_CHOICES if item[1] in allowed]
             evidence_ids = sorted({eid for item in issues for eid in item.evidence_ids})
             schema = state.output_schema
@@ -750,6 +771,18 @@ def build_validation_tab(
             [run, candidate, language_switch],
             [detail, evidence, action, relation, entity_type, entity_link],
         )
+
+        def endpoint_choices(run_id: str | None, target_id: str | None) -> Any:
+            state = service.show_run(run_id) if run_id else None
+            selected = next(
+                (item for item in state.candidates if item.id == target_id), None
+            ) if state else None
+            choices = [("主语", "subject")]
+            if selected is not None and not isinstance(selected.object, str):
+                choices.append(("宾语", "object"))
+            return gr.update(choices=choices, value="subject")
+
+        candidate.change(guard_ui(gr, endpoint_choices, 1), [run, candidate], endpoint)
         evidence.change(
             guard_ui(gr, evidence_preview, 2),
             [run, evidence, language_switch],
@@ -761,6 +794,14 @@ def build_validation_tab(
             ),
             [action, language_switch],
             action_explanation,
+        )
+        for control in (run, candidate, action, endpoint, relation, entity_type, entity_link):
+            control.change(lambda: (gr.update(interactive=False), False),
+                           outputs=[apply_button, confirm])
+        preview_output.change(
+            lambda payload: gr.update(interactive=bool(payload and payload.get("can_apply"))),
+            preview_output,
+            apply_button,
         )
         preview_button.click(
             guard_ui(gr, preview, 2),

@@ -19,6 +19,8 @@ def corrected_candidate(
 ) -> CandidateClaim | None:
     if action in {"exclude", "defer"}:
         return None
+    if action == "approve":
+        return candidate.model_copy(deep=True)
     payload = candidate.model_dump(mode="python")
     if action == "swap_endpoints":
         if not isinstance(candidate.object, EntityMention):

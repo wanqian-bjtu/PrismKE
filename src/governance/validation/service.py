@@ -27,6 +27,7 @@ from src.domain import (
     normalize_label,
 )
 from src.governance.claim_normalization import normalize_claims
+from src.governance.validation.actions import candidate_actions
 from src.persistence.base import EvidenceStore
 
 
@@ -115,10 +116,10 @@ class ValidationService:
             prior = merged.get(item.id)
             if prior is None:
                 merged[item.id] = item
-            elif prior.status in {"open", "deferred"}:
+            elif prior.status in {"open", "deferred", "approved"}:
                 # Refresh policy metadata for compatible open checkpoints while
                 # preserving the review status selected by the operator.
-                item.status = prior.status
+                item.status = prior.status if prior.status != "approved" else "open"
                 merged[item.id] = item
         values = list(merged.values())
         return ValidationResult(
@@ -210,7 +211,6 @@ class ValidationService:
                 *,
                 expected: dict[str, Any] | None = None,
                 actual: dict[str, Any] | None = None,
-                actions: list[Any] | None = None,
             ) -> None:
                 subject = {
                     "id": c.subject.id,
@@ -244,9 +244,9 @@ class ValidationService:
                         message_args={"field": field},
                         expected_constraint=expected,
                         actual_value=actual,
-                        allowed_actions=actions,
                     )
                 )
+                issues[-1].allowed_actions = candidate_actions(c, [issues[-1]])
 
             mentions = [c.subject] + ([c.object] if isinstance(c.object, EntityMention) else [])
             for mention in mentions:
@@ -278,14 +278,6 @@ class ValidationService:
                         "Subject type does not satisfy the relation domain constraint",
                         expected={"domain": relation.domain},
                         actual={"subject_type": subject_type},
-                        actions=[
-                            "swap_endpoints",
-                            "replace_relation",
-                            "replace_entity_type",
-                            "replace_entity_link",
-                            "exclude",
-                            "defer",
-                        ],
                     )
             if relation and relation.range and isinstance(c.object, EntityMention):
                 object_type = schema.entity_type(c.object.entity_type)
@@ -297,14 +289,6 @@ class ValidationService:
                         "Object type does not satisfy the relation range constraint",
                         expected={"range": relation.range},
                         actual={"object_type": object_type},
-                        actions=[
-                            "swap_endpoints",
-                            "replace_relation",
-                            "replace_entity_type",
-                            "replace_entity_link",
-                            "exclude",
-                            "defer",
-                        ],
                     )
             if relation and relation.range and not isinstance(c.object, EntityMention):
                 add(
